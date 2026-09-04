@@ -1,0 +1,110 @@
+import SwiftUI
+
+/// The 16 tokens of design/src/index.css, one palette per theme.
+struct Theme: Equatable {
+    let name: ThemeName
+    let appBg: Color
+    let bg: Color
+    let bgElevated: Color
+    let bgCard: Color
+    let bgHover: Color
+    let border: Color
+    let text: Color
+    let textSecondary: Color
+    let textMuted: Color
+    let accent: Color
+    let accentDim: Color
+    let ai: Color
+    let aiDim: Color
+    let success: Color
+    let warning: Color
+    let danger: Color
+
+    var isDark: Bool { name != .light }
+
+    static func named(_ name: ThemeName) -> Theme {
+        switch name {
+        case .claude: return .claude
+        case .codex: return .codex
+        case .cursor: return .cursor
+        case .light: return .light
+        }
+    }
+
+    static let claude = Theme(
+        name: .claude,
+        appBg: Color(hex: "#050506"), bg: Color(hex: "#0a0a0b"), bgElevated: Color(hex: "#141416"),
+        bgCard: Color(hex: "#1a1a1e"), bgHover: Color(hex: "#222228"), border: Color(hex: "#2a2a30"),
+        text: Color(hex: "#f5f0eb"), textSecondary: Color(hex: "#8a8580"), textMuted: Color(hex: "#5a5550"),
+        accent: Color(hex: "#d4845a"), accentDim: Color(hex: "#a86840"),
+        ai: Color(hex: "#6b8cae"), aiDim: Color(hex: "#4a6a8a"),
+        success: Color(hex: "#5a8a6a"), warning: Color(hex: "#8a7a4a"), danger: Color(hex: "#8a5a5a"))
+
+    static let codex = Theme(
+        name: .codex,
+        appBg: Color(hex: "#060707"), bg: Color(hex: "#0c0d0d"), bgElevated: Color(hex: "#151717"),
+        bgCard: Color(hex: "#1b1d1d"), bgHover: Color(hex: "#232626"), border: Color(hex: "#2b2e2e"),
+        text: Color(hex: "#ececec"), textSecondary: Color(hex: "#9a9e9c"), textMuted: Color(hex: "#5e6361"),
+        accent: Color(hex: "#19c37d"), accentDim: Color(hex: "#129768"),
+        ai: Color(hex: "#54b5c4"), aiDim: Color(hex: "#3a8794"),
+        success: Color(hex: "#5a9a72"), warning: Color(hex: "#9a8744"), danger: Color(hex: "#b35c54"))
+
+    static let cursor = Theme(
+        name: .cursor,
+        appBg: Color(hex: "#050608"), bg: Color(hex: "#0a0c11"), bgElevated: Color(hex: "#121620"),
+        bgCard: Color(hex: "#181d29"), bgHover: Color(hex: "#212838"), border: Color(hex: "#2a3242"),
+        text: Color(hex: "#eef2f8"), textSecondary: Color(hex: "#8b93a3"), textMuted: Color(hex: "#555d6d"),
+        accent: Color(hex: "#5b8dff"), accentDim: Color(hex: "#3f6ad1"),
+        ai: Color(hex: "#b08cff"), aiDim: Color(hex: "#8a64d8"),
+        success: Color(hex: "#4f9d7a"), warning: Color(hex: "#c2a24a"), danger: Color(hex: "#d06464"))
+
+    static let light = Theme(
+        name: .light,
+        appBg: Color(hex: "#e6e2da"), bg: Color(hex: "#f5f2ec"), bgElevated: Color(hex: "#fbf9f4"),
+        bgCard: Color(hex: "#ffffff"), bgHover: Color(hex: "#efece4"), border: Color(hex: "#e0dcd2"),
+        text: Color(hex: "#2a2622"), textSecondary: Color(hex: "#6b655d"), textMuted: Color(hex: "#9a948b"),
+        accent: Color(hex: "#c2643a"), accentDim: Color(hex: "#a8512c"),
+        ai: Color(hex: "#4a6fa0"), aiDim: Color(hex: "#385780"),
+        success: Color(hex: "#3f7a54"), warning: Color(hex: "#9a7a30"), danger: Color(hex: "#b04a4a"))
+}
+
+/// Port of design/src/lib/themes.ts.
+struct ThemeMeta: Identifiable {
+    let id: ThemeName
+    let name: String
+    let tagline: String
+    let swatchBg: Color
+    let swatchCard: Color
+    let swatchAccent: Color
+    let swatchAI: Color
+
+    static let all: [ThemeMeta] = [
+        ThemeMeta(id: .claude, name: "琥珀 · Claude", tagline: "暖色、克制、夜色中的微光",
+                  swatchBg: Color(hex: "#0a0a0b"), swatchCard: Color(hex: "#1a1a1e"),
+                  swatchAccent: Color(hex: "#d4845a"), swatchAI: Color(hex: "#6b8cae")),
+        ThemeMeta(id: .codex, name: "翠绿 · Codex", tagline: "中性冷调，OpenAI 风格的清爽绿",
+                  swatchBg: Color(hex: "#0c0d0d"), swatchCard: Color(hex: "#1b1d1d"),
+                  swatchAccent: Color(hex: "#19c37d"), swatchAI: Color(hex: "#54b5c4")),
+        ThemeMeta(id: .cursor, name: "靛蓝 · Cursor", tagline: "冷峻蓝紫，理性的科技质感",
+                  swatchBg: Color(hex: "#0a0c11"), swatchCard: Color(hex: "#181d29"),
+                  swatchAccent: Color(hex: "#5b8dff"), swatchAI: Color(hex: "#b08cff")),
+        ThemeMeta(id: .light, name: "晨光 · Light", tagline: "纸张般的暖白，日间清晰可读",
+                  swatchBg: Color(hex: "#f5f2ec"), swatchCard: Color(hex: "#ffffff"),
+                  swatchAccent: Color(hex: "#c2643a"), swatchAI: Color(hex: "#4a6fa0")),
+    ]
+
+    static func meta(for id: ThemeName) -> ThemeMeta { all.first { $0.id == id } ?? all[0] }
+}
+
+extension Color {
+    init(hex: String) {
+        var value = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("#") { value.removeFirst() }
+        var rgb: UInt64 = 0
+        Scanner(string: value).scanHexInt64(&rgb)
+        let r = Double((rgb >> 16) & 0xFF) / 255
+        let g = Double((rgb >> 8) & 0xFF) / 255
+        let b = Double(rgb & 0xFF) / 255
+        self.init(.sRGB, red: r, green: g, blue: b, opacity: 1)
+    }
+}

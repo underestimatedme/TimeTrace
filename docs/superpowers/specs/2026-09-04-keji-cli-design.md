@@ -91,7 +91,7 @@ class ToolAdapter:
    - 任务已有 session_id → 只能用原工具（上下文带不过去），且不做降级。
    - 否则 task.tool 指定则用它；仅当该工具最新样本 used_pct ≥ 100 且 `any_tool` 为 1 时，换另一个 used_pct < 100 的工具，写 `tool_switched` 事件。
    - 两个工具都为 100 → 跳过本轮。**百分比只在 100 时才拦，其余一律试**。
-7. 建 worktree（首次运行时）：`git -C <repo> worktree add -b keji/<task_id> ~/.keji/worktrees/<task_id> HEAD`，并 `git config remote.<每个远端>.pushurl no_push://blocked`。
+7. 建 worktree（首次运行时）：`git -C <repo> worktree add -b keji/<task_id> ~/.keji/worktrees/<task_id> <base>`。`base` 默认为 HEAD；任务带 `depends_on` 且依赖任务已有分支时，`base` 为依赖任务的分支 `keji/<dep_id>`，这样「给上一步写单测」建在上一步的产物之上。随后用 `git config --worktree remote.<每个远端>.pushurl no_push://blocked` 只在该 worktree 内封掉 push，主工作区不受影响。
 8. 执行或续接，写 run 行，stdout/stderr 全量落到 `logs/<run_id>.log`。
 9. 收尾：
    - blocked → task.state = blocked，`blocked_until = reset_at + random(0, jitter_sec)`，写 `task_blocked`、`rate_limit` 事件；

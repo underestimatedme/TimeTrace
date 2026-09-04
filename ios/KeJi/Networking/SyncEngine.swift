@@ -29,6 +29,7 @@ final class SyncEngine {
 
     @ObservationIgnored private var pushTask: _Concurrency.Task<Void, Never>?
     @ObservationIgnored private var inFlight = false
+    @ObservationIgnored private var sessionTask: _Concurrency.Task<Bool, Never>?
     private static let userKey = "keji.sync.user"
 
     init(store: AppStore, client: APIClient, enabled: Bool) {
@@ -47,18 +48,27 @@ final class SyncEngine {
 
     // MARK: - Session
 
-    /// Creates a guest session if there are no tokens yet.
+    /// Creates a guest session if there are no tokens yet. Concurrent callers
+    /// (a pull on appear racing a debounced push) share one in-flight request so
+    /// only a single guest account is ever created.
     func ensureSession() async -> Bool {
         guard enabled else { return false }
         if client.hasSession { return true }
-        do {
-            let tokens = try await client.send(Endpoint.guest, as: SessionTokens.self)
-            client.storeTokens(tokens)
-            return true
-        } catch {
-            fail(error)
-            return false
+        if let running = sessionTask { return await running.value }
+        let task = _Concurrency.Task<Bool, Never> { [client] in
+            do {
+                let tokens = try await client.send(Endpoint.guest, as: SessionTokens.self)
+                client.storeTokens(tokens)
+                return true
+            } catch {
+                self.fail(error)
+                return false
+            }
         }
+        sessionTask = task
+        let ok = await task.value
+        sessionTask = nil
+        return ok
     }
 
     func sendCode(identifier: String) async throws {
@@ -99,10 +109,10 @@ final class SyncEngine {
     /// `GET /bootstrap` → replace local state except dirty/deleted entities.
     func pull() async {
         guard enabled, !inFlight else { return }
-        guard await ensureSession() else { return }
         inFlight = true
-        status = .syncing
         defer { inFlight = false }
+        guard await ensureSession() else { return }
+        status = .syncing
         do {
             let bootstrap = try await client.send(Endpoint.bootstrap, as: Bootstrap.self)
             apply(bootstrap)
@@ -129,10 +139,10 @@ final class SyncEngine {
             schedulePush()
             return
         }
-        guard await ensureSession() else { return }
         inFlight = true
-        status = .syncing
         defer { inFlight = false }
+        guard await ensureSession() else { return }
+        status = .syncing
 
         let dirty = store.dirty
         let deleted = store.deleted

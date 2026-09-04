@@ -90,32 +90,32 @@ def pick_tool(task: Dict[str, Any], rows: List[Dict[str, Any]], adapters: Dict[s
     if task.get("session_id"):
         # Half-done work cannot change tool: the session context does not travel.
         tool = task["tool"]
-        return tool if tool in available and not limits.tool_exhausted(rows, tool) else None
+        return tool if tool in available and not limits.tool_exhausted(rows, tool, now) else None
     preferred = task.get("tool")
     if preferred is None:
-        preferred = _most_remaining(rows, available) or CLAUDE
+        preferred = _most_remaining(rows, available, now) or CLAUDE
         if preferred not in available:
             return None
         return preferred
     if preferred not in available:
         return None
-    if not limits.tool_exhausted(rows, preferred):
+    if not limits.tool_exhausted(rows, preferred, now):
         return preferred
     if not task.get("any_tool"):
         return None
-    others = [t for t in available if t != preferred and not limits.tool_exhausted(rows, t)]
+    others = [t for t in available if t != preferred and not limits.tool_exhausted(rows, t, now)]
     if not others:
         return None
-    chosen = _most_remaining(rows, others) or others[0]
+    chosen = _most_remaining(rows, others, now) or others[0]
     db.add_event(EV_TOOL_SWITCHED, tool=chosen,
                  payload={"task_id": task["id"], "from": preferred, "to": chosen}, at=now)
     return chosen
 
 
-def _most_remaining(rows: List[Dict[str, Any]], tools: List[str]) -> Optional[str]:
+def _most_remaining(rows: List[Dict[str, Any]], tools: List[str], now: int) -> Optional[str]:
     best, best_val = None, -1.0
     for t in tools:
-        if limits.tool_exhausted(rows, t):
+        if limits.tool_exhausted(rows, t, now):
             continue
         rem = limits.tool_min_remaining(rows, t)
         val = 100.0 if rem is None else rem  # unknown quota counts as full

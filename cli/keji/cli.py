@@ -9,7 +9,8 @@ from typing import Any, Dict, List, Optional
 
 from keji import __version__, config, limits, render, scheduler, worktree
 from keji.db import Database
-from keji.models import (BLOCKED, CODEX, EV_SAMPLE_FAILURE, FAILED, RUNNABLE, RUNNING, TOOLS)
+from keji.models import (BLOCKED, CODEX, EV_SAMPLE_FAILURE, FAILED, RUNNABLE, RUNNING, TOOLS,
+                         Sample)
 
 
 def _open(args: argparse.Namespace):
@@ -188,6 +189,78 @@ def cmd_events(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_statusline(args: argparse.Namespace) -> int:
+    """Claude Code statusLine hook: ingest the interactive session's rate_limits.
+
+    Claude Code pipes a JSON document on stdin every time the status line refreshes.
+    When it contains `rate_limits`, we store one sample per window with source
+    `statusline`, so quota burned in your own Claude Code sessions (not only keji's
+    headless runs) shows up in `keji status` and in the scheduler's exhaustion check.
+    Prints a one-line quota summary for the status bar.
+    """
+    if args.install:
+        return _install_statusline()
+    raw = sys.stdin.read()
+    try:
+        doc = json.loads(raw) if raw.strip() else {}
+    except ValueError:
+        doc = {}
+    home, cfg, db = _open(args)
+    now = int(time.time())
+    rl = doc.get("rate_limits") or {}
+    samples = []
+    for key, w in rl.items():
+        if not isinstance(w, dict) or w.get("used_percentage") is None:
+            continue
+        samples.append(Sample(
+            bucket_key="claude:%s" % key, tool="claude", used_pct=float(w["used_percentage"]),
+            reset_at=int(w["resets_at"]) if w.get("resets_at") else None,
+            window_mins=300 if key.startswith("five_hour") else (10080 if key.startswith("seven_day") else None),
+            is_representative=(key == "five_hour"), source="statusline",
+        ))
+    if samples:
+        limits.record_samples(db, samples, now)
+    rows = limits.snapshot(db)
+    parts = []
+    for r in rows:
+        if r["tool"] == "claude" and r["bucket_key"] in ("claude:five_hour", "claude:seven_day"):
+            parts.append("%s %d%%" % ("5h" if "five" in r["bucket_key"] else "7d",
+                                      round(r["remaining_pct"])))
+    codex_rows = [r for r in rows if r["bucket_key"] == "codex:codex:primary"]
+    if codex_rows:
+        parts.append("codex %d%%" % round(codex_rows[0]["remaining_pct"]))
+    b = limits.binding(rows)
+    if b:
+        parts.append("⏳ %s" % render.countdown(b.get("reset_at"), now))
+    print("keji · " + " · ".join(parts) if parts else "keji · no quota data yet")
+    return 0
+
+
+def _install_statusline() -> int:
+    """Register `keji statusline` as the statusLine command in ~/.claude/settings.json."""
+    settings = Path(os.path.expanduser("~/.claude/settings.json"))
+    data: Dict[str, Any] = {}
+    if settings.exists():
+        try:
+            data = json.loads(settings.read_text(encoding="utf-8") or "{}")
+        except ValueError:
+            print("error: %s is not valid JSON; fix it first" % settings, file=sys.stderr)
+            return 1
+    keji_bin = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "bin", "keji"))
+    current = data.get("statusLine")
+    if current and "keji" not in json.dumps(current):
+        print("existing statusLine kept, not overwriting: %s" % json.dumps(current), file=sys.stderr)
+        print("add `%s statusline` to that script yourself, e.g. pipe stdin through it" % keji_bin,
+              file=sys.stderr)
+        return 1
+    data["statusLine"] = {"type": "command", "command": "%s statusline" % keji_bin}
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print("statusLine set in %s → %s statusline" % (settings, keji_bin))
+    print("restart Claude Code; quota samples from your interactive sessions now flow into keji")
+    return 0
+
+
 # ---- parser ---------------------------------------------------------------------
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="keji", description="刻迹 — quota-aware task queue for Claude Code and Codex")
@@ -239,6 +312,11 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--type", default=None)
     e.add_argument("--json", action="store_true")
     e.set_defaults(fn=cmd_events)
+
+    sl = sub.add_parser("statusline", help="Claude Code statusLine hook: ingest interactive quota")
+    sl.add_argument("--install", action="store_true",
+                    help="register this command in ~/.claude/settings.json")
+    sl.set_defaults(fn=cmd_statusline)
     return p
 
 

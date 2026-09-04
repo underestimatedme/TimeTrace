@@ -124,7 +124,8 @@ class SchedulerTest(unittest.TestCase):
         self.assertEqual(out, "task 1 → blocked until 700")
 
     def test_any_tool_switches_when_preferred_exhausted(self):
-        limits.record_samples(self.db, [Sample("codex:codex:primary", "codex", 100, reset_at=9)], at=1)
+        limits.record_samples(self.db, [Sample("codex:codex:primary", "codex", 100, reset_at=10 ** 10)],
+                              at=1)
         t = self.db.add_task("do", "/repo", tool="codex", any_tool=True)
         claude = FakeAdapter("claude", [RunResult(ok=True)])
         codex = FakeAdapter("codex")
@@ -161,6 +162,18 @@ class SchedulerTest(unittest.TestCase):
         out = self.run_once({"claude": claude, "codex": codex}, now=700)
         self.assertEqual(out, "task 1 → done")
         self.assertEqual(codex.calls[1][0], "resume")
+
+    def test_interactive_block_seen_via_statusline_blocks_dispatch_until_reset(self):
+        # The user's own Claude Code session hit the limit (statusline sample says 100%).
+        limits.record_samples(self.db, [
+            Sample("claude:five_hour", "claude", 100, reset_at=5000, source="statusline"),
+        ], at=100)
+        self.db.add_task("do", "/repo", tool="claude")
+        ad = FakeAdapter("claude", [RunResult(ok=True)])
+        self.assertEqual(self.run_once({"claude": ad}, now=200), "idle")
+        self.assertEqual(ad.calls, [])
+        # window reset passed with no fresh sample: reading is stale, dispatch proceeds
+        self.assertEqual(self.run_once({"claude": ad}, now=5001), "task 1 → done")
 
     def test_unspecified_tool_picks_most_remaining(self):
         limits.record_samples(self.db, [

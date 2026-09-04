@@ -1,4 +1,5 @@
 """Bucket samples in, remaining-quota view out (spec §4, v0.1 status)."""
+import time
 from typing import Any, Dict, List, Optional
 
 from keji.db import Database
@@ -40,9 +41,21 @@ def tool_rows(rows: List[Dict[str, Any]], tool: str) -> List[Dict[str, Any]]:
     return [r for r in rows if r["tool"] == tool]
 
 
-def tool_exhausted(rows: List[Dict[str, Any]], tool: str) -> bool:
-    """Only a bucket reading 100% blocks dispatch (spec §6 step 6)."""
-    return any(float(r["used_pct"]) >= 100 for r in tool_rows(rows, tool))
+def tool_exhausted(rows: List[Dict[str, Any]], tool: str, now: Optional[int] = None) -> bool:
+    """Only a bucket reading 100% blocks dispatch (spec §6 step 6).
+
+    A 100% reading whose window has already reset is stale, not exhausted: Claude has
+    no on-demand read, so without this the tool would stay "exhausted" until someone
+    happens to produce a new sample.
+    """
+    now = now or int(time.time())
+    for r in tool_rows(rows, tool):
+        if float(r["used_pct"]) < 100:
+            continue
+        reset_at = r.get("reset_at")
+        if reset_at is None or int(reset_at) > now:
+            return True
+    return False
 
 
 def tool_min_remaining(rows: List[Dict[str, Any]], tool: str) -> Optional[float]:

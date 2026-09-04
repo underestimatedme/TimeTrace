@@ -21,7 +21,7 @@ class LimitsTest(unittest.TestCase):
             Sample("claude:five_hour", "claude", 13.0, reset_at=100, window_mins=300,
                    is_representative=True),
             Sample("claude:seven_day", "claude", 3.0, reset_at=200, window_mins=10080),
-            Sample("codex:codex:primary", "codex", 100, reset_at=300, window_mins=300),
+            Sample("codex:codex:primary", "codex", 100, reset_at=10 ** 10, window_mins=300),
             Sample("codex:codex:secondary", "codex", 47, reset_at=400, window_mins=10080),
             Sample("codex:base_model_inference:primary", "codex", 6, reset_at=500,
                    window_mins=10080),
@@ -51,6 +51,17 @@ class LimitsTest(unittest.TestCase):
         self.assertFalse(limits.tool_exhausted(rows, "gemini"))
         limits.record_samples(self.db, [Sample("codex:codex:primary", "codex", 99.9)], at=2000)
         self.assertFalse(limits.tool_exhausted(limits.snapshot(self.db), "codex"))
+
+    def test_exhausted_reading_expires_once_window_reset(self):
+        limits.record_samples(self.db, [
+            Sample("claude:five_hour", "claude", 100, reset_at=1000, source="statusline"),
+        ], at=500)
+        rows = limits.snapshot(self.db)
+        self.assertTrue(limits.tool_exhausted(rows, "claude", now=999))
+        self.assertFalse(limits.tool_exhausted(rows, "claude", now=1001))
+        # no reset_at known: stay exhausted until a fresh sample says otherwise
+        limits.record_samples(self.db, [Sample("codex:codex:primary", "codex", 100)], at=600)
+        self.assertTrue(limits.tool_exhausted(limits.snapshot(self.db), "codex", now=10 ** 9))
 
     def test_rate_limit_event_written_for_exhausted_bucket(self):
         self._seed()

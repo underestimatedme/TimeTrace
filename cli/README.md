@@ -75,6 +75,25 @@ tail -f ~/.keji/daemon.log
 - 熔断：默认 5 小时内 3 次失败就停止派工，直到窗口过去或你 `keji retry`。
 - v0.3 的 on_success 钩子只产出一份声明式 JSON 到 `~/.keji/inbox/`，由守护进程下一轮校验后入库；钩子生成的任务不能再生成任务。
 
+## 限额消耗的两部分覆盖：终端 + 软件
+
+限额是账号级的，不管你在终端里跑还是在软件里点，烧的都是同一个窗口。keji 的到期判断和续接时机必须两边都看得到：
+
+| 消耗来源 | Codex | Claude Code |
+|---|---|---|
+| 终端（keji 无头运行） | `codex exec` 结束后立刻 `account/rateLimits/read` | 每次 `claude -p` 的 `rate_limit_event` |
+| 软件（你自己在 Codex 应用 / Claude Code 里用） | 同一接口，服务端真值，天然包含应用内消耗 | **`keji statusline`**：挂进 Claude Code 状态栏，每次刷新把 `rate_limits` 写进库 |
+
+装 Claude Code 状态栏钩子（会往 `~/.claude/settings.json` 写 `statusLine`，已有别的状态栏脚本时不覆盖）：
+
+```sh
+keji statusline --install
+```
+
+之后 Claude Code 的状态栏会显示 `keji · 5h 86% · 7d 97% · codex 35% · ⏳ 3h12m`，同时你交互会话里撞到的限流（100%）会让守护进程停止往 Claude 派工，直到 `resets_at` 过去或有新样本。
+
+判断规则：任一桶最新样本 `used == 100%` 且 `resets_at` 还没到 → 该工具耗尽；`resets_at` 已过而没有新样本 → 视为已重置，照常派工，由真实运行结果说话。
+
 ## 两个工具的差别
 
 | | Claude Code | Codex |

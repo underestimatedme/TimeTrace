@@ -56,13 +56,16 @@ tail -f ~/.keji/daemon.log
   "circuit_window_mins": 300,
   "allowed_repos": [],
   "hook_max_tasks": 5,
-  "claude": {"bin": "claude", "permission_mode": "acceptEdits", "model": null, "extra_args": []},
+  "claude": {"bin": "claude", "permission_mode": "acceptEdits",
+             "allowed_tools": ["Bash(git add:*)", "Bash(git commit:*)", "Bash(git status:*)",
+                               "Bash(git diff:*)", "Bash(git log:*)"],
+             "model": null, "extra_args": []},
   "codex":  {"bin": "codex",  "sandbox": "workspace-write", "model": null, "extra_args": []}
 }
 ```
 
 - `allowed_repos` 非空时，`keji add --repo` 必须落在其中某个目录之下。
-- `permission_mode` 决定 Claude 无头运行时能做什么。`acceptEdits` 允许改文件但拒绝未授权的命令；要让它跑构建和测试，改成 `bypassPermissions`。这是你的决定，工具不替你做。
+- `permission_mode` 决定 Claude 无头运行时能做什么。`acceptEdits` 允许改文件，命令只放行 `allowed_tools` 里的（缺省是本地 git 提交相关的几条）；要让它跑构建和测试，往 `allowed_tools` 加规则（如 `"Bash(npm test:*)"`）或把模式改成 `bypassPermissions`。这是你的决定，工具不替你做。
 - Codex 的 `sandbox` 对应 `codex exec -s`；`workspace-write` 只允许写 worktree 内的文件。
 
 ## 安全约束

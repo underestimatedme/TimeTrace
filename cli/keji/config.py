@@ -16,6 +16,12 @@ DEFAULTS: Dict[str, Any] = {
     "claude": {
         "bin": "claude",
         "permission_mode": "acceptEdits",
+        # Local git operations the unattended run may perform without asking.
+        # Pushing stays blocked by --disallowedTools and the worktree pushurl.
+        "allowed_tools": [
+            "Bash(git add:*)", "Bash(git commit:*)", "Bash(git status:*)",
+            "Bash(git diff:*)", "Bash(git log:*)",
+        ],
         "model": None,
         "extra_args": [],
     },

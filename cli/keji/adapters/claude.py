@@ -28,6 +28,9 @@ def build_cmd(
         cmd += ["--session-id", session_id]
     cmd += ["--permission-mode", cfg.get("permission_mode", "acceptEdits")]
     cmd += ["--disallowedTools", "Bash(git push*)"]
+    allowed = list(cfg.get("allowed_tools") or [])
+    if allowed:
+        cmd += ["--allowedTools"] + allowed
     if cfg.get("model"):
         cmd += ["--model", cfg["model"]]
     cmd += ["--append-system-prompt", SAFETY_RULES]

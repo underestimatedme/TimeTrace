@@ -49,6 +49,18 @@ class WorktreeTest(unittest.TestCase):
         p2, _ = worktree.ensure(str(self.repo), 2, self.home)
         self.assertEqual(p1, p2)
 
+    def test_ensure_can_start_from_another_task_branch(self):
+        p1, b1 = worktree.ensure(str(self.repo), 1, self.home)
+        (Path(p1) / "step1.txt").write_text("one\n")
+        git("add", ".", cwd=p1)
+        git("commit", "-q", "-m", "step 1", cwd=p1)
+        p2, b2 = worktree.ensure(str(self.repo), 2, self.home, base=b1)
+        self.assertTrue((Path(p2) / "step1.txt").exists())
+        self.assertEqual(git("rev-parse", "--abbrev-ref", "HEAD", cwd=p2), "keji/2")
+        # unknown base falls back to HEAD instead of failing
+        p3, _ = worktree.ensure(str(self.repo), 3, self.home, base="keji/does-not-exist")
+        self.assertFalse((Path(p3) / "step1.txt").exists())
+
     def test_is_git_repo(self):
         self.assertTrue(worktree.is_git_repo(str(self.repo)))
         self.assertFalse(worktree.is_git_repo(self.tmp.name))

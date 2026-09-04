@@ -24,8 +24,12 @@ def branch_name(task_id: int) -> str:
     return "keji/%d" % task_id
 
 
-def ensure(repo: str, task_id: int, home: Path) -> Tuple[str, str]:
-    """Create (once) the worktree for task_id and return (path, branch)."""
+def ensure(repo: str, task_id: int, home: Path, base: str = "HEAD") -> Tuple[str, str]:
+    """Create (once) the worktree for task_id and return (path, branch).
+
+    `base` is the ref the task branch starts from: HEAD of the repo by default, or the
+    branch of the task this one depends on, so follow-up work builds on the previous step.
+    """
     path = Path(home) / "worktrees" / str(task_id)
     branch = branch_name(task_id)
     if not (path / ".git").exists():
@@ -33,7 +37,9 @@ def ensure(repo: str, task_id: int, home: Path) -> Tuple[str, str]:
         if _branch_exists(repo, branch):
             _git("-C", repo, "worktree", "add", str(path), branch)
         else:
-            _git("-C", repo, "worktree", "add", "-b", branch, str(path), "HEAD")
+            if base != "HEAD" and not _branch_exists(repo, base):
+                base = "HEAD"
+            _git("-C", repo, "worktree", "add", "-b", branch, str(path), base)
     block_push(str(path))
     return str(path), branch
 

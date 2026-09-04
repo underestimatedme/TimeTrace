@@ -133,7 +133,12 @@ def _dispatch(db: Database, adapter: Any, tool: str, task: Dict[str, Any], cfg: 
     try:
         wt, branch = task.get("worktree"), task.get("branch")
         if not wt:
-            wt, branch = ensure_worktree(task["repo"], task_id, home)
+            base = "HEAD"
+            if task.get("depends_on") is not None:
+                dep = db.get_task(task["depends_on"])
+                if dep and dep.get("branch") and dep.get("repo") == task["repo"]:
+                    base = dep["branch"]  # build on the previous step's work
+            wt, branch = ensure_worktree(task["repo"], task_id, home, base)
     except Exception as exc:
         db.update_task(task_id, state=FAILED, last_error="worktree: %s" % exc, now=now)
         db.add_event(EV_TASK_FAILED, tool=tool, payload={"task_id": task_id, "reason": str(exc)}, at=now)

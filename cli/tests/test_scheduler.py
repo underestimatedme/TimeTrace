@@ -31,7 +31,11 @@ class FakeAdapter:
         return res
 
 
-def fake_worktree(repo, task_id, home):
+WORKTREE_CALLS = []
+
+
+def fake_worktree(repo, task_id, home, base="HEAD"):
+    WORKTREE_CALLS.append((task_id, base))
     p = Path(home) / "worktrees" / str(task_id)
     p.mkdir(parents=True, exist_ok=True)
     return str(p), "keji/%d" % task_id
@@ -198,6 +202,15 @@ class SchedulerTest(unittest.TestCase):
         self.assertEqual(self.db.get_task(c)["state"], FAILED)
         self.run_once({"claude": ad}, now=200)  # child promoted and run
         self.assertEqual(self.db.get_task(b)["state"], DONE)
+
+    def test_dependent_task_branches_from_dependency(self):
+        a = self.db.add_task("parent", "/repo", tool="claude")
+        b = self.db.add_task("child", "/repo", tool="claude", depends_on=a)
+        ad = FakeAdapter("claude", [RunResult(ok=True), RunResult(ok=True)])
+        del WORKTREE_CALLS[:]
+        self.run_once({"claude": ad}, now=100)
+        self.run_once({"claude": ad}, now=200)
+        self.assertEqual(WORKTREE_CALLS, [(a, "HEAD"), (b, "keji/%d" % a)])
 
     def test_child_fails_when_parent_fails(self):
         a = self.db.add_task("parent", "/repo", tool="claude")

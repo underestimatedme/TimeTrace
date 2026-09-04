@@ -66,7 +66,8 @@ class ParseStreamTest(unittest.TestCase):
 
 
 class BuildCmdTest(unittest.TestCase):
-    cfg = {"bin": "claude", "permission_mode": "acceptEdits", "model": None, "extra_args": []}
+    cfg = {"bin": "claude", "permission_mode": "acceptEdits", "model": None, "extra_args": [],
+           "allowed_tools": ["Bash(git add:*)", "Bash(git commit:*)"]}
 
     def test_start_uses_session_id(self):
         cmd = claude.build_cmd(self.cfg, "do it", session_id="abc")
@@ -75,8 +76,15 @@ class BuildCmdTest(unittest.TestCase):
         self.assertNotIn("--resume", cmd)
         self.assertEqual(cmd[cmd.index("--permission-mode") + 1], "acceptEdits")
         self.assertEqual(cmd[cmd.index("--disallowedTools") + 1], "Bash(git push*)")
+        i = cmd.index("--allowedTools")
+        self.assertEqual(cmd[i + 1:i + 3], ["Bash(git add:*)", "Bash(git commit:*)"])
+        self.assertEqual(cmd[i + 3], "--append-system-prompt")
+
+    def test_no_allowed_tools_flag_when_empty(self):
+        cmd = claude.build_cmd(dict(self.cfg, allowed_tools=[]), "x", session_id="abc")
+        self.assertNotIn("--allowedTools", cmd)
         self.assertEqual(cmd[cmd.index("--append-system-prompt") + 1], SAFETY_RULES)
-        self.assertEqual(cmd[-1], "do it")
+        self.assertEqual(cmd[-1], "x")
 
     def test_resume_uses_resume_flag_and_model(self):
         cfg = dict(self.cfg, model="haiku", extra_args=["--effort", "low"])

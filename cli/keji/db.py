@@ -1,0 +1,262 @@
+"""All SQL lives here. Other modules call these methods and never write SQL."""
+import json
+import sqlite3
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from keji.models import BLOCKED, DONE, FAILED, PENDING, RUNNABLE, RUNNING, Sample
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS task (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    prompt        TEXT NOT NULL,
+    repo          TEXT NOT NULL,
+    tool          TEXT,
+    any_tool      INTEGER NOT NULL DEFAULT 0,
+    session_id    TEXT,
+    state         TEXT NOT NULL,
+    depends_on    INTEGER,
+    on_success    TEXT,
+    priority      INTEGER NOT NULL DEFAULT 0,
+    generation    INTEGER NOT NULL DEFAULT 0,
+    parent_id     INTEGER,
+    worktree      TEXT,
+    branch        TEXT,
+    blocked_until INTEGER,
+    last_error    TEXT,
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS run (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id    INTEGER NOT NULL,
+    tool       TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    ended_at   INTEGER,
+    exit_code  INTEGER,
+    blocked    INTEGER NOT NULL DEFAULT 0,
+    session_id TEXT,
+    log_path   TEXT,
+    summary    TEXT
+);
+CREATE TABLE IF NOT EXISTS bucket (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    tool              TEXT NOT NULL,
+    bucket_key        TEXT NOT NULL UNIQUE,
+    window_mins       INTEGER,
+    is_representative INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS sample (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    bucket_id INTEGER NOT NULL,
+    at        INTEGER NOT NULL,
+    used_pct  REAL NOT NULL,
+    reset_at  INTEGER,
+    source    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS sample_bucket_at ON sample(bucket_id, at DESC);
+CREATE TABLE IF NOT EXISTS event (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    type      TEXT NOT NULL,
+    tool      TEXT,
+    bucket_id INTEGER,
+    at        INTEGER NOT NULL,
+    payload   TEXT
+);
+"""
+
+
+def _now() -> int:
+    return int(time.time())
+
+
+class Database:
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(str(self.path), isolation_level=None)
+        self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA busy_timeout=5000")
+        self.conn.executescript(SCHEMA)
+
+    def close(self) -> None:
+        self.conn.close()
+
+    # ---- task -------------------------------------------------------------
+    def add_task(
+        self,
+        prompt: str,
+        repo: str,
+        tool: Optional[str] = None,
+        any_tool: bool = False,
+        depends_on: Optional[int] = None,
+        on_success: Optional[str] = None,
+        priority: int = 0,
+        generation: int = 0,
+        parent_id: Optional[int] = None,
+        now: Optional[int] = None,
+    ) -> int:
+        now = now or _now()
+        state = PENDING if depends_on is not None else RUNNABLE
+        cur = self.conn.execute(
+            "INSERT INTO task (prompt, repo, tool, any_tool, state, depends_on, on_success,"
+            " priority, generation, parent_id, created_at, updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (prompt, repo, tool, int(bool(any_tool)), state, depends_on, on_success,
+             priority, generation, parent_id, now, now),
+        )
+        return int(cur.lastrowid)
+
+    def get_task(self, task_id: int) -> Optional[Dict[str, Any]]:
+        row = self.conn.execute("SELECT * FROM task WHERE id=?", (task_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_tasks(self, include_done: bool = False) -> List[Dict[str, Any]]:
+        if include_done:
+            rows = self.conn.execute("SELECT * FROM task ORDER BY id").fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM task WHERE state != ? ORDER BY id", (DONE,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def tasks_in_state(self, state: str) -> List[Dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT * FROM task WHERE state=? ORDER BY priority DESC, id ASC", (state,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_task(self, task_id: int, now: Optional[int] = None, **fields: Any) -> None:
+        if not fields:
+            return
+        fields["updated_at"] = now or _now()
+        cols = ", ".join("%s=?" % k for k in fields)
+        self.conn.execute(
+            "UPDATE task SET %s WHERE id=?" % cols, tuple(fields.values()) + (task_id,)
+        )
+
+    def delete_task(self, task_id: int) -> None:
+        self.conn.execute("DELETE FROM task WHERE id=?", (task_id,))
+
+    # ---- run --------------------------------------------------------------
+    def add_run(
+        self, task_id: int, tool: str, session_id: Optional[str], log_path: str,
+        now: Optional[int] = None,
+    ) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO run (task_id, tool, started_at, session_id, log_path)"
+            " VALUES (?,?,?,?,?)",
+            (task_id, tool, now or _now(), session_id, log_path),
+        )
+        return int(cur.lastrowid)
+
+    def finish_run(
+        self, run_id: int, exit_code: int, blocked: bool, summary: str = "",
+        session_id: Optional[str] = None, now: Optional[int] = None,
+    ) -> None:
+        self.conn.execute(
+            "UPDATE run SET ended_at=?, exit_code=?, blocked=?, summary=?,"
+            " session_id=COALESCE(?, session_id) WHERE id=?",
+            (now or _now(), exit_code, int(bool(blocked)), summary, session_id, run_id),
+        )
+
+    def latest_run(self, task_id: int) -> Optional[Dict[str, Any]]:
+        row = self.conn.execute(
+            "SELECT * FROM run WHERE task_id=? ORDER BY id DESC LIMIT 1", (task_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def runs_for_task(self, task_id: int) -> List[Dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT * FROM run WHERE task_id=? ORDER BY id", (task_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def failed_runs_since(self, since: int) -> int:
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM run WHERE ended_at >= ? AND blocked = 0"
+            " AND exit_code IS NOT NULL AND exit_code != 0",
+            (since,),
+        ).fetchone()
+        return int(row["n"])
+
+    # ---- bucket / sample --------------------------------------------------
+    def upsert_bucket(
+        self, tool: str, bucket_key: str, window_mins: Optional[int], is_representative: bool
+    ) -> int:
+        row = self.conn.execute(
+            "SELECT id FROM bucket WHERE bucket_key=?", (bucket_key,)
+        ).fetchone()
+        if row:
+            self.conn.execute(
+                "UPDATE bucket SET window_mins=COALESCE(?, window_mins),"
+                " is_representative=? WHERE id=?",
+                (window_mins, int(bool(is_representative)), row["id"]),
+            )
+            return int(row["id"])
+        cur = self.conn.execute(
+            "INSERT INTO bucket (tool, bucket_key, window_mins, is_representative)"
+            " VALUES (?,?,?,?)",
+            (tool, bucket_key, window_mins, int(bool(is_representative))),
+        )
+        return int(cur.lastrowid)
+
+    def get_bucket(self, bucket_key: str) -> Optional[Dict[str, Any]]:
+        row = self.conn.execute(
+            "SELECT * FROM bucket WHERE bucket_key=?", (bucket_key,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def add_sample(self, sample: Sample, at: Optional[int] = None) -> int:
+        bucket_id = self.upsert_bucket(
+            sample.tool, sample.bucket_key, sample.window_mins, sample.is_representative
+        )
+        cur = self.conn.execute(
+            "INSERT INTO sample (bucket_id, at, used_pct, reset_at, source) VALUES (?,?,?,?,?)",
+            (bucket_id, at or _now(), float(sample.used_pct), sample.reset_at, sample.source),
+        )
+        return int(cur.lastrowid)
+
+    def latest_samples(self) -> List[Dict[str, Any]]:
+        """One row per bucket: the newest sample joined with bucket metadata."""
+        rows = self.conn.execute(
+            "SELECT b.id AS bucket_id, b.tool, b.bucket_key, b.window_mins,"
+            " b.is_representative, s.at, s.used_pct, s.reset_at, s.source"
+            " FROM bucket b JOIN sample s ON s.id = ("
+            "   SELECT id FROM sample WHERE bucket_id=b.id ORDER BY at DESC, id DESC LIMIT 1)"
+            " ORDER BY b.tool, b.bucket_key"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ---- event ------------------------------------------------------------
+    def add_event(
+        self, type_: str, tool: Optional[str] = None, bucket_id: Optional[int] = None,
+        payload: Optional[Dict[str, Any]] = None, at: Optional[int] = None,
+    ) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO event (type, tool, bucket_id, at, payload) VALUES (?,?,?,?,?)",
+            (type_, tool, bucket_id, at or _now(),
+             json.dumps(payload or {}, ensure_ascii=False, sort_keys=True)),
+        )
+        return int(cur.lastrowid)
+
+    def list_events(self, limit: int = 50, type_: Optional[str] = None) -> List[Dict[str, Any]]:
+        if type_:
+            rows = self.conn.execute(
+                "SELECT * FROM event WHERE type=? ORDER BY id DESC LIMIT ?", (type_, limit)
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM event ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["payload"] = json.loads(d["payload"] or "{}")
+            except ValueError:
+                pass
+            out.append(d)
+        return out

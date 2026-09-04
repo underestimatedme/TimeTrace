@@ -1,0 +1,4 @@
+#!/bin/sh
+# keji launcher: runs the package from the repo checkout without installation.
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m keji "$@"

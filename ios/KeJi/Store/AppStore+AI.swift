@@ -1,6 +1,77 @@
 import Foundation
 
 extension AppStore {
+    func failRemoteAIExecution(_ taskId: String, provider: AIProvider, message: String) {
+        let at = Date()
+        withTask(taskId, at: at) { $0.status = .failed }
+        let execution = AIExecution(
+            id: AppStore.generateId(), taskId: taskId, provider: provider, model: "本机 \(provider.label)",
+            status: .failed, startedAt: at, endedAt: at, activeSeconds: 0, elapsedSeconds: 0,
+            waitingHumanSeconds: 0, tokenInput: 0, tokenOutput: 0, estimatedCost: 0,
+            toolCallCount: 0, filesChanged: 0, errorMessage: message,
+            logs: [AIExecutionLog(time: timeLabel(at), message: "远程派发失败")], updatedAt: at)
+        aiExecutions.append(execution)
+        markDirty(.aiExecutions, execution.id)
+        commit()
+    }
+
+    func startRemoteAIExecution(_ taskId: String, job: RemoteJob, provider: AIProvider) {
+        guard let task = task(taskId), !TaskStatus.terminal.contains(task.status) else { return }
+        let at = Date()
+        withTask(taskId, at: at) { $0.status = .aiQueued }
+        let execution = AIExecution(
+            id: AppStore.generateId(), taskId: taskId, provider: provider, model: "本机 \(provider.label)",
+            status: .queued, startedAt: at, activeSeconds: 0, elapsedSeconds: 0, waitingHumanSeconds: 0,
+            tokenInput: 0, tokenOutput: 0, estimatedCost: 0, toolCallCount: 0, filesChanged: 0,
+            remoteJobId: job.id, logs: [AIExecutionLog(time: timeLabel(at), message: "已提交至 Valley，等待电脑领取")],
+            currentStep: job.status.label, updatedAt: at)
+        aiExecutions.append(execution)
+        markDirty(.aiExecutions, execution.id)
+        commit()
+    }
+
+    func applyRemoteJob(_ job: RemoteJob) {
+        guard let idx = aiExecutions.lastIndex(where: { $0.remoteJobId == job.id }) else { return }
+        let oldStatus = aiExecutions[idx].currentStep
+        aiExecutions[idx].currentStep = job.status.label
+        aiExecutions[idx].resultSummary = job.resultSummary
+        aiExecutions[idx].updatedAt = job.updatedAt
+        switch job.status {
+        case .queued, .leased:
+            aiExecutions[idx].status = .queued
+            withTask(job.taskId, at: job.updatedAt) { $0.status = .aiQueued }
+        case .running:
+            aiExecutions[idx].status = .running
+            withTask(job.taskId, at: job.updatedAt) { $0.status = .aiRunning }
+        case .waitingLocalAuth:
+            aiExecutions[idx].status = .waitingAuth
+            withTask(job.taskId, at: job.updatedAt) { $0.status = .paused }
+        case .waitingInput, .waitingQuota:
+            aiExecutions[idx].status = .waitingInput
+            withTask(job.taskId, at: job.updatedAt) { $0.status = .paused }
+        case .awaitingReview:
+            aiExecutions[idx].status = .completed
+            aiExecutions[idx].endedAt = job.updatedAt
+            withTask(job.taskId, at: job.updatedAt) { task in
+                task.status = .waitingHuman
+                task.resultSummary = job.resultSummary
+            }
+        case .failed, .expired:
+            aiExecutions[idx].status = .failed
+            aiExecutions[idx].endedAt = job.updatedAt
+            withTask(job.taskId, at: job.updatedAt) { $0.status = .failed }
+        case .cancelled:
+            aiExecutions[idx].status = .cancelled
+            aiExecutions[idx].endedAt = job.updatedAt
+            withTask(job.taskId, at: job.updatedAt) { $0.status = .cancelled }
+        }
+        if oldStatus != aiExecutions[idx].currentStep {
+            aiExecutions[idx].logs.append(AIExecutionLog(time: timeLabel(job.updatedAt), message: job.status.label))
+        }
+        markDirty(.aiExecutions, aiExecutions[idx].id)
+        commit()
+    }
+
     func startAIExecution(_ taskId: String) {
         guard let task = task(taskId) else { return }
         guard !TaskStatus.terminal.contains(task.status), task.status != .waitingHuman else { return }
@@ -91,14 +162,14 @@ extension AppStore {
     func tickAIExecutions(at date: Date? = nil) {
         let reference = date ?? Date()
         now = reference
-        let hasRunningAI = aiExecutions.contains { $0.status == .running }
+        let hasRunningAI = aiExecutions.contains { $0.status == .running && $0.remoteJobId == nil }
         let hasWaiting = timeSessions.contains { $0.type == .waitingHuman && $0.endedAt == nil }
         guard hasRunningAI || activeFocus != nil || hasWaiting else { return }
 
         var spawned: [TimeSession] = []
         var finishedTasks: Set<String> = []
-        let runningTasks = Set(aiExecutions.filter { $0.status == .running }.map(\.taskId))
-        for idx in aiExecutions.indices where aiExecutions[idx].status == .running {
+        let runningTasks = Set(aiExecutions.filter { $0.status == .running && $0.remoteJobId == nil }.map(\.taskId))
+        for idx in aiExecutions.indices where aiExecutions[idx].status == .running && aiExecutions[idx].remoteJobId == nil {
             var ae = aiExecutions[idx]
             let active = ae.activeSeconds + 1
             let stepIdx = min(active / 30, AppStore.aiSteps.count - 1)

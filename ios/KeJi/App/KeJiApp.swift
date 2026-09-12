@@ -10,6 +10,7 @@ struct KeJiApp: App {
                 .environment(environment.store)
                 .environment(environment.router)
                 .environment(environment.sync)
+                .environment(environment.remote)
                 .environment(environment)
         }
     }
@@ -22,6 +23,7 @@ final class AppEnvironment {
     let store: AppStore
     let router: AppRouter
     let sync: SyncEngine
+    let remote: RemoteExecutionClient
     let stateStore: StateStore
 
     @ObservationIgnored private var saveTask: _Concurrency.Task<Void, Never>?
@@ -46,6 +48,7 @@ final class AppEnvironment {
 
         let client = APIClient(baseURL: options.apiBaseURL)
         sync = SyncEngine(store: store, client: client, enabled: !options.offline)
+        remote = RemoteExecutionClient(client: client)
         store.onChange = { [weak self] in self?.scheduleSave() }
         if options.sampleData { scheduleSave() }
 

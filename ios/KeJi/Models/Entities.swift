@@ -90,6 +90,7 @@ struct AIExecution: Codable, Identifiable, Equatable {
     var filesChanged: Int
     var resultSummary: String?
     var errorMessage: String?
+    var remoteJobId: String?
     var logs: [AIExecutionLog]
     var currentStep: String?
     var updatedAt: Date
@@ -98,13 +99,15 @@ struct AIExecution: Codable, Identifiable, Equatable {
          startedAt: Date, endedAt: Date? = nil, activeSeconds: Int, elapsedSeconds: Int,
          waitingHumanSeconds: Int, tokenInput: Int, tokenOutput: Int, estimatedCost: Double,
          toolCallCount: Int, filesChanged: Int, resultSummary: String? = nil, errorMessage: String? = nil,
+         remoteJobId: String? = nil,
          logs: [AIExecutionLog], currentStep: String? = nil, updatedAt: Date) {
         self.id = id; self.taskId = taskId; self.provider = provider; self.model = model; self.status = status
         self.startedAt = startedAt; self.endedAt = endedAt; self.activeSeconds = activeSeconds
         self.elapsedSeconds = elapsedSeconds; self.waitingHumanSeconds = waitingHumanSeconds
         self.tokenInput = tokenInput; self.tokenOutput = tokenOutput; self.estimatedCost = estimatedCost
         self.toolCallCount = toolCallCount; self.filesChanged = filesChanged; self.resultSummary = resultSummary
-        self.errorMessage = errorMessage; self.logs = logs; self.currentStep = currentStep; self.updatedAt = updatedAt
+        self.errorMessage = errorMessage; self.remoteJobId = remoteJobId
+        self.logs = logs; self.currentStep = currentStep; self.updatedAt = updatedAt
     }
 
     // Tolerate `logs: null` from the server.
@@ -127,6 +130,7 @@ struct AIExecution: Codable, Identifiable, Equatable {
         filesChanged = try c.decodeIfPresent(Int.self, forKey: .filesChanged) ?? 0
         resultSummary = try c.decodeIfPresent(String.self, forKey: .resultSummary)
         errorMessage = try c.decodeIfPresent(String.self, forKey: .errorMessage)
+        remoteJobId = try c.decodeIfPresent(String.self, forKey: .remoteJobId)
         logs = try c.decodeIfPresent([AIExecutionLog].self, forKey: .logs) ?? []
         currentStep = try c.decodeIfPresent(String.self, forKey: .currentStep)
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? startedAt

@@ -69,8 +69,7 @@ HTTP tests intercept URLSession requests locally and do not contact production.
 `KEJI_OFFLINE=1` disables networking for the unit-test host. Do not use `--sample-data` without
 `--ui-testing` when you want to preserve the simulator's normal app data.
 
-AI execution and tool connections remain simulations. Passing these tests does not verify real
-Claude/Codex integrations, SMS/email delivery, production account deletion, or multi-device sync.
+离线 UI 测试仍使用显式模拟模式；正常联网模式通过 Valley 绑定电脑、选择本地 workspace/CLI 并派发真实远程任务。自动测试不等同于真机蜂窝网、电脑休眠恢复或 24 小时稳定性验证。
 
 ## API base URL
 

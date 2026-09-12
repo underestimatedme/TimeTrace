@@ -5,6 +5,7 @@ struct AIExecutionView: View {
     @Environment(\.theme) private var theme
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
+    @Environment(RemoteExecutionClient.self) private var remote
     let taskId: String
     @State private var pulse = false
 
@@ -17,6 +18,19 @@ struct AIExecutionView: View {
             }
         }
         .onAppear { pulse = true }
+        .task(id: store.aiExecutions.last { $0.taskId == taskId }?.remoteJobId) {
+            await pollRemoteJob()
+        }
+        .task(id: store.aiExecutions.last { $0.taskId == taskId }?.remoteJobId) {
+            guard let jobID = store.aiExecutions.last(where: { $0.taskId == taskId })?.remoteJobId else { return }
+            while !_Concurrency.Task.isCancelled {
+                if let job = try? await remote.refresh(jobID: jobID) {
+                    store.applyRemoteJob(job)
+                    if [.awaitingReview, .failed, .cancelled, .expired].contains(job.status) { return }
+                }
+                try? await _Concurrency.Task.sleep(nanoseconds: 3_000_000_000)
+            }
+        }
     }
 
     private func statusColor(_ status: AIExecutionStatus?) -> Color {
@@ -24,6 +38,21 @@ struct AIExecutionView: View {
         case .running: return theme.ai
         case .completed: return theme.success
         default: return theme.textMuted
+        }
+    }
+
+    private func pollRemoteJob() async {
+        guard let jobID = store.aiExecutions.last(where: { $0.taskId == taskId })?.remoteJobId else { return }
+        while !_Concurrency.Task.isCancelled {
+            do {
+                let job = try await remote.refresh(jobID: jobID)
+                store.applyRemoteJob(job)
+                if [.awaitingReview, .failed, .cancelled, .expired].contains(job.status) { return }
+            } catch {
+                try? await _Concurrency.Task.sleep(nanoseconds: 5_000_000_000)
+                continue
+            }
+            try? await _Concurrency.Task.sleep(nanoseconds: 3_000_000_000)
         }
     }
 

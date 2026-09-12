@@ -47,6 +47,9 @@ final class FunctionalUITests: XCTestCase {
         tap("继续")
         tap("开始使用")
         tap("任务")
+        if !app.buttons["新建任务"].waitForExistence(timeout: 2) {
+            tap("任务") // onboarding transition can briefly swallow the first tab tap
+        }
         tap("新建任务")
         let title = app.textFields["输入任务名称"]
         XCTAssertTrue(title.waitForExistence(timeout: 5))

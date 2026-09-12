@@ -1,6 +1,6 @@
 import Foundation
 
-enum HTTPMethod: String { case get = "GET", post = "POST", delete = "DELETE" }
+enum HTTPMethod: String { case get = "GET", post = "POST", put = "PUT", delete = "DELETE" }
 
 struct Endpoint {
     var method: HTTPMethod
@@ -25,6 +25,17 @@ struct Endpoint {
     static let bootstrap = Endpoint(method: .get, path: "/bootstrap", requiresAuth: true, body: nil)
     static func sync(_ request: SyncRequest) -> Endpoint {
         Endpoint(method: .post, path: "/sync", requiresAuth: true, body: request)
+    }
+    static let runners = Endpoint(method: .get, path: "/runners", requiresAuth: true, body: nil)
+    static func approveRunner(code: String) -> Endpoint {
+        Endpoint(method: .post, path: "/device-authorizations/approve", requiresAuth: true,
+                 body: DeviceApprovalRequest(userCode: code))
+    }
+    static func createRemoteJob(_ request: RemoteJobRequest) -> Endpoint {
+        Endpoint(method: .post, path: "/remote-jobs", requiresAuth: true, body: request)
+    }
+    static func remoteJob(id: String) -> Endpoint {
+        Endpoint(method: .get, path: "/remote-jobs/\(id)", requiresAuth: true, body: nil)
     }
 }
 

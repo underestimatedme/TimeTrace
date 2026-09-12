@@ -5,6 +5,8 @@ struct TaskCreateView: View {
     @Environment(\.theme) private var theme
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
+    @Environment(RemoteExecutionClient.self) private var remote
+    @Environment(AppEnvironment.self) private var appEnv
 
     enum SaveAction { case save, start, schedule }
 
@@ -19,10 +21,24 @@ struct TaskCreateView: View {
     @State private var priority: TaskPriority = .medium
     @State private var scheduledStart: Date?
     @State private var dueDate: Date?
+    @State private var runnerId = ""
+    @State private var workspaceId = ""
+    @State private var toolId = ""
+    @State private var dispatchError: String?
 
     private var projectGoals: [Goal] { store.goals.filter { $0.projectId == projectId } }
     private var showsAI: Bool { executorType == .ai || executorType == .collaboration }
-    private var canSave: Bool { !title.trimmingCharacters(in: .whitespaces).isEmpty }
+    private var canSave: Bool {
+        guard !title.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        if showsAI && !appEnv.options.offline {
+            return selectedRunner != nil && !workspaceId.isEmpty && !toolId.isEmpty
+        }
+        return true
+    }
+    private var selectedRunner: RunnerInventory? { remote.runners.first { $0.runner.id == runnerId } }
+    private var availableTools: [RunnerTool] {
+        selectedRunner?.tools.filter { $0.provider == aiProvider && $0.status == "available" } ?? []
+    }
 
     var body: some View {
         SubPageScaffold(title: "新建任务") {
@@ -69,6 +85,33 @@ struct TaskCreateView: View {
                         AppSelect(options: CollaborationMode.allCases, selection: $collaborationMode) { $0.label }
                     }
                 }
+                if remote.runners.isEmpty {
+                    Card(borderColor: theme.ai.opacity(0.2)) {
+                        Text("还没有在线电脑。请先在「AI 工具管理」中绑定 Mac，并运行 keji agent。")
+                            .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
+                    }
+                } else {
+                    FormField(label: "执行电脑") {
+                        AppSelect(options: remote.runners.map(\.runner.id), selection: $runnerId) { id in
+                            remote.runners.first { $0.runner.id == id }?.runner.name ?? id
+                        }
+                    }
+                    if let selectedRunner {
+                        FormField(label: "本地工作区") {
+                            AppSelect(options: selectedRunner.workspaces.map(\.id), selection: $workspaceId) { id in
+                                selectedRunner.workspaces.first { $0.id == id }?.name ?? id
+                            }
+                        }
+                        FormField(label: "本机工具") {
+                            AppSelect(options: availableTools.map(\.id), selection: $toolId) { id in
+                                availableTools.first { $0.id == id }.map { "\($0.provider.label) · \($0.version)" } ?? id
+                            }
+                        }
+                    }
+                }
+                if let dispatchError {
+                    Text(dispatchError).font(Typo.sans(Typo.xs)).foregroundStyle(theme.danger)
+                }
             }
 
             HStack(alignment: .top, spacing: 16) {
@@ -96,8 +139,12 @@ struct TaskCreateView: View {
         }
         .onAppear {
             if projectId.isEmpty { projectId = store.projects.first?.id ?? "" }
+            selectRemoteDefaults()
+            _Concurrency.Task { await remote.loadRunners(); selectRemoteDefaults() }
         }
         .onChange(of: projectId) { _, _ in goalId = "" }
+        .onChange(of: runnerId) { _, _ in selectRunnerDefaults() }
+        .onChange(of: aiProvider) { _, _ in toolId = availableTools.first?.id ?? "" }
     }
 
     private func executorTile(_ type: ExecutorType, _ label: String) -> some View {
@@ -126,14 +173,45 @@ struct TaskCreateView: View {
         case .start:
             router.go(.tasks)
             if executorType == .ai {
-                store.startAIExecution(id)
                 router.push(.ai(id))
+                if let task = store.task(id), let runner = selectedRunner,
+                   let workspace = runner.workspaces.first(where: { $0.id == workspaceId }),
+                   let tool = availableTools.first(where: { $0.id == toolId }) {
+                    _Concurrency.Task {
+                        do {
+                            let job = try await remote.dispatch(task: task, runner: runner, workspace: workspace, tool: tool)
+                            store.startRemoteAIExecution(id, job: job, provider: tool.provider)
+                        } catch {
+                            dispatchError = error.localizedDescription
+                            store.failRemoteAIExecution(id, provider: aiProvider, message: error.localizedDescription)
+                        }
+                    }
+                } else if appEnv.options.offline {
+                    store.startAIExecution(id)
+                } else {
+                    dispatchError = "请先选择可用的电脑、工作区和 AI 工具"
+                }
             } else {
                 store.startFocus(id)
                 router.push(.focus(id))
             }
         case .save, .schedule:
             router.go(.tasks)
+        }
+    }
+
+    private func selectRemoteDefaults() {
+        if runnerId.isEmpty { runnerId = remote.runners.first?.runner.id ?? "" }
+        selectRunnerDefaults()
+    }
+
+    private func selectRunnerDefaults() {
+        guard let selectedRunner else { return }
+        if !selectedRunner.workspaces.contains(where: { $0.id == workspaceId }) {
+            workspaceId = selectedRunner.workspaces.first?.id ?? ""
+        }
+        if !availableTools.contains(where: { $0.id == toolId }) {
+            toolId = availableTools.first?.id ?? ""
         }
     }
 }

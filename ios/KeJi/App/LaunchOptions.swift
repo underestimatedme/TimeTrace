@@ -14,6 +14,7 @@ struct LaunchOptions {
     var theme: ThemeName?
     var offline = false
     var apiBaseURL: URL?
+    var uiTesting = false
 
     static let current = LaunchOptions(arguments: ProcessInfo.processInfo.arguments)
 
@@ -27,6 +28,7 @@ struct LaunchOptions {
             switch arg {
             case "--sample-data": sampleData = true
             case "--offline": offline = true
+            case "--ui-testing": uiTesting = true; offline = true
             case "--screen": screen = value(); i += 1
             case "--theme": theme = value().flatMap(ThemeName.init(rawValue:)); i += 1
             case "--api-base-url": apiBaseURL = value().flatMap(URL.init(string:)); i += 1
@@ -34,5 +36,6 @@ struct LaunchOptions {
             }
             i += 1
         }
+        if ProcessInfo.processInfo.environment["KEJI_OFFLINE"] == "1" { offline = true }
     }
 }

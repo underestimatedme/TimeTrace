@@ -107,4 +107,69 @@ final class StoreReducerTests: XCTestCase {
         store.setTaskStatus(id, .completed)
         XCTAssertNotNil(store.task(id)?.completedAt)
     }
+
+    func testSwitchingFocusClosesPreviousSessionAndRepeatedStartIsIdempotent() {
+        let store = makeStore()
+        store.startFocus("t7")
+        XCTAssertEqual(store.task("t2")?.status, .paused)
+        XCTAssertTrue(store.timeSessions.filter { $0.taskId == "t2" && $0.type == .humanFocus }.allSatisfy { $0.endedAt != nil })
+        store.startFocus("t7")
+        XCTAssertEqual(store.timeSessions.filter { $0.taskId == "t7" && $0.type == .humanFocus && $0.endedAt == nil }.count, 1)
+    }
+
+    func testMissingTaskCannotStartFocus() {
+        let store = makeStore()
+        let before = store.snapshot
+        store.startFocus("missing")
+        XCTAssertEqual(store.snapshot, before)
+    }
+
+    func testPausedAIDoesNotAccrueTimeAndCanResumeSameExecution() throws {
+        let store = makeStore()
+        store.startAIExecution("t7")
+        let id = try XCTUnwrap(store.aiExecutions.last { $0.taskId == "t7" }?.id)
+        store.tick()
+        store.pauseAIExecution("t7")
+        let before = Stats.taskTimeBreakdown(store.timeSessions, taskId: "t7").ai
+        store.tick()
+        XCTAssertEqual(Stats.taskTimeBreakdown(store.timeSessions, taskId: "t7").ai, before)
+        XCTAssertTrue(store.timeSessions.filter { $0.taskId == "t7" && $0.type == .aiActive }.allSatisfy { $0.endedAt != nil })
+        store.authorizeAI("t7")
+        store.authorizeAI("t7")
+        XCTAssertEqual(store.aiExecutions.filter { $0.taskId == "t7" }.count, 1)
+        XCTAssertEqual(store.aiExecutions.first { $0.id == id }?.status, .running)
+        XCTAssertEqual(store.timeSessions.filter { $0.taskId == "t7" && $0.type == .aiActive && $0.endedAt == nil }.count, 1)
+    }
+
+    func testAICompletionClosesActiveTimeAndWaitingContinuesWithoutOtherWork() {
+        let store = makeStore()
+        store.completeFocus()
+        store.cancelAIExecution("t3")
+        store.startAIExecution("t7")
+        for _ in 0..<180 { store.tick() }
+        XCTAssertTrue(store.timeSessions.filter { $0.taskId == "t7" && $0.type == .aiActive }.allSatisfy { $0.endedAt != nil })
+        let before = store.timeSessions.first { $0.taskId == "t7" && $0.type == .waitingHuman }!.durationSeconds
+        store.tick()
+        XCTAssertEqual(store.timeSessions.first { $0.taskId == "t7" && $0.type == .waitingHuman }?.durationSeconds, before + 1)
+        XCTAssertEqual(Stats.taskTimeBreakdown(store.timeSessions, taskId: "t7").ai, 180)
+    }
+
+    func testReviewIsIdempotentAndCompletedExecutionCannotBeResumed() {
+        let store = makeStore()
+        store.completeAIReview("t4")
+        store.completeAIReview("t4")
+        XCTAssertEqual(store.timeSessions.filter { $0.taskId == "t4" && $0.type == .humanReview }.count, 1)
+        store.authorizeAI("t4")
+        XCTAssertEqual(store.task("t4")?.status, .completed)
+    }
+
+    func testCompletingFromTaskMenuStopsAllTiming() {
+        let store = makeStore()
+        store.setTaskStatus("t2", .completed)
+        XCTAssertNil(store.activeFocus)
+        XCTAssertTrue(store.timeSessions.filter { $0.taskId == "t2" }.allSatisfy { $0.endedAt != nil })
+        store.setTaskStatus("t3", .completed)
+        XCTAssertTrue(store.aiExecutions.filter { $0.taskId == "t3" }.allSatisfy { $0.status != .running })
+        XCTAssertTrue(store.timeSessions.filter { $0.taskId == "t3" }.allSatisfy { $0.endedAt != nil })
+    }
 }

@@ -47,6 +47,8 @@ struct AppTextField: View {
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .focused($focused)
+            .submitLabel(.done)
+            .onSubmit { focused = false }
             .modifier(InputChrome(focused: focused))
     }
 }

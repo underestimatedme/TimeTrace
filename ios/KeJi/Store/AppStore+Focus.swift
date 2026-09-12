@@ -2,6 +2,9 @@ import Foundation
 
 extension AppStore {
     func startFocus(_ taskId: String) {
+        guard let task = task(taskId), !TaskStatus.terminal.contains(task.status), task.status != .aiRunning else { return }
+        guard activeFocus?.taskId != taskId else { return }
+        if activeFocus != nil { pauseFocus(reason: "切换任务") }
         let at = Date()
         activeFocus = ActiveFocus(taskId: taskId, startedAt: at, accumulatedSeconds: 0)
         withTask(taskId, at: at) { $0.status = .humanRunning }
@@ -29,15 +32,10 @@ extension AppStore {
     }
 
     func resumeFocus() {
-        guard var focus = activeFocus else { return }
-        let at = Date()
-        focus.startedAt = at
-        activeFocus = focus
-        withTask(focus.taskId, at: at) { $0.status = .humanRunning }
-        appendSession(newSession(taskId: focus.taskId, type: .humanFocus, executor: TimeSession.humanExecutor,
-                                 startedAt: at, source: .timer, confidence: .exact))
-        markActiveFocusDirty()
-        commit()
+        // Pausing closes the segment and clears activeFocus. Resume with startFocus(taskId).
+        // An existing activeFocus is already running; never create a duplicate segment.
+        guard let focus = activeFocus else { return }
+        startFocus(focus.taskId)
     }
 
     func completeFocus(note: String? = nil) {

@@ -54,6 +54,8 @@ struct AppearanceView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("theme-\(meta.id.rawValue)")
+        .accessibilityValue(active ? "已选中" : "未选中")
     }
 
     private func swatch(_ color: Color) -> some View {

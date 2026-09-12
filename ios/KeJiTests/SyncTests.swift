@@ -1,6 +1,116 @@
 import XCTest
 @testable import KeJi
 
+private final class StubHTTPProtocol: URLProtocol {
+    static var handler: ((URLRequest) throws -> (Int, Data))?
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        do {
+            let (status, data) = try Self.handler!(request)
+            let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,
+                                           headerFields: ["Content-Type": "application/json"])!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch { client?.urlProtocol(self, didFailWithError: error) }
+    }
+    override func stopLoading() {}
+}
+
+@MainActor
+final class HTTPClientTests: XCTestCase {
+    private var client: APIClient!
+    private var session: URLSession!
+
+    override func setUp() {
+        super.setUp()
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubHTTPProtocol.self]
+        session = URLSession(configuration: config)
+        client = APIClient(baseURL: URL(string: "https://keji-tests.invalid/api/v1")!,
+                           keychain: KeychainStore(account: "qa-" + UUID().uuidString), session: session)
+    }
+
+    override func tearDown() {
+        client.clearTokens()
+        session.invalidateAndCancel()
+        StubHTTPProtocol.handler = nil
+        super.tearDown()
+    }
+
+    func testGuestThenAuthenticatedSyncAndBootstrap() async throws {
+        let state = SampleData.createEmptyData().state
+        let encoded = try JSONCoding.encoder.encode(Bootstrap(user: UserInfo(id: "qa", isGuest: true), state: state, serverTime: nil))
+        let response = try JSONSerialization.data(withJSONObject: ["code": 0, "data": JSONSerialization.jsonObject(with: encoded)])
+        StubHTTPProtocol.handler = { request in
+            if request.url!.path.hasSuffix("/auth/guest") {
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+                return (201, Data(#"{"code":0,"data":{"access_token":"qa-access","refresh_token":"qa-refresh","expires_in":900}}"#.utf8))
+            }
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer qa-access")
+            XCTAssertEqual(request.httpMethod, request.url!.path.hasSuffix("/sync") ? "POST" : "GET")
+            return (200, response)
+        }
+        client.storeTokens(try await client.send(.guest, as: SessionTokens.self))
+        let request = SyncRequest(clientTime: Date(), upserts: SyncUpserts(), deletes: SyncDeletes(), settings: state.settings)
+        let synced = try await client.send(.sync(request), as: Bootstrap.self)
+        XCTAssertEqual(synced.user?.id, "qa")
+        let pulled = try await client.send(.bootstrap, as: Bootstrap.self)
+        XCTAssertEqual(pulled.state, synced.state)
+    }
+
+    func testUnauthorizedRefreshesAndRetriesWithNewToken() async throws {
+        client.storeTokens(SessionTokens(accessToken: "old", refreshToken: "refresh", expiresIn: 900))
+        StubHTTPProtocol.handler = { request in
+            if request.url!.path.hasSuffix("/auth/refresh") {
+                return (200, Data(#"{"code":0,"data":{"access_token":"new","refresh_token":"rotated","expires_in":900}}"#.utf8))
+            }
+            if request.value(forHTTPHeaderField: "Authorization") == "Bearer old" {
+                return (401, Data(#"{"code":40100,"message":"expired"}"#.utf8))
+            }
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer new")
+            return (200, Data(#"{"code":0,"data":{"state":{}}}"#.utf8))
+        }
+        _ = try await client.send(.bootstrap, as: Bootstrap.self)
+        XCTAssertEqual(client.tokens?.accessToken, "new")
+        XCTAssertEqual(client.tokens?.refreshToken, "rotated")
+    }
+
+    func testTransportFailureIsReportedAsOfflineError() async {
+        StubHTTPProtocol.handler = { _ in throw URLError(.notConnectedToInternet) }
+        do {
+            _ = try await client.send(.contentVersion, as: ContentVersion.self)
+            XCTFail("Expected offline error")
+        } catch {
+            XCTAssertEqual((error as? APIError)?.code, -3)
+        }
+    }
+
+    func testContinuousEditsDoNotStarveScheduledSync() async throws {
+        let store = AppStore()
+        store.completeOnboarding(useSample: false)
+        client.storeTokens(SessionTokens(accessToken: "qa", refreshToken: "qa", expiresIn: 900))
+        let engine = SyncEngine(store: store, client: client, enabled: true)
+        let pushed = expectation(description: "Sync occurs while changes continue")
+        pushed.assertForOverFulfill = false
+        let state = try JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(store.snapshot))
+        let response = try JSONSerialization.data(withJSONObject: ["code": 0, "data": ["state": state]])
+        StubHTTPProtocol.handler = { request in
+            XCTAssertTrue(request.url!.path.hasSuffix("/sync"))
+            pushed.fulfill()
+            return (200, response)
+        }
+        for index in 0..<8 {
+            store.updateSettings { $0.name = "edit-\(index)" }
+            try await _Concurrency.Task.sleep(nanoseconds: 300_000_000)
+        }
+        await fulfillment(of: [pushed], timeout: 1)
+        XCTAssertNotNil(engine.lastSyncAt)
+    }
+}
+
 @MainActor
 final class SyncTests: XCTestCase {
     private func json(_ value: Encodable) throws -> [String: Any] {
@@ -151,5 +261,49 @@ final class SyncTests: XCTestCase {
         XCTAssertEqual(fromEnv.absoluteString, "http://b.test")
         let fallback = APIClient.resolveBaseURL(arguments: [], environment: [:], bundle: Bundle(for: SyncTests.self))
         XCTAssertEqual(fallback.absoluteString, APIClient.defaultBaseURL)
+    }
+
+    func testAcknowledgementPreservesEditsMadeWhileRequestIsInFlight() {
+        let store = AppStore()
+        store.completeOnboarding(useSample: true)
+        let sent = store.snapshot
+        let checkpoint = store.syncCheckpoint()
+        store.updateTask("t7") { $0.title = "请求期间的新编辑" }
+        store.updateSettings { $0.theme = .light }
+        store.pauseFocus()
+        store.markAIToolsDirty()
+        store.deleteTask("t20")
+        store.acknowledge(checkpoint, settings: true, activeFocus: true, aiTools: true)
+        store.applySnapshot(sent)
+        XCTAssertEqual(store.task("t7")?.title, "请求期间的新编辑")
+        XCTAssertEqual(store.settings.theme, .light)
+        XCTAssertNil(store.activeFocus)
+        XCTAssertNil(store.task("t20"))
+        XCTAssertTrue(store.dirty[.tasks]?.contains("t7") == true)
+        XCTAssertTrue(store.aiToolsDirty)
+        XCTAssertFalse(store.dirty[.tasks]?.contains("t1") == true)
+    }
+
+    func testPersistenceRoundTripKeepsPendingChangesAndFocus() throws {
+        let store = AppStore()
+        store.completeOnboarding(useSample: true)
+        store.updateTask("t7") { $0.title = "离线编辑" }
+        store.deleteTask("t20")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        let persistence = StateStore(url: url)
+        defer { persistence.clear() }
+        persistence.save(store.persisted)
+        let restored = AppStore()
+        restored.load(try XCTUnwrap(persistence.load()))
+        XCTAssertEqual(restored.task("t7")?.title, "离线编辑")
+        let focus = try XCTUnwrap(restored.activeFocus)
+        let originalFocus = try XCTUnwrap(store.activeFocus)
+        XCTAssertEqual(focus.taskId, originalFocus.taskId)
+        XCTAssertEqual(focus.accumulatedSeconds, originalFocus.accumulatedSeconds)
+        // RFC3339 storage deliberately normalizes sub-millisecond precision.
+        XCTAssertEqual(focus.startedAt.timeIntervalSince1970, originalFocus.startedAt.timeIntervalSince1970, accuracy: 0.001)
+        XCTAssertEqual(restored.dirty, store.dirty)
+        XCTAssertEqual(restored.deleted, store.deleted)
+        XCTAssertTrue(restored.hasOnboarded)
     }
 }

@@ -60,16 +60,31 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.atlaspaces.keji.tests
         GENERATE_INFOPLIST_FILE: "YES"
+  KeJiUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: KeJiUITests
+    dependencies:
+      - target: KeJi
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.atlaspaces.keji.uitests
+        GENERATE_INFOPLIST_FILE: "YES"
 schemes:
   KeJi:
     build:
       targets:
         KeJi: all
         KeJiTests: [test]
+        KeJiUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
       gatherCoverageData: false
+      environmentVariables:
+        KEJI_OFFLINE: "1"
       targets:
         - KeJiTests
+        - KeJiUITests

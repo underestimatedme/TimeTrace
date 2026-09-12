@@ -30,7 +30,7 @@ final class AppEnvironment {
         self.options = options
         let store = AppStore()
         let router = AppRouter()
-        let stateStore = StateStore()
+        let stateStore = StateStore(fileName: options.uiTesting ? "keji-ui-testing-state.json" : StateStore.fileName)
         self.store = store
         self.router = router
         self.stateStore = stateStore

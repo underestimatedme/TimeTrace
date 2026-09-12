@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-/// Offline-first sync: local store is truth; dirty entities are pushed (debounced 2s) and the
+/// Offline-first sync: local store is truth; dirty entities are coalesced over 2s and the
 /// merged snapshot returned by the server is applied back, preserving in-flight dirty entities.
 @Observable @MainActor
 final class SyncEngine {
@@ -122,13 +122,14 @@ final class SyncEngine {
         }
     }
 
-    /// Debounced 2s after any `markDirty`.
+    /// Push 2s after the first pending change, even if more changes arrive.
     func schedulePush() {
-        guard enabled, store.hasOnboarded else { return }
-        pushTask?.cancel()
+        // Coalesce into one pending push. Continuous timer updates must not postpone it forever.
+        guard enabled, store.hasOnboarded, pushTask == nil else { return }
         pushTask = _Concurrency.Task { [weak self] in
             try? await _Concurrency.Task.sleep(nanoseconds: 2_000_000_000)
             guard !_Concurrency.Task.isCancelled else { return }
+            self?.pushTask = nil
             await self?.pushDirty()
         }
     }
@@ -149,11 +150,12 @@ final class SyncEngine {
         let sendSettings = store.settingsDirty
         let sendFocus = store.activeFocusDirty
         let sendTools = store.aiToolsDirty
+        let checkpoint = store.syncCheckpoint()
         let request = buildRequest(dirty: dirty, deleted: deleted, settings: sendSettings,
                                    activeFocus: sendFocus, aiTools: sendTools)
         do {
             let bootstrap = try await client.send(Endpoint.sync(request), as: Bootstrap.self)
-            store.clearDirty(dirty, deleted: deleted, settings: sendSettings, activeFocus: sendFocus, aiTools: sendTools)
+            store.acknowledge(checkpoint, settings: sendSettings, activeFocus: sendFocus, aiTools: sendTools)
             apply(bootstrap)
             status = .idle
             if store.hasPendingSync { schedulePush() }

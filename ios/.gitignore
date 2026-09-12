@@ -1,5 +1,5 @@
-KeJi.xcodeproj/
+qa-artifacts/
+.derived-data/
 DerivedData/
-*.xcuserstate
-xcuserdata/
-.DS_Store
+TestResults.xcresult/
+KeJi.xcodeproj/

@@ -11,7 +11,7 @@ struct AIExecutionView: View {
     var body: some View {
         SubPageScaffold(title: "AI 执行") {
             if let task = store.task(taskId) {
-                content(task, store.aiExecutions.first { $0.taskId == taskId })
+                content(task, store.aiExecutions.last { $0.taskId == taskId })
             } else {
                 MissingPlaceholder(text: "任务不存在")
             }
@@ -103,7 +103,10 @@ struct AIExecutionView: View {
             if status == .waitingAuth, execution != nil {
                 AppButton("授权继续", icon: "shield", variant: .accent, fullWidth: true) { store.authorizeAI(task.id) }
             }
-            if execution?.status == .completed || task.status == .waitingHuman {
+            if status == .waitingInput, execution != nil {
+                AppButton("继续执行", icon: "play", variant: .accent, fullWidth: true) { store.authorizeAI(task.id) }
+            }
+            if task.status == .waitingHuman {
                 HStack(spacing: 8) {
                     AppButton("审核完成", icon: "checkmark", variant: .accent, fullWidth: true) {
                         store.completeAIReview(task.id)

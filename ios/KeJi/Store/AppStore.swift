@@ -32,6 +32,41 @@ final class AppStore {
     private(set) var activeFocusDirty = false
     private(set) var aiToolsDirty = false
 
+    /// In-memory generations distinguish a sent value from edits made during its request.
+    @ObservationIgnored private var generation: UInt64 = 0
+    @ObservationIgnored private var entityGenerations: [SyncEntity: [String: UInt64]] = [:]
+    @ObservationIgnored private var settingsGeneration: UInt64 = 0
+    @ObservationIgnored private var focusGeneration: UInt64 = 0
+    @ObservationIgnored private var toolsGeneration: UInt64 = 0
+
+    struct SyncCheckpoint {
+        let dirty: [SyncEntity: Set<String>]
+        let deleted: [SyncEntity: Set<String>]
+        let entities: [SyncEntity: [String: UInt64]]
+        let settings: UInt64
+        let focus: UInt64
+        let tools: UInt64
+    }
+
+    func syncCheckpoint() -> SyncCheckpoint {
+        SyncCheckpoint(dirty: dirty, deleted: deleted, entities: entityGenerations,
+                       settings: settingsGeneration, focus: focusGeneration, tools: toolsGeneration)
+    }
+
+    func acknowledge(_ checkpoint: SyncCheckpoint, settings: Bool, activeFocus: Bool, aiTools: Bool) {
+        func unchanged(_ values: [SyncEntity: Set<String>]) -> [SyncEntity: Set<String>] {
+            values.reduce(into: [:]) { result, entry in
+                result[entry.key] = entry.value.filter {
+                    entityGenerations[entry.key]?[$0] == checkpoint.entities[entry.key]?[$0]
+                }
+            }
+        }
+        clearDirty(unchanged(checkpoint.dirty), deleted: unchanged(checkpoint.deleted),
+                   settings: settings && settingsGeneration == checkpoint.settings,
+                   activeFocus: activeFocus && focusGeneration == checkpoint.focus,
+                   aiTools: aiTools && toolsGeneration == checkpoint.tools)
+    }
+
     /// Called after every state mutation (persistence hook).
     @ObservationIgnored var onChange: (() -> Void)?
     /// Called whenever something becomes dirty (sync hook).
@@ -82,20 +117,24 @@ final class AppStore {
     func timeLabel(_ date: Date) -> String { Format.time(date) }
 
     func markDirty(_ entity: SyncEntity, _ id: String) {
+        generation &+= 1
+        entityGenerations[entity, default: [:]][id] = generation
         dirty[entity, default: []].insert(id)
         deleted[entity]?.remove(id)
         onDirty?()
     }
 
     func markDeleted(_ entity: SyncEntity, _ id: String) {
+        generation &+= 1
+        entityGenerations[entity, default: [:]][id] = generation
         dirty[entity]?.remove(id)
         deleted[entity, default: []].insert(id)
         onDirty?()
     }
 
-    func markSettingsDirty() { settingsDirty = true; onDirty?() }
-    func markActiveFocusDirty() { activeFocusDirty = true; onDirty?() }
-    func markAIToolsDirty() { aiToolsDirty = true; onDirty?() }
+    func markSettingsDirty() { generation &+= 1; settingsGeneration = generation; settingsDirty = true; onDirty?() }
+    func markActiveFocusDirty() { generation &+= 1; focusGeneration = generation; activeFocusDirty = true; onDirty?() }
+    func markAIToolsDirty() { generation &+= 1; toolsGeneration = generation; aiToolsDirty = true; onDirty?() }
 
     /// Finish a mutation: notify persistence.
     func commit() { onChange?() }

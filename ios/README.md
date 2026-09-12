@@ -51,6 +51,27 @@ xcrun simctl launch booted com.atlaspaces.keji --sample-data --screen today --of
 
 Sample ids: tasks `t1`…`t20` (`t2` is the running focus, `t3` the running AI execution, `t4` waiting review), projects `p1`…`p4`, goals `g1`…`g5`.
 
+## Automated functional QA
+
+```sh
+bash ios/scripts/run-qa.sh                         # from the repository root
+SIMULATOR_NAME='iPhone 16' bash ios/scripts/run-qa.sh
+```
+
+The scheme runs unit/HTTP-contract tests and `KeJiUITests` sequentially. UI coverage includes onboarding,
+task creation, focus pause/resume/completion, AI task routing/pause/resume/cancellation/review,
+all five tabs, project/goal/tool/account pages, four themes and persistence after relaunch.
+Screenshots are attached to the `.xcresult` and exported under the timestamped `ios/qa-artifacts/` directory.
+CI uploads `KeJi-test-results` even after test failures. Tests use offline mode;
+HTTP tests intercept URLSession requests locally and do not contact production.
+
+`--ui-testing` forces offline mode and selects `keji-ui-testing-state.json`, a separate persistence file.
+`KEJI_OFFLINE=1` disables networking for the unit-test host. Do not use `--sample-data` without
+`--ui-testing` when you want to preserve the simulator's normal app data.
+
+AI execution and tool connections remain simulations. Passing these tests does not verify real
+Claude/Codex integrations, SMS/email delivery, production account deletion, or multi-device sync.
+
 ## API base URL
 
 Resolution order: `--api-base-url` launch arg → `KEJI_API_BASE_URL` environment variable → `KEJI_API_BASE_URL` in Info.plist

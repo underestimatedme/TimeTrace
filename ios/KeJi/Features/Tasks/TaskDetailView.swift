@@ -24,7 +24,7 @@ struct TaskDetailView: View {
         let project = store.project(task.projectId)
         let goal = task.goalId.flatMap(store.goal)
         let breakdown = Stats.taskTimeBreakdown(store.timeSessions, taskId: task.id)
-        let aiExec = store.aiExecutions.first { $0.taskId == task.id }
+        let aiExec = store.aiExecutions.last { $0.taskId == task.id }
 
         VStack(alignment: .leading, spacing: 0) {
             Text(task.title).font(Typo.sans(Typo.lg, weight: .medium)).foregroundStyle(theme.text).padding(.bottom, 8)
@@ -70,8 +70,13 @@ struct TaskDetailView: View {
             }
             if TaskStatus.startable.contains(task.status) {
                 AppButton("开始执行", variant: .accent, fullWidth: true) {
-                    store.startFocus(task.id)
-                    router.push(.focus(task.id))
+                    if task.executorType == .ai {
+                        store.startAIExecution(task.id)
+                        router.push(.ai(task.id))
+                    } else {
+                        store.startFocus(task.id)
+                        router.push(.focus(task.id))
+                    }
                 }
             }
             if task.status == .aiRunning {

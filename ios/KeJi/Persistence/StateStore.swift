@@ -6,7 +6,7 @@ final class StateStore {
 
     let url: URL
 
-    init(url: URL? = nil) {
+    init(url: URL? = nil, fileName: String = StateStore.fileName) {
         if let url {
             self.url = url
         } else {
@@ -14,7 +14,7 @@ final class StateStore {
                 ?? FileManager.default.temporaryDirectory
             let dir = base.appendingPathComponent("KeJi", isDirectory: true)
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            self.url = dir.appendingPathComponent(StateStore.fileName)
+            self.url = dir.appendingPathComponent(fileName)
         }
     }
 

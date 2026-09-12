@@ -31,7 +31,17 @@ jobs:
           xcodebuild -project KeJi.xcodeproj -scheme KeJi \
             -destination 'platform=iOS Simulator,name=iPhone 16' \
             -derivedDataPath DerivedData \
+            -parallel-testing-enabled NO \
+            -resultBundlePath TestResults.xcresult \
             build test CODE_SIGNING_ALLOWED=NO | tail -200
+
+      - name: Upload test results and UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: KeJi-test-results
+          path: ios/TestResults.xcresult
+          if-no-files-found: warn
 
       - name: Zip app
         working-directory: ios

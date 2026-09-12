@@ -41,10 +41,31 @@ extension AppStore {
     }
 
     func setTaskStatus(_ id: String, _ status: TaskStatus) {
+        guard let task = task(id) else { return }
+        if status == .completed, task.status == .waitingHuman {
+            completeAIReview(id)
+            return
+        }
+        if status == .completed, activeFocus?.taskId == id {
+            completeFocus()
+            return
+        }
+        if TaskStatus.terminal.contains(status) {
+            let endedAt = Date()
+            if activeFocus?.taskId == id { pauseFocus() }
+            closeOpenSessions(at: endedAt) { $0.taskId == id }
+            for idx in aiExecutions.indices where aiExecutions[idx].taskId == id && aiExecutions[idx].endedAt == nil {
+                aiExecutions[idx].status = status == .completed ? .completed : (status == .failed ? .failed : .cancelled)
+                aiExecutions[idx].endedAt = endedAt
+                aiExecutions[idx].updatedAt = endedAt
+                markDirty(.aiExecutions, aiExecutions[idx].id)
+            }
+        }
         let at = Date()
         updateTask(id) { t in
             t.status = status
             if status == .completed { t.completedAt = at }
+            else { t.completedAt = nil }
         }
     }
 

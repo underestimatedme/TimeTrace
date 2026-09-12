@@ -1,0 +1,179 @@
+@import "tailwindcss";
+
+@theme {
+  --color-app-bg: #050506;
+  --color-bg: #0a0a0b;
+  --color-bg-elevated: #141416;
+  --color-bg-card: #1a1a1e;
+  --color-bg-hover: #222228;
+  --color-border: #2a2a30;
+  --color-text: #f5f0eb;
+  --color-text-secondary: #8a8580;
+  --color-text-muted: #5a5550;
+  --color-accent: #d4845a;
+  --color-accent-dim: #a86840;
+  --color-ai: #6b8cae;
+  --color-ai-dim: #4a6a8a;
+  --color-success: #5a8a6a;
+  --color-warning: #8a7a4a;
+  --color-danger: #8a5a5a;
+  --font-sans: "SF Pro Display", "PingFang SC", "Helvetica Neue", system-ui, sans-serif;
+  --font-mono: "SF Mono", "Menlo", monospace;
+}
+
+/* ── 主题：琥珀 · Claude（默认，暖色） ── */
+:root[data-theme="claude"] {
+  --color-app-bg: #050506;
+  --color-bg: #0a0a0b;
+  --color-bg-elevated: #141416;
+  --color-bg-card: #1a1a1e;
+  --color-bg-hover: #222228;
+  --color-border: #2a2a30;
+  --color-text: #f5f0eb;
+  --color-text-secondary: #8a8580;
+  --color-text-muted: #5a5550;
+  --color-accent: #d4845a;
+  --color-accent-dim: #a86840;
+  --color-ai: #6b8cae;
+  --color-ai-dim: #4a6a8a;
+  --color-success: #5a8a6a;
+  --color-warning: #8a7a4a;
+  --color-danger: #8a5a5a;
+}
+
+/* ── 主题：翠绿 · Codex（中性冷调 + OpenAI 绿） ── */
+:root[data-theme="codex"] {
+  --color-app-bg: #060707;
+  --color-bg: #0c0d0d;
+  --color-bg-elevated: #151717;
+  --color-bg-card: #1b1d1d;
+  --color-bg-hover: #232626;
+  --color-border: #2b2e2e;
+  --color-text: #ececec;
+  --color-text-secondary: #9a9e9c;
+  --color-text-muted: #5e6361;
+  --color-accent: #19c37d;
+  --color-accent-dim: #129768;
+  --color-ai: #54b5c4;
+  --color-ai-dim: #3a8794;
+  --color-success: #5a9a72;
+  --color-warning: #9a8744;
+  --color-danger: #b35c54;
+}
+
+/* ── 主题：靛蓝 · Cursor（冷调蓝 + 紫） ── */
+:root[data-theme="cursor"] {
+  --color-app-bg: #050608;
+  --color-bg: #0a0c11;
+  --color-bg-elevated: #121620;
+  --color-bg-card: #181d29;
+  --color-bg-hover: #212838;
+  --color-border: #2a3242;
+  --color-text: #eef2f8;
+  --color-text-secondary: #8b93a3;
+  --color-text-muted: #555d6d;
+  --color-accent: #5b8dff;
+  --color-accent-dim: #3f6ad1;
+  --color-ai: #b08cff;
+  --color-ai-dim: #8a64d8;
+  --color-success: #4f9d7a;
+  --color-warning: #c2a24a;
+  --color-danger: #d06464;
+}
+
+/* ── 主题：晨光 · Light（暖白纸张，日间） ── */
+:root[data-theme="light"] {
+  --color-app-bg: #e6e2da;
+  --color-bg: #f5f2ec;
+  --color-bg-elevated: #fbf9f4;
+  --color-bg-card: #ffffff;
+  --color-bg-hover: #efece4;
+  --color-border: #e0dcd2;
+  --color-text: #2a2622;
+  --color-text-secondary: #6b655d;
+  --color-text-muted: #9a948b;
+  --color-accent: #c2643a;
+  --color-accent-dim: #a8512c;
+  --color-ai: #4a6fa0;
+  --color-ai-dim: #385780;
+  --color-success: #3f7a54;
+  --color-warning: #9a7a30;
+  --color-danger: #b04a4a;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-app-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.3s ease;
+}
+
+#root {
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.app-shell {
+  width: 100%;
+  max-width: 430px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--color-bg);
+  position: relative;
+  overflow: hidden;
+}
+
+.scroll-area {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.scroll-area::-webkit-scrollbar {
+  width: 0;
+}
+
+.pt-safe {
+  padding-top: max(1rem, env(safe-area-inset-top));
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.animate-pulse-soft {
+  animation: pulse-soft 2s ease-in-out infinite;
+}
+
+@keyframes progress {
+  from { width: 0%; }
+}
+
+.time-tick {
+  background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
+  height: 1px;
+  opacity: 0.3;
+}

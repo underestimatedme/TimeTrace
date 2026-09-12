@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 DEFAULTS: Dict[str, Any] = {
+	"cloud_base_url": "https://apis.atlaspaces.com/timetrace/api/v1",
     "interval_sec": 30,
     "jitter_sec": 300,
     "default_block_sleep_sec": 3600,

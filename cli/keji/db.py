@@ -64,6 +64,34 @@ CREATE TABLE IF NOT EXISTS event (
     at        INTEGER NOT NULL,
     payload   TEXT
 );
+CREATE TABLE IF NOT EXISTS remote_workspace (
+    id             TEXT PRIMARY KEY,
+    name           TEXT NOT NULL,
+    path           TEXT NOT NULL UNIQUE,
+    default_branch TEXT NOT NULL,
+    updated_at     INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS remote_claim (
+    job_id       TEXT PRIMARY KEY,
+    attempt_id   TEXT NOT NULL,
+    lease_epoch  INTEGER NOT NULL,
+    workspace_id TEXT NOT NULL,
+    tool_id      TEXT NOT NULL,
+    prompt       TEXT NOT NULL,
+    state        TEXT NOT NULL,
+    updated_at   INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS remote_outbox (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id      TEXT NOT NULL,
+    attempt_id  TEXT NOT NULL,
+    lease_epoch INTEGER NOT NULL,
+    seq         INTEGER NOT NULL,
+    payload     TEXT NOT NULL,
+    sent_at     INTEGER,
+    created_at  INTEGER NOT NULL,
+    UNIQUE(job_id, attempt_id, seq)
+);
 """
 
 
@@ -83,6 +111,65 @@ class Database:
 
     def close(self) -> None:
         self.conn.close()
+
+    # ---- remote runner ---------------------------------------------------
+    def upsert_workspace(self, workspace_id: str, name: str, path: str, default_branch: str,
+                         now: Optional[int] = None) -> None:
+        self.conn.execute(
+            "INSERT INTO remote_workspace (id,name,path,default_branch,updated_at) VALUES (?,?,?,?,?)"
+            " ON CONFLICT(id) DO UPDATE SET name=excluded.name,path=excluded.path,"
+            " default_branch=excluded.default_branch,updated_at=excluded.updated_at",
+            (workspace_id, name, str(Path(path).resolve()), default_branch, now or _now()),
+        )
+
+    def get_workspace(self, workspace_id: str) -> Optional[Dict[str, Any]]:
+        row = self.conn.execute("SELECT * FROM remote_workspace WHERE id=?", (workspace_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_workspaces(self) -> List[Dict[str, Any]]:
+        return [dict(row) for row in self.conn.execute("SELECT * FROM remote_workspace ORDER BY name").fetchall()]
+
+    def remove_workspace(self, workspace_id: str) -> None:
+        self.conn.execute("DELETE FROM remote_workspace WHERE id=?", (workspace_id,))
+
+    def save_remote_claim(self, claim: Dict[str, Any], state: str = "claimed", now: Optional[int] = None) -> None:
+        job = claim["job"]
+        self.conn.execute(
+            "INSERT INTO remote_claim (job_id,attempt_id,lease_epoch,workspace_id,tool_id,prompt,state,updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at",
+            (job["id"], claim["attempt_id"], claim["lease_epoch"], job["workspace_id"],
+             job["tool_profile_id"], job["prompt"], state, now or _now()),
+        )
+
+    def update_remote_claim(self, job_id: str, state: str, now: Optional[int] = None) -> None:
+        self.conn.execute("UPDATE remote_claim SET state=?,updated_at=? WHERE job_id=?", (state, now or _now(), job_id))
+
+    def get_remote_claim(self, job_id: str) -> Optional[Dict[str, Any]]:
+        row = self.conn.execute("SELECT * FROM remote_claim WHERE job_id=?", (job_id,)).fetchone()
+        return dict(row) if row else None
+
+    def queue_remote_event(self, job_id: str, attempt_id: str, lease_epoch: int,
+                           event: Dict[str, Any], now: Optional[int] = None) -> None:
+        self.conn.execute(
+            "INSERT OR IGNORE INTO remote_outbox (job_id,attempt_id,lease_epoch,seq,payload,created_at)"
+            " VALUES (?,?,?,?,?,?)",
+            (job_id, attempt_id, lease_epoch, int(event["seq"]),
+             json.dumps(event, ensure_ascii=False, sort_keys=True), now or _now()),
+        )
+
+    def pending_remote_events(self) -> List[Dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT * FROM remote_outbox WHERE sent_at IS NULL ORDER BY job_id,attempt_id,seq"
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["payload"] = json.loads(item["payload"])
+            result.append(item)
+        return result
+
+    def mark_remote_event_sent(self, event_id: int, now: Optional[int] = None) -> None:
+        self.conn.execute("UPDATE remote_outbox SET sent_at=? WHERE id=?", (now or _now(), event_id))
 
     # ---- task -------------------------------------------------------------
     def add_task(

@@ -8,6 +8,20 @@
 
 零依赖，Python 3.9+ 标准库。
 
+## 手机远程派发（Valley Runner）
+
+Claude/Codex 的登录凭据不会上传：iPhone 只把任务发给 Valley，本机 `keji agent` 通过出站 HTTPS 领取任务，再调用当前 macOS 用户已经登录的 CLI。
+
+```sh
+keji cloud login                    # 显示 8 位码，在 iPhone「AI 工具管理」批准
+keji workspace add ~/code/TimeTrace # 只显式开放这个仓库
+keji agent doctor                   # 检查配对、CLI 和工作区
+keji agent run --once               # 联调一轮
+keji agent install                  # 安装并启动登录用户的 LaunchAgent
+```
+
+Runner refresh token 存在 macOS 登录 Keychain（service `com.atlaspaces.keji.runner`）；access token 15 分钟轮换。每个远程任务仍进入独立 worktree，且 push 被禁用。电脑关机、休眠或未登录时，Valley 只保留排队任务，不会在云端接管本地代码或账号。
+
 ## 安装
 
 ```sh
@@ -49,6 +63,7 @@ tail -f ~/.keji/daemon.log
 
 ```json
 {
+  "cloud_base_url": "https://apis.atlaspaces.com/timetrace/api/v1",
   "interval_sec": 30,
   "jitter_sec": 300,
   "default_block_sleep_sec": 3600,

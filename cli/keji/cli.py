@@ -1,13 +1,20 @@
 """argparse front-end. Every subcommand is a thin wrapper over the modules."""
 import argparse
+import hashlib
 import json
 import os
+import platform
+import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from keji import __version__, config, limits, render, scheduler, worktree
+from keji.agent import Agent
+from keji.cloud import CloudClient
+from keji.credentials import CredentialStore, SessionManager
 from keji.db import Database
 from keji.models import (BLOCKED, CODEX, EV_SAMPLE_FAILURE, FAILED, RUNNABLE, RUNNING, TOOLS,
                          Sample)
@@ -28,6 +35,130 @@ def _adapters(cfg: Dict[str, Any]):
 
 def _log(msg: str) -> None:
     print(time.strftime("%H:%M:%S"), msg, flush=True)
+
+
+def _cloud(cfg: Dict[str, Any]) -> CloudClient:
+    return CloudClient(str(cfg["cloud_base_url"]))
+
+
+def cmd_cloud_login(args: argparse.Namespace) -> int:
+    _, cfg, _ = _open(args)
+    cloud = _cloud(cfg)
+    auth = cloud.create_device_authorization(platform.node() or "Mac", "darwin", __version__)
+    print("在刻迹 iPhone App 的「AI 工具 → 绑定电脑」中输入：%s" % auth["user_code"])
+    print("授权码 %d 分钟内有效，正在等待确认…" % max(1, int(auth["expires_in"]) // 60))
+    deadline = time.time() + int(auth["expires_in"])
+    while time.time() < deadline:
+        approval = cloud.poll_device_authorization(auth["device_code"])
+        if approval.get("status") == "approved":
+            credentials = cloud.activate(auth["device_code"], approval["activation_code"])
+            credentials["expires_at"] = int(time.time()) + int(credentials.get("expires_in") or 900)
+            CredentialStore().save(credentials)
+            print("已绑定：%s" % credentials["runner"]["name"])
+            return 0
+        if approval.get("status") == "expired":
+            break
+        time.sleep(max(1, int(auth.get("interval") or 5)))
+    print("配对已过期，请重新运行命令", file=sys.stderr)
+    return 1
+
+
+def cmd_cloud_status(args: argparse.Namespace) -> int:
+    credentials = CredentialStore().load()
+    if not credentials:
+        print("未绑定；运行 `keji cloud login`")
+        return 1
+    runner = credentials.get("runner") or {}
+    print("已绑定 %s (%s)" % (runner.get("name", "Mac"), runner.get("id", "unknown")))
+    return 0
+
+
+def cmd_cloud_logout(args: argparse.Namespace) -> int:
+    CredentialStore().delete()
+    print("本机 Runner 凭据已从 Keychain 删除")
+    return 0
+
+
+def _workspace_id(path: str) -> str:
+    return hashlib.sha256(path.encode("utf-8")).hexdigest()[:24]
+
+
+def cmd_workspace_add(args: argparse.Namespace) -> int:
+    _, _, db = _open(args)
+    path = str(Path(args.path).expanduser().resolve())
+    if not worktree.is_git_repo(path):
+        print("error: workspace must be a git repository", file=sys.stderr)
+        return 2
+    branch = subprocess.run(["git", "branch", "--show-current"], cwd=path, check=True,
+                            capture_output=True, text=True).stdout.strip() or "HEAD"
+    workspace_id = args.id or _workspace_id(path)
+    db.upsert_workspace(workspace_id, args.name or Path(path).name, path, branch)
+    print("workspace %s added: %s" % (workspace_id, path))
+    return 0
+
+
+def cmd_workspace_list(args: argparse.Namespace) -> int:
+    _, _, db = _open(args)
+    rows = db.list_workspaces()
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+    elif not rows:
+        print("no workspaces")
+    else:
+        for row in rows:
+            print("%s  %s  %s" % (row["id"], row["name"], row["path"]))
+    return 0
+
+
+def cmd_workspace_remove(args: argparse.Namespace) -> int:
+    _, _, db = _open(args)
+    db.remove_workspace(args.id)
+    print("workspace %s removed" % args.id)
+    return 0
+
+
+def cmd_agent_run(args: argparse.Namespace) -> int:
+    home, cfg, db = _open(args)
+    cloud = _cloud(cfg)
+    sessions = SessionManager(CredentialStore(), cloud)
+    adapters = _adapters(cfg)
+    agent = Agent(db, cloud, adapters, home, sessions.token)
+    inventory = [{"id": row["id"], "name": row["name"], "default_branch": row["default_branch"]}
+                 for row in db.list_workspaces()]
+    tools = [{"id": name + "-default", "provider": name, "version": "local",
+              "status": "available" if shutil.which(str(cfg.get(name, {}).get("bin", name))) else "unavailable"}
+             for name in adapters]
+    cloud.update_inventory(sessions.token(), inventory, tools)
+    if args.once:
+        print(agent.run_once())
+        return 0
+    agent.run_forever(args.interval)
+    return 0
+
+
+def cmd_agent_doctor(args: argparse.Namespace) -> int:
+    home, cfg, db = _open(args)
+    paired = CredentialStore().load() is not None
+    print("Valley: %s" % cfg["cloud_base_url"])
+    print("配对: %s" % ("已完成" if paired else "未完成"))
+    print("工作区: %d" % len(db.list_workspaces()))
+    for name in TOOLS:
+        binary = str(cfg.get(name, {}).get("bin", name))
+        print("%s: %s" % (name, shutil.which(binary) or "未找到"))
+    return 0 if paired and db.list_workspaces() else 1
+
+
+def cmd_agent_install(args: argparse.Namespace) -> int:
+    template = Path(__file__).resolve().parents[1] / "launchd" / "com.keji.run.plist"
+    destination = Path.home() / "Library" / "LaunchAgents" / "com.keji.run.plist"
+    keji_bin = Path(__file__).resolve().parents[1] / "bin" / "keji"
+    rendered = template.read_text(encoding="utf-8").replace("__KEJI_BIN__", str(keji_bin)).replace("__HOME__", str(Path.home()))
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(rendered, encoding="utf-8")
+    subprocess.run(["launchctl", "unload", str(destination)], check=False, capture_output=True)
+    subprocess.run(["launchctl", "load", str(destination)], check=True)
+    print("Runner 已安装并启动：%s" % destination)
+    return 0
 
 
 # ---- commands -----------------------------------------------------------------
@@ -317,6 +448,35 @@ def build_parser() -> argparse.ArgumentParser:
     sl.add_argument("--install", action="store_true",
                     help="register this command in ~/.claude/settings.json")
     sl.set_defaults(fn=cmd_statusline)
+
+    cloud = sub.add_parser("cloud", help="bind this Mac to a KeJi account")
+    cloud_sub = cloud.add_subparsers(dest="cloud_cmd", required=True)
+    cloud_sub.add_parser("login", help="pair this computer").set_defaults(fn=cmd_cloud_login)
+    cloud_sub.add_parser("status", help="show pairing status").set_defaults(fn=cmd_cloud_status)
+    cloud_sub.add_parser("logout", help="remove local runner credentials").set_defaults(fn=cmd_cloud_logout)
+
+    workspace = sub.add_parser("workspace", help="manage repositories exposed to remote tasks")
+    workspace_sub = workspace.add_subparsers(dest="workspace_cmd", required=True)
+    wa = workspace_sub.add_parser("add")
+    wa.add_argument("path")
+    wa.add_argument("--id")
+    wa.add_argument("--name")
+    wa.set_defaults(fn=cmd_workspace_add)
+    wl = workspace_sub.add_parser("list")
+    wl.add_argument("--json", action="store_true")
+    wl.set_defaults(fn=cmd_workspace_list)
+    wr = workspace_sub.add_parser("remove")
+    wr.add_argument("id")
+    wr.set_defaults(fn=cmd_workspace_remove)
+
+    agent = sub.add_parser("agent", help="run the Valley-connected local executor")
+    agent_sub = agent.add_subparsers(dest="agent_cmd", required=True)
+    ar = agent_sub.add_parser("run")
+    ar.add_argument("--once", action="store_true")
+    ar.add_argument("--interval", type=int, default=5)
+    ar.set_defaults(fn=cmd_agent_run)
+    agent_sub.add_parser("doctor", help="check pairing, tools and workspaces").set_defaults(fn=cmd_agent_doctor)
+    agent_sub.add_parser("install", help="install the macOS LaunchAgent").set_defaults(fn=cmd_agent_install)
     return p
 
 

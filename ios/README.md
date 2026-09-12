@@ -36,7 +36,7 @@ Run from Xcode (`open KeJi.xcodeproj`) or install on a booted simulator:
 ```sh
 UDID=$(xcrun simctl list devices booted -j | python3 -c 'import json,sys;print(json.load(sys.stdin)["devices"].__iter__().__next__())')
 xcrun simctl install booted <DerivedData>/Build/Products/Debug-iphonesimulator/KeJi.app
-xcrun simctl launch booted com.atlaspaces.keji --sample-data --screen today --offline
+xcrun simctl launch booted com.atlaspaces.timetrace --sample-data --screen today --offline
 ```
 
 ## Launch arguments (debug hooks)

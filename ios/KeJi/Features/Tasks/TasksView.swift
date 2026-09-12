@@ -5,6 +5,7 @@ struct TasksView: View {
     @Environment(\.theme) private var theme
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
+    @Environment(AppEnvironment.self) private var appEnv
 
     enum Filter: String, CaseIterable {
         case all, pending, human, ai, waiting, completed
@@ -97,14 +98,14 @@ struct TasksView: View {
 
     private func taskMenu(_ task: TaskItem) -> some View {
         Menu {
-            if TaskStatus.startable.contains(task.status) {
+            if TaskStatus.startable.contains(task.status) && (task.executorType != .ai || appEnv.options.offline) {
                 Button { handle(task, .start) } label: { Label("开始", systemImage: "play") }
             }
             if task.status == .humanRunning {
                 Button { handle(task, .pause) } label: { Label("暂停", systemImage: "pause") }
             }
             Button { handle(task, .complete) } label: { Label("完成", systemImage: "checkmark") }
-            if task.executorType == .human {
+            if task.executorType == .human && appEnv.options.offline {
                 Button { handle(task, .delegate) } label: { Label("委派给 AI", systemImage: "cpu") }
             }
             Button(role: .destructive) { handle(task, .delete) } label: { Label("删除", systemImage: "trash") }

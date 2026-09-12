@@ -1,5 +1,6 @@
 """argparse front-end. Every subcommand is a thin wrapper over the modules."""
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -39,6 +40,16 @@ def _log(msg: str) -> None:
 
 def _cloud(cfg: Dict[str, Any]) -> CloudClient:
     return CloudClient(str(cfg["cloud_base_url"]))
+
+
+def _acquire_execution_lock(home: Path):
+    lock_file = open(home / "agent.lock", "a+")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock_file.close()
+        return None
+    return lock_file
 
 
 def cmd_cloud_login(args: argparse.Namespace) -> int:
@@ -119,6 +130,10 @@ def cmd_workspace_remove(args: argparse.Namespace) -> int:
 
 def cmd_agent_run(args: argparse.Namespace) -> int:
     home, cfg, db = _open(args)
+    lock_file = _acquire_execution_lock(home)
+    if lock_file is None:
+        print("error: another keji agent is already running", file=sys.stderr)
+        return 1
     cloud = _cloud(cfg)
     sessions = SessionManager(CredentialStore(), cloud)
     adapters = _adapters(cfg)
@@ -218,6 +233,10 @@ def cmd_ls(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     home, cfg, db = _open(args)
+    lock_file = _acquire_execution_lock(home)
+    if lock_file is None:
+        print("error: another keji agent is already running", file=sys.stderr)
+        return 1
     adapters = _adapters(cfg)
     interval = args.interval or int(cfg.get("interval_sec", 30))
     _log("keji %s daemon, home=%s, interval=%ss%s" % (

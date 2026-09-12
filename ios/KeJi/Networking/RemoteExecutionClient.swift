@@ -27,12 +27,17 @@ final class RemoteExecutionClient {
         await loadRunners()
     }
 
+    func inspect(code: String) async throws -> DeviceAuthorizationInspection {
+        try await client.send(Endpoint.inspectRunner(code: code.uppercased()), as: DeviceAuthorizationInspection.self)
+    }
+
     func dispatch(task: TaskItem, runner: RunnerInventory, workspace: RunnerWorkspace,
                   tool: RunnerTool) async throws -> RemoteJob {
         let request = RemoteJobRequest(
             taskId: task.id, runnerId: runner.runner.id, workspaceId: workspace.id,
             toolProfileId: tool.id, prompt: task.description.isEmpty ? task.title : task.description,
-            idempotencyKey: "ios-\(task.id)-\(runner.runner.id)-\(workspace.id)-\(tool.id)")
+            idempotencyKey: "ios-\(task.id)-\(runner.runner.id)-\(workspace.id)-\(tool.id)",
+            expectedTaskRevision: Int64(task.updatedAt.timeIntervalSince1970 * 1000))
         let job = try await client.send(Endpoint.createRemoteJob(request), as: RemoteJob.self)
         jobsByTask[task.id] = job
         return job
@@ -50,5 +55,17 @@ final class RemoteExecutionClient {
         let job = try await client.send(Endpoint.remoteJob(id: jobID), as: RemoteJob.self)
         jobsByTask[job.taskId] = job
         return job
+    }
+
+    func cancel(jobID: String) async throws {
+        guard let job = jobsByTask.values.first(where: { $0.id == jobID }) else { throw APIError.decoding(NSError(domain: "RemoteJob", code: 1)) }
+        _ = try await client.send(Endpoint.remoteJobCommand(id: jobID, action: "cancel", expectedRevision: job.revision,
+                                                             idempotencyKey: "cancel-\(job.id)-\(job.revision)"), as: RemoteCommandResponse.self)
+    }
+
+    func completeReview(jobID: String) async throws {
+        guard let job = jobsByTask.values.first(where: { $0.id == jobID }) else { throw APIError.decoding(NSError(domain: "RemoteJob", code: 2)) }
+        _ = try await client.send(Endpoint.remoteJobCommand(id: jobID, action: "complete_review", expectedRevision: job.revision,
+                                                             idempotencyKey: "review-\(job.id)-\(job.revision)"), as: RemoteCommandResponse.self)
     }
 }

@@ -18,15 +18,14 @@ extension AppStore {
     func startRemoteAIExecution(_ taskId: String, job: RemoteJob, provider: AIProvider) {
         guard let task = task(taskId), !TaskStatus.terminal.contains(task.status) else { return }
         let at = Date()
-        withTask(taskId, at: at) { $0.status = .aiQueued }
+        updateRemoteTask(taskId, at: at) { $0.status = .aiQueued }
         let execution = AIExecution(
-            id: AppStore.generateId(), taskId: taskId, provider: provider, model: "本机 \(provider.label)",
+            id: job.id, taskId: taskId, provider: provider, model: "本机 \(provider.label)",
             status: .queued, startedAt: at, activeSeconds: 0, elapsedSeconds: 0, waitingHumanSeconds: 0,
             tokenInput: 0, tokenOutput: 0, estimatedCost: 0, toolCallCount: 0, filesChanged: 0,
             remoteJobId: job.id, logs: [AIExecutionLog(time: timeLabel(at), message: "已提交至 Valley，等待电脑领取")],
             currentStep: job.status.label, updatedAt: at)
         aiExecutions.append(execution)
-        markDirty(.aiExecutions, execution.id)
         commit()
     }
 
@@ -39,37 +38,50 @@ extension AppStore {
         switch job.status {
         case .queued, .leased:
             aiExecutions[idx].status = .queued
-            withTask(job.taskId, at: job.updatedAt) { $0.status = .aiQueued }
+            updateRemoteTask(job.taskId, at: job.updatedAt) { $0.status = .aiQueued }
         case .running:
             aiExecutions[idx].status = .running
-            withTask(job.taskId, at: job.updatedAt) { $0.status = .aiRunning }
+            updateRemoteTask(job.taskId, at: job.updatedAt) { $0.status = .aiRunning }
         case .waitingLocalAuth:
             aiExecutions[idx].status = .waitingAuth
-            withTask(job.taskId, at: job.updatedAt) { $0.status = .paused }
+            updateRemoteTask(job.taskId, at: job.updatedAt) { $0.status = .paused }
         case .waitingInput, .waitingQuota:
             aiExecutions[idx].status = .waitingInput
-            withTask(job.taskId, at: job.updatedAt) { $0.status = .paused }
+            updateRemoteTask(job.taskId, at: job.updatedAt) { $0.status = .paused }
         case .awaitingReview:
             aiExecutions[idx].status = .completed
             aiExecutions[idx].endedAt = job.updatedAt
-            withTask(job.taskId, at: job.updatedAt) { task in
+            updateRemoteTask(job.taskId, at: job.updatedAt) { task in
                 task.status = .waitingHuman
                 task.resultSummary = job.resultSummary
             }
-        case .failed, .expired:
+        case .completed:
+            aiExecutions[idx].status = .completed
+            aiExecutions[idx].endedAt = job.updatedAt
+            updateRemoteTask(job.taskId, at: job.updatedAt) { task in
+                task.status = .completed
+                task.completedAt = job.updatedAt
+                task.resultSummary = job.resultSummary
+            }
+        case .failed, .expired, .interrupted:
             aiExecutions[idx].status = .failed
             aiExecutions[idx].endedAt = job.updatedAt
-            withTask(job.taskId, at: job.updatedAt) { $0.status = .failed }
+            updateRemoteTask(job.taskId, at: job.updatedAt) { $0.status = .failed }
         case .cancelled:
             aiExecutions[idx].status = .cancelled
             aiExecutions[idx].endedAt = job.updatedAt
-            withTask(job.taskId, at: job.updatedAt) { $0.status = .cancelled }
+            updateRemoteTask(job.taskId, at: job.updatedAt) { $0.status = .cancelled }
         }
         if oldStatus != aiExecutions[idx].currentStep {
             aiExecutions[idx].logs.append(AIExecutionLog(time: timeLabel(job.updatedAt), message: job.status.label))
         }
-        markDirty(.aiExecutions, aiExecutions[idx].id)
         commit()
+    }
+
+    private func updateRemoteTask(_ id: String, at: Date, _ updates: (inout TaskItem) -> Void) {
+        guard let idx = tasks.firstIndex(where: { $0.id == id }) else { return }
+        updates(&tasks[idx])
+        tasks[idx].updatedAt = at
     }
 
     func startAIExecution(_ taskId: String) {

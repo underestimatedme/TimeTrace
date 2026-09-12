@@ -17,4 +17,12 @@ final class RemoteExecutionTests: XCTestCase {
         XCTAssertEqual(job.resultSummary, "tests passed")
         XCTAssertNil(job.prompt)
     }
+
+    func testDispatchIncludesExpectedTaskRevision() throws {
+        let request = RemoteJobRequest(taskId: "t1", runnerId: "r1", workspaceId: "w1",
+                                       toolProfileId: "codex-default", prompt: "work",
+                                       idempotencyKey: "once", expectedTaskRevision: 1_780_000_000_123)
+        let object = try JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(request)) as? [String: Any]
+        XCTAssertEqual((object?["expected_task_revision"] as? NSNumber)?.int64Value, 1_780_000_000_123)
+    }
 }

@@ -55,8 +55,10 @@ class CloudClient:
             "device_code": device_code, "activation_code": activation_code,
         })
 
-    def refresh(self, refresh_token: str) -> Dict[str, Any]:
-        return self.request("POST", "/runner/session/refresh", {"refresh_token": refresh_token})
+    def refresh(self, refresh_token: str, idempotency_key: str) -> Dict[str, Any]:
+        return self.request("POST", "/runner-auth/refresh", {
+            "refresh_token": refresh_token, "idempotency_key": idempotency_key,
+        })
 
     def update_inventory(self, token: str, workspaces: list, tools: list) -> Dict[str, Any]:
         return self.request("PUT", "/runner/inventory", {"workspaces": workspaces, "tools": tools}, token)
@@ -65,6 +67,11 @@ class CloudClient:
         return self.request("POST", "/runner/jobs/claim", {"wait_seconds": 0}, token)
 
     def append_events(self, token: str, job_id: str, attempt_id: str, epoch: int, events: list) -> Dict[str, Any]:
-        return self.request("POST", "/runner/jobs/%s/events" % job_id, {
-            "attempt_id": attempt_id, "lease_epoch": epoch, "events": events,
+        return self.request("POST", "/runner/attempts/%s/events" % attempt_id, {
+			"job_id": job_id, "lease_epoch": epoch, "events": events,
+        }, token)
+
+    def renew(self, token: str, attempt_id: str, epoch: int) -> Dict[str, Any]:
+        return self.request("POST", "/runner/attempts/%s/renew" % attempt_id, {
+            "lease_epoch": epoch,
         }, token)

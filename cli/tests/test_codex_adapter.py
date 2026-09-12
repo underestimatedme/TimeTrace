@@ -91,7 +91,7 @@ class AdapterBlockedResetTest(unittest.TestCase):
     def test_blocked_run_pulls_reset_from_live_limits(self):
         ad = codex.CodexAdapter({"bin": "codex"})
         ad.read_limits = lambda: [Sample("codex:codex:primary", "codex", 100, reset_at=999)]
-        codex.run_streaming = lambda cmd, cwd, log: (1, load_lines("codex_exec_blocked.jsonl"))
+        codex.run_streaming = lambda cmd, cwd, log, **kwargs: (1, load_lines("codex_exec_blocked.jsonl"))
         try:
             res = ad.start("x", "/wt", "sid", "/dev/null")
         finally:

@@ -14,13 +14,16 @@ class CredentialTest(unittest.TestCase):
         calls = []
 
         def run(command, **kwargs):
-            calls.append(command)
+            calls.append((command, kwargs))
             return Result()
 
         CredentialStore(run).save({"access_token": "access", "refresh_token": "refresh", "runner": {"id": "r1"}})
-        self.assertEqual(calls[0][0], "security")
-        self.assertEqual(calls[0][calls[0].index("-a") + 1], "default")
-        self.assertNotIn("refresh", calls[0][calls[0].index("-a") + 1])
+        command, kwargs = calls[0]
+        self.assertEqual(command[0], "security")
+        self.assertEqual(command[command.index("-a") + 1], "default")
+        self.assertNotIn("refresh", " ".join(command))
+        self.assertIn("refresh", kwargs["input"])
+        self.assertNotIn("access", kwargs["input"])
 
     def test_session_manager_refreshes_expiring_access_token(self):
         class Store:
@@ -29,14 +32,15 @@ class CredentialTest(unittest.TestCase):
             def load(self): return self.value
             def save(self, value): self.value = value
         class Cloud:
-            def refresh(self, token):
+            def refresh(self, token, request_key):
                 self.token = token
+                self.request_key = request_key
                 return {"access_token": "new", "refresh_token": "r2", "expires_in": 900}
         store, cloud = Store(), Cloud()
         manager = SessionManager(store, cloud, clock=lambda: 100)
         self.assertEqual(manager.token(), "new")
         self.assertEqual(cloud.token, "r")
-        self.assertEqual(store.value["expires_at"], 1000)
+        self.assertEqual(store.value["refresh_token"], "r2")
 
 
 if __name__ == "__main__":

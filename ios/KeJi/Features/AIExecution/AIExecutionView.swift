@@ -8,6 +8,8 @@ struct AIExecutionView: View {
     @Environment(RemoteExecutionClient.self) private var remote
     let taskId: String
     @State private var pulse = false
+    @State private var commandMessage: String?
+    @State private var commandError: String?
 
     var body: some View {
         SubPageScaffold(title: "AI 执行") {
@@ -20,16 +22,6 @@ struct AIExecutionView: View {
         .onAppear { pulse = true }
         .task(id: store.aiExecutions.last { $0.taskId == taskId }?.remoteJobId) {
             await pollRemoteJob()
-        }
-        .task(id: store.aiExecutions.last { $0.taskId == taskId }?.remoteJobId) {
-            guard let jobID = store.aiExecutions.last(where: { $0.taskId == taskId })?.remoteJobId else { return }
-            while !_Concurrency.Task.isCancelled {
-                if let job = try? await remote.refresh(jobID: jobID) {
-                    store.applyRemoteJob(job)
-                    if [.awaitingReview, .failed, .cancelled, .expired].contains(job.status) { return }
-                }
-                try? await _Concurrency.Task.sleep(nanoseconds: 3_000_000_000)
-            }
         }
     }
 
@@ -47,7 +39,7 @@ struct AIExecutionView: View {
             do {
                 let job = try await remote.refresh(jobID: jobID)
                 store.applyRemoteJob(job)
-                if [.awaitingReview, .failed, .cancelled, .expired].contains(job.status) { return }
+                if [.awaitingReview, .completed, .failed, .cancelled, .expired, .interrupted].contains(job.status) { return }
             } catch {
                 try? await _Concurrency.Task.sleep(nanoseconds: 5_000_000_000)
                 continue
@@ -120,7 +112,7 @@ struct AIExecutionView: View {
         }
 
         VStack(spacing: 8) {
-            if status == .running, execution != nil {
+            if status == .running, execution != nil, execution?.remoteJobId == nil {
                 HStack(spacing: 8) {
                     AppButton("暂停", icon: "pause", variant: .secondary, fullWidth: true) { store.pauseAIExecution(task.id) }
                     AppButton("取消", icon: "xmark", variant: .danger, fullWidth: true) {
@@ -129,17 +121,35 @@ struct AIExecutionView: View {
                     }
                 }
             }
-            if status == .waitingAuth, execution != nil {
+            if [.queued, .running].contains(status), let jobID = execution?.remoteJobId {
+                AppButton(commandMessage ?? "取消远程任务", icon: "xmark", variant: .danger,
+                          fullWidth: true, disabled: commandMessage != nil) {
+                    commandMessage = "等待电脑确认取消…"
+                    _Concurrency.Task {
+                        do { try await remote.cancel(jobID: jobID) }
+                        catch { commandMessage = nil; commandError = "取消请求失败，请重试" }
+                    }
+                }
+            }
+            if let commandError { Text(commandError).font(Typo.sans(Typo.xs)).foregroundStyle(theme.danger) }
+            if status == .waitingAuth, execution?.remoteJobId == nil {
                 AppButton("授权继续", icon: "shield", variant: .accent, fullWidth: true) { store.authorizeAI(task.id) }
             }
-            if status == .waitingInput, execution != nil {
+            if status == .waitingInput, execution?.remoteJobId == nil {
                 AppButton("继续执行", icon: "play", variant: .accent, fullWidth: true) { store.authorizeAI(task.id) }
             }
             if task.status == .waitingHuman {
                 HStack(spacing: 8) {
                     AppButton("审核完成", icon: "checkmark", variant: .accent, fullWidth: true) {
-                        store.completeAIReview(task.id)
-                        router.go(.today)
+                        if let jobID = execution?.remoteJobId {
+                            _Concurrency.Task {
+                                do { try await remote.completeReview(jobID: jobID); _ = try await remote.refresh(jobID: jobID); router.go(.today) }
+                                catch { commandError = "审核状态提交失败，请重试" }
+                            }
+                        } else {
+                            store.completeAIReview(task.id)
+                            router.go(.today)
+                        }
                     }
                     AppButton("查看详情", icon: "eye", variant: .secondary, fullWidth: true) { router.push(.taskDetail(task.id)) }
                 }

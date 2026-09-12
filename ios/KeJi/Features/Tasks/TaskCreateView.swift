@@ -7,6 +7,7 @@ struct TaskCreateView: View {
     @Environment(AppRouter.self) private var router
     @Environment(RemoteExecutionClient.self) private var remote
     @Environment(AppEnvironment.self) private var appEnv
+    @Environment(SyncEngine.self) private var sync
 
     enum SaveAction { case save, start, schedule }
 
@@ -174,12 +175,16 @@ struct TaskCreateView: View {
             router.go(.tasks)
             if executorType == .ai {
                 router.push(.ai(id))
-                if let task = store.task(id), let runner = selectedRunner,
+                if store.task(id) != nil, let runner = selectedRunner,
                    let workspace = runner.workspaces.first(where: { $0.id == workspaceId }),
                    let tool = availableTools.first(where: { $0.id == toolId }) {
                     _Concurrency.Task {
                         do {
-                            let job = try await remote.dispatch(task: task, runner: runner, workspace: workspace, tool: tool)
+                            await sync.pushDirty()
+                            guard case .idle = sync.status, let syncedTask = store.task(id) else {
+                                throw APIError.offline
+                            }
+                            let job = try await remote.dispatch(task: syncedTask, runner: runner, workspace: workspace, tool: tool)
                             store.startRemoteAIExecution(id, job: job, provider: tool.provider)
                         } catch {
                             dispatchError = error.localizedDescription

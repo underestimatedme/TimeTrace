@@ -38,8 +38,10 @@ def ensure(repo: str, task_id: int, home: Path, base: str = "HEAD") -> Tuple[str
             _git("-C", repo, "worktree", "add", str(path), branch)
         else:
             if base != "HEAD" and not _branch_exists(repo, base):
-                base = "HEAD"
+                raise ValueError("registered base branch no longer exists: %s" % base)
             _git("-C", repo, "worktree", "add", "-b", branch, str(path), base)
+    elif _git("-C", str(path), "rev-parse", "--abbrev-ref", "HEAD") != branch:
+        raise ValueError("remote worktree is on an unexpected branch: %s" % path)
     block_push(str(path))
     return str(path), branch
 

@@ -5,7 +5,7 @@
 1. Mac 执行 `keji cloud login`，Valley 创建 10 分钟有效的 device code，并返回 8 位 user code。
 2. 已登录（非游客）的 iOS 用户在「AI 工具管理」输入 user code。Valley 在事务中把该授权记录绑定到当前 `tt_users.id`。
 3. CLI 只轮询 device code；批准后用一次性 activation code 换取 Runner 专用 access/refresh token。它不会获得手机账号密码或用户 token。
-4. refresh token 存入当前 macOS 登录用户的 Keychain；access token 15 分钟轮换。Claude/Codex 继续使用该 macOS 用户原有的本地登录态，任何厂商凭据都不上传 Valley。
+4. refresh token 通过 Security.framework 存入当前 macOS 登录用户的 Keychain；access token 仅驻留内存并每 15 分钟轮换。Claude/Codex 继续使用该 macOS 用户原有的本地登录态，任何厂商凭据都不上传 Valley。
 
 ## 首次启用
 
@@ -24,10 +24,12 @@ keji agent install
 - device code、user code、activation code 和 Runner token 均只存摘要；待 CLI 读取的一次性 activation code使用 AEAD 加密。
 - Prompt 使用 AEAD 加密落 PostgreSQL，普通用户响应不会返回 Prompt；只有归属 Runner 领取任务时解密。
 - 作业创建要求用户、Runner、workspace 和 tool 同属一个账号，并使用 `(user_id, idempotency_key)` 去重。
-- 领取通过 PostgreSQL `FOR UPDATE SKIP LOCKED` 和 lease epoch 防止重复执行；事件必须严格递增。
+- 领取通过 PostgreSQL `FOR UPDATE SKIP LOCKED`、单 Runner 活动租约和 lease epoch 防止重复执行；Agent 每 30 秒续租，事件必须严格递增且终态不可回退。
 - 本机先把领取记录和回传事件写入 SQLite。网络中断时完成事件保留在 outbox，恢复后重放。
+- Valley 同步投影对应的任务和 AI 执行记录，远程状态不依赖当前手机页面，App 重启或换设备后仍可恢复。
+- 手机取消远程任务时只提交 desired action；Agent 收到后终止整个 CLI 进程组并回传 `cancelled`，手机收到确认前保持“等待电脑确认”。
 
-当前加密密钥由 Valley 的 TimeTrace pepper/JWT secret 派生。正式开启功能前应配置并迁移到独立、可轮换的远程任务 AEAD 密钥，再执行空库和存量库迁移演练。
+生产环境设置独立的 `TIMETRACE_REMOTE_ENCRYPTION_KEY_V1`，并将 `TIMETRACE_REMOTE_ENCRYPTION_KEY_VERSION=1`。轮换时先同时配置旧、新版本密钥，再提高版本号；数据行记录 key version，因此轮换期间旧任务仍可解密。未配置 V1 时仅开发环境回退到 TimeTrace pepper，生产发布检查不得接受该回退。
 
 ## 运行状态
 

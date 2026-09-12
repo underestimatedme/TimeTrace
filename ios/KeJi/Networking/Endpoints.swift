@@ -31,11 +31,20 @@ struct Endpoint {
         Endpoint(method: .post, path: "/device-authorizations/approve", requiresAuth: true,
                  body: DeviceApprovalRequest(userCode: code))
     }
+    static func inspectRunner(code: String) -> Endpoint {
+        Endpoint(method: .post, path: "/device-authorizations/inspect", requiresAuth: true,
+                 body: DeviceApprovalRequest(userCode: code))
+    }
     static func createRemoteJob(_ request: RemoteJobRequest) -> Endpoint {
         Endpoint(method: .post, path: "/remote-jobs", requiresAuth: true, body: request)
     }
     static func remoteJob(id: String) -> Endpoint {
         Endpoint(method: .get, path: "/remote-jobs/\(id)", requiresAuth: true, body: nil)
+    }
+    static func remoteJobCommand(id: String, action: String, expectedRevision: Int, idempotencyKey: String) -> Endpoint {
+        Endpoint(method: .post, path: "/remote-jobs/\(id)/commands", requiresAuth: true,
+                 body: RemoteJobCommandRequest(action: action, expectedRevision: expectedRevision,
+                                               idempotencyKey: idempotencyKey))
     }
 }
 

@@ -136,7 +136,9 @@ class Database:
         job = claim["job"]
         self.conn.execute(
             "INSERT INTO remote_claim (job_id,attempt_id,lease_epoch,workspace_id,tool_id,prompt,state,updated_at)"
-            " VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at",
+            " VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET "
+            "attempt_id=excluded.attempt_id,lease_epoch=excluded.lease_epoch,workspace_id=excluded.workspace_id,"
+            "tool_id=excluded.tool_id,prompt=excluded.prompt,state=excluded.state,updated_at=excluded.updated_at",
             (job["id"], claim["attempt_id"], claim["lease_epoch"], job["workspace_id"],
              job["tool_profile_id"], job["prompt"], state, now or _now()),
         )

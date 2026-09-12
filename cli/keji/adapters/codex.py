@@ -162,9 +162,9 @@ class CodexAdapter(ToolAdapter):
         resp = app_server_request(self.cfg.get("bin", "codex"), "account/rateLimits/read")
         return parse_rate_limits(resp)
 
-    def start(self, prompt: str, cwd: str, session_id: str, log_file: str) -> RunResult:
+    def start(self, prompt: str, cwd: str, session_id: str, log_file: str, cancel_event=None) -> RunResult:
         cmd = build_cmd(self.cfg, prompt, cwd, last_msg_file=log_file + ".last.md")
-        return self._run(cmd, cwd, log_file)
+        return self._run(cmd, cwd, log_file, cancel_event)
 
     def resume(self, prompt: str, cwd: str, session_id: str, log_file: str) -> RunResult:
         cmd = build_cmd(self.cfg, prompt, cwd, resume=session_id,
@@ -173,8 +173,8 @@ class CodexAdapter(ToolAdapter):
         res.session_id = res.session_id or session_id
         return res
 
-    def _run(self, cmd: List[str], cwd: str, log_file: str) -> RunResult:
-        code, lines = run_streaming(cmd, cwd, log_file)
+    def _run(self, cmd: List[str], cwd: str, log_file: str, cancel_event=None) -> RunResult:
+        code, lines = run_streaming(cmd, cwd, log_file, timeout=float(self.cfg.get("timeout_seconds", 3600)), cancel_event=cancel_event)
         res = parse_exec(lines)
         res.exit_code = code
         if code != 0 and not res.blocked:

@@ -5,6 +5,7 @@ struct TaskDetailView: View {
     @Environment(\.theme) private var theme
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
+    @Environment(AppEnvironment.self) private var appEnv
     let taskId: String
 
     private struct TimelineEvent: Identifiable { let id = UUID(); let time: Date; let label: String }
@@ -68,7 +69,7 @@ struct TaskDetailView: View {
             if task.status == .waitingHuman {
                 AppButton("审核完成", variant: .accent, fullWidth: true) { store.completeAIReview(task.id) }
             }
-            if TaskStatus.startable.contains(task.status) {
+            if TaskStatus.startable.contains(task.status) && (task.executorType != .ai || appEnv.options.offline) {
                 AppButton("开始执行", variant: .accent, fullWidth: true) {
                     if task.executorType == .ai {
                         store.startAIExecution(task.id)
@@ -82,6 +83,10 @@ struct TaskDetailView: View {
             if task.status == .aiRunning {
                 AppButton("查看 AI 执行", variant: .secondary, fullWidth: true) { router.push(.ai(task.id)) }
             }
+        }
+        if TaskStatus.startable.contains(task.status), task.executorType == .ai, !appEnv.options.offline {
+            Text("在线 AI 任务请在新建任务时选择电脑、工作区和工具后派发。")
+                .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
         }
     }
 

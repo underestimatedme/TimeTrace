@@ -8,6 +8,7 @@ struct AIToolsView: View {
     @Environment(RemoteExecutionClient.self) private var remote
     @State private var pairingCode = ""
     @State private var pairingMessage: String?
+    @State private var pendingInspection: DeviceAuthorizationInspection?
 
     private func description(_ provider: AIProvider) -> String {
         switch provider {
@@ -38,7 +39,7 @@ struct AIToolsView: View {
                         AppTextField(placeholder: "例如 A1B2C3D4", text: $pairingCode)
                             .textInputAutocapitalization(.characters)
                             .accessibilityIdentifier("runner-pairing-code")
-                        AppButton("批准绑定", variant: .accent, fullWidth: true,
+                        AppButton("检查电脑", variant: .accent, fullWidth: true,
                                   disabled: pairingCode.trimmingCharacters(in: .whitespaces).count != 8) {
                             approvePairing()
                         }
@@ -95,18 +96,39 @@ struct AIToolsView: View {
             .padding(.top, 24)
         }
         .task { if sync.isLoggedIn { await remote.loadRunners() } }
+        .confirmationDialog("确认绑定这台电脑？", isPresented: Binding(
+            get: { pendingInspection != nil }, set: { if !$0 { pendingInspection = nil } }
+        ), titleVisibility: .visible) {
+            Button("确认绑定") { confirmPairing() }
+            Button("取消", role: .cancel) { pendingInspection = nil }
+        } message: {
+            if let info = pendingInspection {
+                Text("\(info.deviceName) · \(info.platform) · v\(info.clientVersion)\n请求时间：\(Format.relative(info.requestedAt, now: Date()))\n权限：仅接收任务、运行本机已登记仓库、回报状态及取消进程")
+            }
+        }
     }
 
     private func approvePairing() {
+        pairingMessage = "正在核对电脑信息…"
+        _Concurrency.Task {
+            do {
+                pendingInspection = try await remote.inspect(code: pairingCode)
+                pairingMessage = nil
+            } catch {
+                pairingMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func confirmPairing() {
+        pendingInspection = nil
         pairingMessage = "正在批准…"
         _Concurrency.Task {
             do {
                 try await remote.approve(code: pairingCode)
                 pairingCode = ""
                 pairingMessage = "电脑已绑定，可以远程派发任务。"
-            } catch {
-                pairingMessage = error.localizedDescription
-            }
+            } catch { pairingMessage = error.localizedDescription }
         }
     }
 }

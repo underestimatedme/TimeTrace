@@ -57,9 +57,8 @@ class WorktreeTest(unittest.TestCase):
         p2, b2 = worktree.ensure(str(self.repo), 2, self.home, base=b1)
         self.assertTrue((Path(p2) / "step1.txt").exists())
         self.assertEqual(git("rev-parse", "--abbrev-ref", "HEAD", cwd=p2), "keji/2")
-        # unknown base falls back to HEAD instead of failing
-        p3, _ = worktree.ensure(str(self.repo), 3, self.home, base="keji/does-not-exist")
-        self.assertFalse((Path(p3) / "step1.txt").exists())
+        with self.assertRaisesRegex(ValueError, "base branch"):
+            worktree.ensure(str(self.repo), 3, self.home, base="keji/does-not-exist")
 
     def test_is_git_repo(self):
         self.assertTrue(worktree.is_git_repo(str(self.repo)))

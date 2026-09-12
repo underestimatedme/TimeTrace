@@ -6,7 +6,7 @@ enum RemoteJobStatus: String, Codable {
     case waitingLocalAuth = "waiting_local_auth"
     case waitingInput = "waiting_input"
     case awaitingReview = "awaiting_review"
-    case failed, cancelled, expired
+    case completed, failed, cancelled, expired, interrupted
 
     var label: String {
         switch self {
@@ -17,9 +17,11 @@ enum RemoteJobStatus: String, Codable {
         case .waitingLocalAuth: return "等待电脑登录"
         case .waitingInput: return "等待输入"
         case .awaitingReview: return "等待审核"
+        case .completed: return "已完成"
         case .failed: return "执行失败"
         case .cancelled: return "已取消"
         case .expired: return "已过期"
+        case .interrupted: return "执行中断"
         }
     }
 }
@@ -75,6 +77,20 @@ struct RemoteJob: Codable, Identifiable, Equatable {
 
 struct DeviceApprovalRequest: Encodable { var userCode: String }
 struct DeviceApprovalResponse: Decodable { var approved: Bool }
+struct RemoteCommandResponse: Decodable { var accepted: Bool }
+struct RemoteJobCommandRequest: Encodable {
+    var action: String
+    var expectedRevision: Int
+    var idempotencyKey: String
+}
+struct DeviceAuthorizationInspection: Decodable {
+    var deviceName: String
+    var platform: String
+    var clientVersion: String
+    var requestedAt: Date
+    var expiresAt: Date
+    var permissions: [String]
+}
 struct RemoteJobRequest: Encodable {
     var taskId: String
     var runnerId: String
@@ -82,4 +98,5 @@ struct RemoteJobRequest: Encodable {
     var toolProfileId: String
     var prompt: String
     var idempotencyKey: String
+    var expectedTaskRevision: Int64
 }

@@ -37,6 +37,18 @@ class CloudClientTest(unittest.TestCase):
         with self.assertRaises(CloudError):
             client.request("GET", "/x")
 
+    def test_renew_uses_attempt_endpoint(self):
+        seen = []
+        client = CloudClient("https://v", opener=lambda req, timeout: (seen.append(req) or Response(200, {"code": 0, "data": {}})))
+        client.renew("token", "a1", 3)
+        self.assertTrue(seen[0].full_url.endswith("/runner/attempts/a1/renew"))
+
+    def test_events_use_attempt_endpoint(self):
+        seen = []
+        client = CloudClient("https://v", opener=lambda req, timeout: (seen.append(req) or Response(200, {"code": 0, "data": {}})))
+        client.append_events("token", "j1", "a1", 3, [{"seq": 1, "type": "running"}])
+        self.assertTrue(seen[0].full_url.endswith("/runner/attempts/a1/events"))
+
 
 if __name__ == "__main__":
     unittest.main()

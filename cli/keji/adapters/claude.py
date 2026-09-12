@@ -117,16 +117,16 @@ class ClaudeAdapter(ToolAdapter):
     def read_limits(self) -> Optional[List[Sample]]:
         return None  # no on-demand channel; samples come from runs
 
-    def start(self, prompt: str, cwd: str, session_id: str, log_file: str) -> RunResult:
+    def start(self, prompt: str, cwd: str, session_id: str, log_file: str, cancel_event=None) -> RunResult:
         return self._run(build_cmd(self.cfg, prompt, session_id=session_id), cwd, log_file,
-                         session_id)
+						 session_id, cancel_event)
 
     def resume(self, prompt: str, cwd: str, session_id: str, log_file: str) -> RunResult:
         return self._run(build_cmd(self.cfg, prompt, resume=session_id), cwd, log_file,
                          session_id)
 
-    def _run(self, cmd: List[str], cwd: str, log_file: str, session_id: str) -> RunResult:
-        code, lines = run_streaming(cmd, cwd, log_file)
+    def _run(self, cmd: List[str], cwd: str, log_file: str, session_id: str, cancel_event=None) -> RunResult:
+        code, lines = run_streaming(cmd, cwd, log_file, timeout=float(self.cfg.get("timeout_seconds", 3600)), cancel_event=cancel_event)
         res = parse_stream(lines)
         res.exit_code = code
         res.session_id = res.session_id or session_id

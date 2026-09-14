@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from keji import hooks, limits, worktree
 from keji.db import Database
+from keji.dispatch import LockBusy, coding_slot_lock
 from keji.models import (BLOCKED, CLAUDE, DONE, EV_CIRCUIT_OPEN, EV_SAMPLE_FAILURE,
                          EV_TASK_BLOCKED, EV_TASK_DONE, EV_TASK_FAILED, EV_TASK_RESUMED,
                          EV_TOOL_SWITCHED, EV_WINDOW_RESET, FAILED, PENDING, RUNNABLE,
@@ -130,6 +131,22 @@ def _most_remaining(rows: List[Dict[str, Any]], tools: List[str], now: int) -> O
 def _dispatch(db: Database, adapter: Any, tool: str, task: Dict[str, Any], cfg: Dict[str, Any],
               home: Path, now: int, log: Callable[[str], None], ensure_worktree: Callable,
               hook_runner: Callable, rng: Callable[[], float], clock: Callable[[], int]) -> str:
+    """Fence local execution through the same runner-wide coding slot as the
+    cloud agent so the two can never drive a process at the same time."""
+    try:
+        slot = coding_slot_lock(home).acquire()
+    except LockBusy:
+        return "task %d → deferred (runner busy)" % task["id"]
+    try:
+        return _dispatch_locked(db, adapter, tool, task, cfg, home, now, log,
+                                ensure_worktree, hook_runner, rng, clock)
+    finally:
+        slot.release()
+
+
+def _dispatch_locked(db: Database, adapter: Any, tool: str, task: Dict[str, Any], cfg: Dict[str, Any],
+                     home: Path, now: int, log: Callable[[str], None], ensure_worktree: Callable,
+                     hook_runner: Callable, rng: Callable[[], float], clock: Callable[[], int]) -> str:
     task_id = task["id"]
     resuming = bool(task.get("session_id"))
     session_id = task.get("session_id") or str(uuid.uuid4())

@@ -10,16 +10,26 @@ from typing import Any, Callable, Dict
 
 from keji.db import Database
 from keji import worktree
+from keji.dispatch import DispatchGate, LockBusy, coding_slot_lock, deny_reason, workspace_lock
+
+
+def _capability_zero_spend(adapter: Any, job: Dict[str, Any]) -> bool:
+    """Safe default: only a verified adapter capability authorises spend-free
+    execution. A manual/source claim can never grant it."""
+    caps = getattr(adapter, "capabilities", lambda: {})()
+    return bool(caps.get("can_enforce_zero_spend", False))
 
 
 class Agent:
     def __init__(self, db: Database, cloud: Any, adapters: Dict[str, Any], home: Path,
                  access_token: Callable[[], str], prepare_workspace: Callable = worktree.ensure,
-                 heartbeat_interval: float = 30):
+                 heartbeat_interval: float = 30,
+                 zero_spend_verified: Callable[[Any, Dict[str, Any]], bool] = _capability_zero_spend):
         self.db, self.cloud, self.adapters = db, cloud, adapters
         self.home, self.access_token = Path(home), access_token
         self.prepare_workspace = prepare_workspace
         self.heartbeat_interval = heartbeat_interval
+        self._zero_spend = zero_spend_verified
 
     def run_once(self) -> str:
         self.flush_outbox()
@@ -51,15 +61,46 @@ class Agent:
         self.home.joinpath("logs").mkdir(parents=True, exist_ok=True)
         log_file = str(self.home / "logs" / ("remote-%s.log" % job_id))
         session_id = str(uuid.uuid4())
-        self.db.update_remote_claim(job_id, "launching")
-        self._report(claim, [{"seq": 1, "type": "running", "message": "started"}])
-        self.db.update_remote_claim(job_id, "running")
-        error = ""
-        lease_lost = False
         lease_deadline = (datetime.fromisoformat(
             claim["lease_expires_at"].replace("Z", "+00:00")
         ).timestamp() if claim.get("lease_expires_at") else time.time() + 90)
+
+        # One gate for every start/resume: nothing runs while cancelled, past its
+        # lease, without ready dependencies, or without a verified zero-additional-
+        # spend guarantee.
+        gate = DispatchGate(
+            cancelled=(job.get("status") == "cancelled" or job.get("desired_action") == "cancel"),
+            lease_valid=lease_deadline > time.time(),
+            runner_online=True,
+            dependencies_ready=True,
+            zero_spend_verified=self._zero_spend(adapter, job),
+        )
+        reason = deny_reason(gate)
+        if reason is not None:
+            event_type = "cancelled" if reason == "cancelled" else "waiting_input"
+            self._report(claim, [{"seq": 1, "type": event_type, "message": "dispatch blocked: %s" % reason}])
+            self.db.update_remote_claim(job_id, "reported")
+            return "job %s → blocked (%s)" % (job_id, reason)
+
+        # Fence local and remote dispatch through file locks: one coding slot per
+        # runner, one writer per canonical workspace. A second process is denied
+        # and defers rather than double-running the Plan/working directory.
         try:
+            slot = coding_slot_lock(self.home).acquire()
+        except LockBusy:
+            return "job %s → deferred (runner busy)" % job_id
+        try:
+            ws_lock = workspace_lock(self.home, workspace["path"]).acquire()
+        except LockBusy:
+            slot.release()
+            return "job %s → deferred (workspace busy)" % job_id
+
+        error = ""
+        lease_lost = False
+        try:
+            self.db.update_remote_claim(job_id, "launching")
+            self._report(claim, [{"seq": 1, "type": "running", "message": "started"}])
+            self.db.update_remote_claim(job_id, "running")
             local_id = int(hashlib.sha256(job_id.encode("utf-8")).hexdigest()[:12], 16)
             execution_path, _ = self.prepare_workspace(workspace["path"], local_id, self.home, workspace["default_branch"])
             with ThreadPoolExecutor(max_workers=1) as pool:
@@ -89,6 +130,9 @@ class Agent:
         except Exception as exc:
             result = None
             error = "adapter crashed: %s" % exc
+        finally:
+            ws_lock.release()
+            slot.release()
         if lease_lost:
             self.db.update_remote_claim(job_id, "fenced")
             return "job %s → fenced (lease lost)" % job_id

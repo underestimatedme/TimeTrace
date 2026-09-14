@@ -61,6 +61,21 @@ class SchedulerTest(unittest.TestCase):
             hook_runner=lambda *a: self.hooks.append(a), rng=lambda: 0.0, clock=lambda: now,
         )
 
+    def test_defers_when_coding_slot_held_by_agent(self):
+        # The cloud agent holds the runner-wide coding slot; the local scheduler
+        # must defer rather than start a second concurrent process.
+        from keji.dispatch import coding_slot_lock
+
+        self.db.add_task("do", "/repo", tool="claude")
+        ad = FakeAdapter("claude", [RunResult(ok=True)])
+        held = coding_slot_lock(self.home).acquire()
+        try:
+            out = self.run_once({"claude": ad}, now=100)
+        finally:
+            held.release()
+        self.assertEqual(out, "task 1 → deferred (runner busy)")
+        self.assertEqual(ad.calls, [])  # adapter never invoked
+
     def test_success_path_records_run_and_event(self):
         t = self.db.add_task("do", "/repo", tool="claude")
         ad = FakeAdapter("claude", [RunResult(ok=True, output="done!", samples=[

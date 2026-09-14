@@ -32,6 +32,11 @@ class FakeCloud:
 
 
 class Adapter:
+    def capabilities(self):
+        # A verified subscription profile: zero additional spend guaranteed.
+        return {"can_record": True, "can_read_quota": True, "can_dispatch": True,
+                "can_resume": True, "can_enforce_zero_spend": True}
+
     def start(self, prompt, cwd, session_id, log_file, cancel_event=None):
         self.args = (prompt, cwd)
         return RunResult(exit_code=0, ok=True, output="finished", session_id=session_id)
@@ -138,6 +143,43 @@ class AgentTest(unittest.TestCase):
             agent.flush_outbox()
             self.assertEqual(db.pending_remote_events(), [])
             self.assertEqual(cloud.events[-1]["type"], "completed")
+
+    def test_unverified_billing_blocks_execution(self):
+        class UnverifiedAdapter(Adapter):
+            def capabilities(self):
+                caps = super().capabilities()
+                caps["can_enforce_zero_spend"] = False
+                return caps
+
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "keji.db")
+            repo = Path(d) / "repo"; init_repo(repo)
+            db.upsert_workspace("ws1", "repo", str(repo), "main")
+            cloud, adapter = FakeCloud(), UnverifiedAdapter()
+            agent = Agent(db, cloud, {"codex": adapter}, Path(d), lambda: "token",
+                          prepare_workspace=lambda repo, task_id, home, base: (repo, "keji/test"))
+            self.assertEqual(agent.run_once(), "job j1 → blocked (billing_unverified)")
+            # The adapter must never have been started.
+            self.assertFalse(hasattr(adapter, "args"))
+            self.assertEqual(cloud.events[-1]["type"], "waiting_input")
+
+    def test_workspace_busy_defers_without_second_run(self):
+        from keji.dispatch import workspace_lock
+
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "keji.db")
+            repo = Path(d) / "repo"; init_repo(repo)
+            db.upsert_workspace("ws1", "repo", str(repo), "main")
+            cloud, adapter = FakeCloud(), Adapter()
+            agent = Agent(db, cloud, {"codex": adapter}, Path(d), lambda: "token",
+                          prepare_workspace=lambda repo, task_id, home, base: (repo, "keji/test"))
+            # Another process already writing this canonical workspace.
+            held = workspace_lock(Path(d), str(repo)).acquire()
+            try:
+                self.assertEqual(agent.run_once(), "job j1 → deferred (workspace busy)")
+                self.assertFalse(hasattr(adapter, "args"))
+            finally:
+                held.release()
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from keji.adapters.base import SAFETY_RULES, ToolAdapter, run_streaming
 from keji.models import CLAUDE, RunResult, Sample
+from keji.quota import merge_capabilities
 
 LIMIT_TEXT_MARKERS = ("hit your limit", "usage limit", "rate limit")
 
@@ -110,9 +111,23 @@ def _int_or_none(v: Any) -> Optional[int]:
 
 class ClaudeAdapter(ToolAdapter):
     name = CLAUDE
+    adapter_version = "claude-code/0.4"
 
     def __init__(self, cfg: Dict[str, Any]):
         self.cfg = cfg
+
+    def capabilities(self) -> Dict[str, bool]:
+        # Implemented surface: records runs, dispatches headless, resumes the
+        # original session via `--resume`. No on-demand quota read. Zero-spend
+        # enforcement stays unverified (raised only by R4 billing checks), so
+        # unattended resume is not yet authorised for this adapter.
+        return merge_capabilities({
+            "can_record": True,
+            "can_read_quota": False,
+            "can_dispatch": True,
+            "can_resume": True,
+            "can_enforce_zero_spend": False,
+        })
 
     def read_limits(self) -> Optional[List[Sample]]:
         return None  # no on-demand channel; samples come from runs

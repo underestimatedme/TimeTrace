@@ -113,12 +113,15 @@ def pick_tool(task: Dict[str, Any], rows: List[Dict[str, Any]], adapters: Dict[s
 
 
 def _most_remaining(rows: List[Dict[str, Any]], tools: List[str], now: int) -> Optional[str]:
-    best, best_val = None, -1.0
+    best, best_val = None, -2.0
     for t in tools:
         if limits.tool_exhausted(rows, t, now):
             continue
         rem = limits.tool_min_remaining(rows, t)
-        val = 100.0 if rem is None else rem  # unknown quota counts as full
+        # Unknown quota is uncertain, not full: it must not outrank a tool with a
+        # known, non-exhausted remaining reading. It is only a last resort when no
+        # tool has a known reading.
+        val = -1.0 if rem is None else rem
         if val > best_val:
             best, best_val = t, val
     return best

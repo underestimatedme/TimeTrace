@@ -49,6 +49,24 @@ class CloudClientTest(unittest.TestCase):
         client.append_events("token", "j1", "a1", 3, [{"seq": 1, "type": "running"}])
         self.assertTrue(seen[0].full_url.endswith("/runner/attempts/a1/events"))
 
+    def test_quota_samples_endpoint_and_body(self):
+        seen = []
+
+        def opener(request, timeout):
+            seen.append(request)
+            return Response(200, {"code": 0, "data": {"accepted": 1}})
+
+        client = CloudClient("https://v", opener=opener)
+        payload = [{"sample_id": "s1", "pool_id": "pool-1", "used_percent": 20.0}]
+        client.post_quota_samples("secrettoken", payload)
+        self.assertTrue(seen[0].full_url.endswith("/runner/quota/samples"))
+        body = json.loads(seen[0].data.decode())
+        self.assertEqual(body, {"samples": payload})
+        # The sample body itself must not carry credentials or account emails.
+        raw = seen[0].data.decode()
+        for leak in ("secrettoken", "refresh", "@"):
+            self.assertNotIn(leak, raw)
+
 
 if __name__ == "__main__":
     unittest.main()

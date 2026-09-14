@@ -1,8 +1,9 @@
 """ToolAdapter interface plus the subprocess helper both adapters share."""
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from keji.models import RunResult, Sample
 from keji.process import run_streaming
+from keji.quota import default_capabilities
 
 # Appended to every headless run (spec §8). Both tools get the same text.
 SAFETY_RULES = (
@@ -20,6 +21,13 @@ class ToolAdapter:
     """Uniform surface over Claude Code and Codex. Subclasses fill the three methods."""
 
     name = "base"
+    adapter_version = "0"
+
+    def capabilities(self) -> Dict[str, bool]:
+        """Verified capability flags for this adapter. The base surface claims
+        nothing — every flag is False until a subclass asserts what its
+        implemented commands and verified billing config actually support."""
+        return default_capabilities()
 
     def read_limits(self) -> Optional[List[Sample]]:
         """On-demand quota read. Return None when the tool has no such channel."""

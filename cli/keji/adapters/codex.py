@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from keji.adapters.base import SAFETY_RULES, ToolAdapter, run_streaming
 from keji.models import CODEX, RunResult, Sample
+from keji.quota import merge_capabilities
 
 LIMIT_TEXT_MARKERS = ("usage limit", "rate limit", "try again at")
 PRIMARY_BUCKET = "codex:codex:primary"
@@ -154,9 +155,22 @@ def _int_or_none(v: Any) -> Optional[int]:
 
 class CodexAdapter(ToolAdapter):
     name = CODEX
+    adapter_version = "codex-cli/0.151"
 
     def __init__(self, cfg: Dict[str, Any]):
         self.cfg = cfg
+
+    def capabilities(self) -> Dict[str, bool]:
+        # Implemented surface: records runs, reads quota on demand via
+        # app-server (no quota consumed), dispatches headless, resumes a thread.
+        # Zero-spend enforcement stays unverified until R4 billing checks.
+        return merge_capabilities({
+            "can_record": True,
+            "can_read_quota": True,
+            "can_dispatch": True,
+            "can_resume": True,
+            "can_enforce_zero_spend": False,
+        })
 
     def read_limits(self) -> Optional[List[Sample]]:
         resp = app_server_request(self.cfg.get("bin", "codex"), "account/rateLimits/read")

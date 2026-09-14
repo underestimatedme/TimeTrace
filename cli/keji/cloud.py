@@ -63,6 +63,11 @@ class CloudClient:
     def update_inventory(self, token: str, workspaces: list, tools: list) -> Dict[str, Any]:
         return self.request("PUT", "/runner/inventory", {"workspaces": workspaces, "tools": tools}, token)
 
+    def post_quota_samples(self, token: str, samples: list) -> Dict[str, Any]:
+        """Send de-identified quota readings to Valley (dedup by sample_id).
+        The payload carries only opaque pool/profile ids — never credentials."""
+        return self.request("POST", "/runner/quota/samples", {"samples": samples}, token)
+
     def claim(self, token: str) -> Optional[Dict[str, Any]]:
         return self.request("POST", "/runner/jobs/claim", {"wait_seconds": 0}, token)
 

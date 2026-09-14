@@ -92,6 +92,11 @@ CREATE TABLE IF NOT EXISTS remote_outbox (
     created_at  INTEGER NOT NULL,
     UNIQUE(job_id, attempt_id, seq)
 );
+CREATE TABLE IF NOT EXISTS checkpoint (
+    plan_id    TEXT PRIMARY KEY,
+    data       TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
 """
 
 
@@ -172,6 +177,28 @@ class Database:
 
     def mark_remote_event_sent(self, event_id: int, now: Optional[int] = None) -> None:
         self.conn.execute("UPDATE remote_outbox SET sent_at=? WHERE id=?", (now or _now(), event_id))
+
+    # ---- checkpoints ------------------------------------------------------
+    def save_checkpoint(self, checkpoint: Any, now: Optional[int] = None) -> None:
+        """Atomically persist one checkpoint per plan (INSERT OR REPLACE is a
+        single autocommit statement). Stores no secrets or CLI environment."""
+        self.conn.execute(
+            "INSERT OR REPLACE INTO checkpoint (plan_id,data,updated_at) VALUES (?,?,?)",
+            (checkpoint.plan_id, json.dumps(checkpoint.to_row(), ensure_ascii=False, sort_keys=True), now or _now()),
+        )
+
+    def get_checkpoint(self, plan_id: str) -> Optional[Any]:
+        from keji.checkpoints import Checkpoint
+        row = self.conn.execute("SELECT data FROM checkpoint WHERE plan_id=?", (plan_id,)).fetchone()
+        return Checkpoint.from_row(json.loads(row["data"])) if row else None
+
+    def list_checkpoints(self) -> List[Any]:
+        from keji.checkpoints import Checkpoint
+        rows = self.conn.execute("SELECT data FROM checkpoint ORDER BY plan_id").fetchall()
+        return [Checkpoint.from_row(json.loads(row["data"])) for row in rows]
+
+    def delete_checkpoint(self, plan_id: str) -> None:
+        self.conn.execute("DELETE FROM checkpoint WHERE plan_id=?", (plan_id,))
 
     # ---- task -------------------------------------------------------------
     def add_task(

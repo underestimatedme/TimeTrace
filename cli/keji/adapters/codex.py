@@ -180,10 +180,10 @@ class CodexAdapter(ToolAdapter):
         cmd = build_cmd(self.cfg, prompt, cwd, last_msg_file=log_file + ".last.md")
         return self._run(cmd, cwd, log_file, cancel_event)
 
-    def resume(self, prompt: str, cwd: str, session_id: str, log_file: str) -> RunResult:
+    def resume(self, prompt: str, cwd: str, session_id: str, log_file: str, cancel_event=None) -> RunResult:
         cmd = build_cmd(self.cfg, prompt, cwd, resume=session_id,
                         last_msg_file=log_file + ".last.md")
-        res = self._run(cmd, cwd, log_file)
+        res = self._run(cmd, cwd, log_file, cancel_event)
         res.session_id = res.session_id or session_id
         return res
 

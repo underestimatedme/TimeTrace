@@ -136,9 +136,9 @@ class ClaudeAdapter(ToolAdapter):
         return self._run(build_cmd(self.cfg, prompt, session_id=session_id), cwd, log_file,
 						 session_id, cancel_event)
 
-    def resume(self, prompt: str, cwd: str, session_id: str, log_file: str) -> RunResult:
+    def resume(self, prompt: str, cwd: str, session_id: str, log_file: str, cancel_event=None) -> RunResult:
         return self._run(build_cmd(self.cfg, prompt, resume=session_id), cwd, log_file,
-                         session_id)
+                         session_id, cancel_event)
 
     def _run(self, cmd: List[str], cwd: str, log_file: str, session_id: str, cancel_event=None) -> RunResult:
         code, lines = run_streaming(cmd, cwd, log_file, timeout=float(self.cfg.get("timeout_seconds", 3600)), cancel_event=cancel_event)

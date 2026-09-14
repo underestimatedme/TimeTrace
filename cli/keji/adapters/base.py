@@ -33,8 +33,8 @@ class ToolAdapter:
         """On-demand quota read. Return None when the tool has no such channel."""
         return None
 
-    def start(self, prompt: str, cwd: str, session_id: str, log_file: str) -> RunResult:
+    def start(self, prompt: str, cwd: str, session_id: str, log_file: str, cancel_event=None) -> RunResult:
         raise NotImplementedError
 
-    def resume(self, prompt: str, cwd: str, session_id: str, log_file: str) -> RunResult:
+    def resume(self, prompt: str, cwd: str, session_id: str, log_file: str, cancel_event=None) -> RunResult:
         raise NotImplementedError

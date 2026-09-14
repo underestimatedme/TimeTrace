@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict
 
 from keji.db import Database
 from keji import worktree
+from keji.checkpoints import Checkpoint, resume_allowed
 from keji.dispatch import DispatchGate, LockBusy, coding_slot_lock, deny_reason, workspace_lock
 
 
@@ -60,7 +61,18 @@ class Agent:
             return "job %s → rejected (tool unavailable)" % job_id
         self.home.joinpath("logs").mkdir(parents=True, exist_ok=True)
         log_file = str(self.home / "logs" / ("remote-%s.log" % job_id))
-        session_id = str(uuid.uuid4())
+
+        # Resume the original provider session when a durable checkpoint exists
+        # for this Plan and the tool profile is unchanged; otherwise start fresh.
+        plan_key = job.get("plan_id") or job_id
+        tool_profile_id = job["tool_profile_id"]
+        native_resume = bool(getattr(adapter, "capabilities", lambda: {})().get("can_resume", False))
+        checkpoint = self.db.get_checkpoint(plan_key)
+        resuming = bool(
+            checkpoint and checkpoint.provider_session_id
+            and resume_allowed(checkpoint.tool_profile_id, tool_profile_id, native_resume)
+        )
+        session_id = checkpoint.provider_session_id if resuming else str(uuid.uuid4())
         lease_deadline = (datetime.fromisoformat(
             claim["lease_expires_at"].replace("Z", "+00:00")
         ).timestamp() if claim.get("lease_expires_at") else time.time() + 90)
@@ -105,7 +117,8 @@ class Agent:
             execution_path, _ = self.prepare_workspace(workspace["path"], local_id, self.home, workspace["default_branch"])
             with ThreadPoolExecutor(max_workers=1) as pool:
                 cancel_event = threading.Event()
-                future = pool.submit(adapter.start, job["prompt"], execution_path, session_id, log_file, cancel_event)
+                run = adapter.resume if resuming else adapter.start
+                future = pool.submit(run, job["prompt"], execution_path, session_id, log_file, cancel_event)
                 while True:
                     try:
                         result = future.result(timeout=self.heartbeat_interval)
@@ -140,11 +153,26 @@ class Agent:
             event = {"seq": 2, "type": "completed", "message": "completed",
                      "result_summary": (result.output or "completed")[:1000]}
             outcome = "awaiting_review"
+            self.db.delete_checkpoint(plan_key)  # done: no stale resume
         else:
             message = error if result is None else (result.error or "exit %s" % result.exit_code)
             event_type = "cancelled" if error == "cancelled by user" else ("waiting_quota" if result is not None and result.blocked else "failed")
             event = {"seq": 2, "type": event_type, "message": message[:1000]}
             outcome = event_type
+            if event_type == "waiting_quota":
+                # Durable checkpoint so natural quota recovery can resume the same
+                # provider session in the same workspace.
+                self.db.save_checkpoint(Checkpoint(
+                    plan_id=plan_key, job_id=job_id, attempt_id=claim["attempt_id"],
+                    tool_profile_id=tool_profile_id,
+                    provider_session_id=(result.session_id or session_id),
+                    canonical_workspace=workspace["path"], git_head="", dirty_paths_digest="",
+                    last_output_offset=0, completed_criteria=[],
+                    side_effect_summary=(result.output or "")[:200], reason="waiting_quota",
+                ))
+            else:
+                # cancelled / failed: drop any checkpoint so nothing auto-resumes.
+                self.db.delete_checkpoint(plan_key)
         self._report(claim, [event])
         self.db.update_remote_claim(job_id, "reported")
         return "job %s → %s" % (job_id, outcome)

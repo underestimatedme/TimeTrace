@@ -163,6 +163,47 @@ class AgentTest(unittest.TestCase):
             self.assertFalse(hasattr(adapter, "args"))
             self.assertEqual(cloud.events[-1]["type"], "waiting_input")
 
+    def test_quota_block_checkpoints_then_resumes_same_session(self):
+        class ReleasingCloud(FakeCloud):
+            def __init__(self):
+                super().__init__()
+                self.n = 0
+
+            def claim(self, token):
+                self.n += 1
+                c = super().claim(token)
+                c["attempt_id"] = "a%d" % self.n  # each re-lease is a new attempt
+                return c
+
+        class BlockThenResume(Adapter):
+            def __init__(self):
+                self.calls = []
+
+            def start(self, prompt, cwd, session_id, log_file, cancel_event=None):
+                self.calls.append(("start", session_id))
+                return RunResult(exit_code=1, blocked=True, error="usage limit", session_id="prov-sess")
+
+            def resume(self, prompt, cwd, session_id, log_file, cancel_event=None):
+                self.calls.append(("resume", session_id))
+                return RunResult(exit_code=0, ok=True, output="done", session_id=session_id)
+
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "keji.db")
+            repo = Path(d) / "repo"; init_repo(repo)
+            db.upsert_workspace("ws1", "repo", str(repo), "main")
+            cloud, adapter = ReleasingCloud(), BlockThenResume()
+            agent = Agent(db, cloud, {"codex": adapter}, Path(d), lambda: "token",
+                          prepare_workspace=lambda repo, task_id, home, base: (repo, "keji/test"))
+            self.assertEqual(agent.run_once(), "job j1 → waiting_quota")
+            cp = db.get_checkpoint("j1")
+            self.assertIsNotNone(cp)
+            self.assertEqual(cp.provider_session_id, "prov-sess")
+            # Natural recovery re-leases: the agent resumes the original session.
+            self.assertEqual(agent.run_once(), "job j1 → awaiting_review")
+            self.assertEqual(adapter.calls[0][0], "start")
+            self.assertEqual(adapter.calls[1], ("resume", "prov-sess"))
+            self.assertIsNone(db.get_checkpoint("j1"))  # cleared on completion
+
     def test_workspace_busy_defers_without_second_run(self):
         from keji.dispatch import workspace_lock
 

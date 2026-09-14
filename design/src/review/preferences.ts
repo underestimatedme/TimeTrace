@@ -1,0 +1,2 @@
+export type Preferences = {theme:'light'|'dark'|'system';accent:'blue'|'violet';reduceMotion:boolean;showTools:boolean;showFlow:boolean;showQuote:boolean;autoResume:boolean;sync:boolean;shareLogs:boolean;notifications:boolean;quiet:boolean}
+export const defaultPreferences: Preferences = {theme:'light',accent:'blue',reduceMotion:false,showTools:true,showFlow:true,showQuote:true,autoResume:true,sync:true,shareLogs:false,notifications:true,quiet:true}

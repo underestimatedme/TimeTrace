@@ -16,6 +16,8 @@ import { FocusPage } from '@/pages/Focus'
 import { AIExecutionPage } from '@/pages/AIExecution'
 import { ProjectsPage, ProjectDetailPage, GoalDetailPage } from '@/pages/Projects'
 import { AIToolsPage } from '@/pages/AITools'
+import { WorkspaceReview } from '@/review/WorkspaceReview'
+import { GlassWorkspace } from '@/review/GlassWorkspace'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const hasOnboarded = useStore((s) => s.hasOnboarded)
@@ -39,7 +41,10 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<SplashPage />} />
+        <Route path="/" element={<GlassWorkspace />} />
+        <Route path="/review" element={<GlassWorkspace />} />
+        <Route path="/review-v1" element={<WorkspaceReview />} />
+        <Route path="/legacy" element={<SplashPage />} />
         <Route path="/onboarding" element={<OnboardingPage />} />
         <Route path="/today" element={<ProtectedRoute><TodayPage /></ProtectedRoute>} />
         <Route path="/tasks" element={<ProtectedRoute><TasksPage /></ProtectedRoute>} />

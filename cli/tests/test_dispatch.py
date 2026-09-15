@@ -6,6 +6,7 @@ from keji.dispatch import (
     DispatchGate,
     FileLock,
     LockBusy,
+    adapter_zero_spend_verified,
     coding_slot_lock,
     deny_reason,
     workspace_lock,
@@ -35,6 +36,19 @@ class DispatchGateTest(unittest.TestCase):
         self.assertEqual(deny_reason(DispatchGate(False, False, True, True, True)), "lease_expired")
         self.assertEqual(deny_reason(DispatchGate(False, True, False, True, True)), "runner_offline")
         self.assertEqual(deny_reason(DispatchGate(False, True, True, False, True)), "dependencies_pending")
+
+    def test_only_boolean_true_verifies_zero_spend(self):
+        class Adapter:
+            def __init__(self, value):
+                self.value = value
+
+            def capabilities(self):
+                return {"can_enforce_zero_spend": self.value}
+
+        self.assertTrue(adapter_zero_spend_verified(Adapter(True)))
+        for value in ("false", "true", 1, [True]):
+            with self.subTest(value=value):
+                self.assertFalse(adapter_zero_spend_verified(Adapter(value)))
 
 
 class FileLockTest(unittest.TestCase):

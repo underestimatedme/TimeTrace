@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict
 from keji.db import Database
 from keji import quota, worktree
 from keji.checkpoints import Checkpoint, resume_allowed
-from keji.dispatch import (DispatchGate, LockBusy, adapter_zero_spend_verified,
+from keji.dispatch import (DispatchGate, LockBusy, adapter_capabilities, adapter_zero_spend_verified,
                            coding_slot_lock, deny_reason, workspace_lock)
 
 
@@ -74,7 +74,7 @@ class Agent:
         # for this Plan and the tool profile is unchanged; otherwise start fresh.
         plan_key = job.get("plan_id") or job_id
         tool_profile_id = job["tool_profile_id"]
-        native_resume = bool(getattr(adapter, "capabilities", lambda: {})().get("can_resume", False))
+        native_resume = adapter_capabilities(adapter).get("can_resume") is True
         checkpoint = self.db.get_checkpoint(plan_key)
         resuming = bool(
             checkpoint and checkpoint.provider_session_id

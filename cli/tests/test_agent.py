@@ -170,6 +170,37 @@ class AgentTest(unittest.TestCase):
             self.assertFalse(hasattr(adapter, "args"))
             self.assertEqual(cloud.events[-1]["type"], "waiting_input")
 
+    def test_malformed_capabilities_block_without_execution(self):
+        def raising_capabilities():
+            raise RuntimeError("unavailable")
+
+        class MalformedAdapter:
+            def __init__(self, capabilities):
+                self.capabilities = capabilities
+                self.calls = []
+
+            def start(self, *args):
+                self.calls.append("start")
+                return RunResult(exit_code=0, ok=True)
+
+            def resume(self, *args):
+                self.calls.append("resume")
+                return RunResult(exit_code=0, ok=True)
+
+        for capabilities in (raising_capabilities, lambda: ["not a mapping"], {}):
+            with self.subTest(capabilities=capabilities):
+                with tempfile.TemporaryDirectory() as d:
+                    db = Database(Path(d) / "keji.db")
+                    repo = Path(d) / "repo"; init_repo(repo)
+                    db.upsert_workspace("ws1", "repo", str(repo), "main")
+                    cloud, adapter = FakeCloud(), MalformedAdapter(capabilities)
+                    agent = Agent(db, cloud, {"codex": adapter}, Path(d), lambda: "token",
+                                  prepare_workspace=lambda repo, task_id, home, base: (repo, "keji/test"))
+                    self.assertEqual(agent.run_once(), "job j1 → blocked (billing_unverified)")
+                    self.assertEqual(adapter.calls, [])
+                    self.assertEqual(db.get_remote_claim("j1")["state"], "reported")
+                    self.assertEqual(cloud.events[-1]["type"], "waiting_input")
+
     def test_unverified_billing_blocks_resume_before_running(self):
         class UnverifiedResumingAdapter(Adapter):
             def __init__(self):

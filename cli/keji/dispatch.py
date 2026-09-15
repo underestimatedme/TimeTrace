@@ -11,7 +11,7 @@ import hashlib
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 
 @dataclass(frozen=True)
@@ -36,16 +36,21 @@ def deny_reason(gate: DispatchGate) -> Optional[str]:
     return next((reason for blocked, reason in checks if blocked), None)
 
 
-def adapter_zero_spend_verified(adapter: Any) -> bool:
-    """Return true only when an adapter explicitly verifies zero-spend mode."""
+def adapter_capabilities(adapter: Any) -> Dict[str, bool]:
+    """Read an adapter capability declaration without trusting its surface."""
     capabilities = getattr(adapter, "capabilities", None)
     if not callable(capabilities):
-        return False
+        return {}
     try:
         caps = capabilities()
     except Exception:
-        return False
-    return isinstance(caps, dict) and bool(caps.get("can_enforce_zero_spend", False))
+        return {}
+    return caps if isinstance(caps, dict) else {}
+
+
+def adapter_zero_spend_verified(adapter: Any) -> bool:
+    """Return true only when an adapter explicitly verifies zero-spend mode."""
+    return adapter_capabilities(adapter).get("can_enforce_zero_spend") is True
 
 
 class LockBusy(RuntimeError):

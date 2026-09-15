@@ -16,6 +16,9 @@ final class AppStore {
     /// Daily stats shipped with the sample data; empty when the user starts from scratch.
     var sampleDailyStats: [DailyStats] = []
     var experiments: [EfficiencyExperiment] = []
+    /// Plans (项目 → 任务 → Plan). Server-authoritative via PlanClient; not part
+    /// of the legacy sync snapshot. Persisted locally and migrated on load.
+    var plans: [PlanItem] = []
     var settings: UserSettings = .defaults()
     var aiTools: [AIToolConnection] = AIToolConnection.defaults
     var activeFocus: ActiveFocus?
@@ -209,8 +212,8 @@ final class AppStore {
 
     var snapshot: StateSnapshot {
         StateSnapshot(projects: projects, goals: goals, tasks: tasks, timeSessions: timeSessions,
-                      aiExecutions: aiExecutions, experiments: experiments, settings: settings,
-                      aiTools: aiTools, activeFocus: activeFocus)
+                      aiExecutions: aiExecutions, experiments: experiments, plans: plans, settings: settings,
+                      aiTools: aiTools, activeFocus: activeFocus, schemaVersion: 2)
     }
 
     /// Replace local state with a server snapshot, keeping entities that are still dirty or
@@ -256,6 +259,10 @@ final class AppStore {
         timeSessions = persisted.state.timeSessions
         aiExecutions = persisted.state.aiExecutions
         experiments = persisted.state.experiments
+        // Bring the local cache up to schema v2: ensure every Task has a default
+        // Plan. Idempotent, so re-loading a migrated cache is a no-op.
+        let migrated = migrateDefaultPlans(persisted.state)
+        plans = migrated.plans
         settings = persisted.state.settings
         aiTools = persisted.state.aiTools
         activeFocus = persisted.state.activeFocus

@@ -9,6 +9,8 @@ import errno
 import fcntl
 import hashlib
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -53,8 +55,81 @@ def adapter_zero_spend_verified(adapter: Any) -> bool:
     return adapter_capabilities(adapter).get("can_enforce_zero_spend") is True
 
 
+def adapter_dispatch_problem(adapter: Any, resuming: bool = False) -> str:
+    caps = adapter_capabilities(adapter)
+    if caps.get("can_enforce_zero_spend") is not True:
+        return "billing_unverified"
+    if caps.get("can_dispatch") is not True:
+        return "dispatch_unavailable"
+    if resuming and caps.get("can_resume") is not True:
+        return "resume_unavailable"
+    return ""
+
+
+class DispatchDenied(RuntimeError):
+    """Authority changed before the actual OS process creation."""
+
+
+_spawn_check = ContextVar("keji_spawn_check", default=None)
+
+
+@contextmanager
+def spawn_authority(check):
+    """Carry the caller's live authority through adapters to run_streaming.
+    Install inside the worker thread; contexts are not inherited by executors.
+    """
+    token = _spawn_check.set(check)
+    try:
+        yield
+    finally:
+        _spawn_check.reset(token)
+
+
+def enforce_spawn_authority(cancel_event=None) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise DispatchDenied("cancelled")
+    check = _spawn_check.get()
+    if check is not None:
+        try:
+            reason = check()
+        except Exception as exc:
+            raise DispatchDenied("authority_unavailable") from exc
+        if reason:
+            raise DispatchDenied(reason)
+
+
 class LockBusy(RuntimeError):
     """Raised when a non-blocking file lock is already held elsewhere."""
+
+
+class UnclearedOwner(LockBusy):
+    """The OS lock is free but an unclean execution left its durable fence."""
+
+
+def manual_clearance(path: str) -> str:
+    return ("manual recovery required for %s: stop all runners and writer descendants, "
+            "verify no process is writing, then clear this marker under an exclusive lock; "
+            "do not unlink an active lock file" % path)
+
+
+def lock_diagnostics(home):
+    """Read-only diagnosis; never clear markers or infer safety from a PID."""
+    messages = []
+    for path in sorted(_locks_dir(home).glob("*.lock")):
+        fd = os.open(str(path), os.O_RDONLY)
+        try:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as exc:
+                if exc.errno not in (errno.EACCES, errno.EAGAIN):
+                    raise
+                messages.append("active execution lock: %s" % path)
+            else:
+                if os.read(fd, 1):
+                    messages.append(manual_clearance(str(path)))
+        finally:
+            os.close(fd)
+    return messages
 
 
 class FileLock:
@@ -84,7 +159,7 @@ class FileLock:
             raise
         try:
             if os.read(fd, 1):
-                raise LockBusy("uncleared owner; verify orphan processes before clearing %s" % self.path)
+                raise UnclearedOwner(manual_clearance(self.path))
             os.write(fd, str(os.getpid()).encode())
             os.fsync(fd)
         except Exception:

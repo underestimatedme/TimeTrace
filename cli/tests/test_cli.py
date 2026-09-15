@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -61,6 +62,18 @@ class CliTest(unittest.TestCase):
         self.assertEqual(tasks[0]["priority"], 2)
         self.assertEqual(tasks[1]["any_tool"], 1)
         self.assertEqual(tasks[1]["repo"], os.path.abspath(str(self.repo)))
+
+    def test_doctor_diagnoses_persistent_lock_without_clearing_it(self):
+        path = self.home / "locks" / "coding-slot.lock"
+        path.parent.mkdir(parents=True)
+        path.write_text("1234")
+        with patch("keji.cli.CredentialStore") as credentials:
+            credentials.return_value.load.return_value = None
+            code, out, err = self.run_cli("agent", "doctor")
+        self.assertIn("manual", out)
+        self.assertIn(str(path), out)
+        self.assertIn("descendants", out)
+        self.assertEqual(path.read_text(), "1234")
 
     def test_add_rejects_non_repo_and_missing_dependency(self):
         code, _, err = self.run_cli("add", "x", "--repo", self.tmp.name)

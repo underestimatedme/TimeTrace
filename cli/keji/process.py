@@ -6,6 +6,8 @@ import threading
 import time
 from typing import IO, List, Optional, Sequence, Tuple
 
+from keji.dispatch import enforce_spawn_authority
+
 MAX_CAPTURED_LINES = 10_000
 MAX_LOG_BYTES = 10 * 1024 * 1024
 
@@ -24,6 +26,10 @@ def run_streaming(
     with open(log_file, "a", encoding="utf-8") as log, open(os.devnull, "rb") as devnull:
         log.write("$ " + " ".join(_shell_quote(part) for part in cmd) + "\n")
         log.flush()
+        # Check after command/environment/log preparation, at the shared OS
+        # boundary used by both provider adapters. This check and Popen are not
+        # atomic; callers must handle revocation after the process starts.
+        enforce_spawn_authority(cancel_event)
         proc = subprocess.Popen(
             list(cmd), cwd=cwd, stdin=devnull, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=run_env, text=True, bufsize=1, start_new_session=True,

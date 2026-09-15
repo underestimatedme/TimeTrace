@@ -64,6 +64,12 @@ class WorktreeTest(unittest.TestCase):
         self.assertTrue(worktree.is_git_repo(str(self.repo)))
         self.assertFalse(worktree.is_git_repo(self.tmp.name))
 
+    def test_snapshot_detects_assume_unchanged_tracked_bytes(self):
+        git("update-index", "--assume-unchanged", "README.md", cwd=self.repo)
+        before = worktree.snapshot(str(self.repo))
+        (self.repo / "README.md").write_text("changed while hidden from git diff\n")
+        self.assertNotEqual(worktree.snapshot(str(self.repo)), before)
+
 
 if __name__ == "__main__":
     unittest.main()

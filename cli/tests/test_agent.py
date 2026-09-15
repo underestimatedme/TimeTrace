@@ -440,6 +440,118 @@ class RecoveryFenceTest(unittest.TestCase):
         self.calls.clear()
         return self.db.get_checkpoint("j1")
 
+    def test_checkpoint_created_before_lock_acquisition_is_reloaded(self):
+        from keji.dispatch import coding_slot_lock
+        self.claim["job"].update(id="j2", plan_id="plan-1")
+        other_cloud = FakeCloud()
+        other_claim = other_cloud.claim("token")
+        other_claim["job"]["plan_id"] = "plan-1"
+        other_cloud.claim = lambda token: other_claim
+        other = Agent(self.db, other_cloud, {"codex": self.adapter}, self.home, lambda: "token",
+                      prepare_workspace=self.agent.prepare_workspace)
+        def acquire_after_other(home):
+            with patch("keji.agent.coding_slot_lock", coding_slot_lock):
+                self.assertEqual(other.run_once(), "job j1 → waiting_quota")
+            return coding_slot_lock(home)
+        with patch("keji.agent.coding_slot_lock", acquire_after_other):
+            self.assertEqual(self.agent.run_once(), "job j2 → awaiting_review")
+        self.assertEqual([call[0] for call in self.calls], ["start", "resume"])
+
+    def test_started_history_created_before_lock_acquisition_is_reloaded(self):
+        from keji.dispatch import coding_slot_lock
+        self.claim["job"]["plan_id"] = "plan-1"
+        def acquire_after_start(home):
+            self.db.mark_plan_started("plan-1", "other-job", "other-attempt")
+            return coding_slot_lock(home)
+        with patch("keji.agent.coding_slot_lock", acquire_after_start):
+            self.assertIn("waiting_input", self.agent.run_once())
+        self.assertEqual(self.calls, [])
+
+    def test_cancelled_resume_exception_deletes_checkpoint_and_reports_cancel(self):
+        self.checkpoint()
+        started = threading.Event()
+        original_renew = self.cloud.renew
+        def renew(*args):
+            return {"desired_action": "cancel"} if started.is_set() else original_renew(*args)
+        self.cloud.renew = renew
+        def resume(prompt, cwd, session_id, log_file, cancel_event):
+            started.set()
+            self.assertTrue(cancel_event.wait(1))
+            raise RuntimeError("provider interrupted")
+        self.adapter.resume = resume
+        self.assertIn("cancelled", self.agent.run_once())
+        self.assertIsNone(self.db.get_checkpoint("j1"))
+        self.assertEqual(self.cloud.events[-1]["type"], "cancelled")
+
+    def test_adapter_cancel_event_dominates_resume_shutdown_exception(self):
+        self.checkpoint()
+        def resume(prompt, cwd, session_id, log_file, cancel_event):
+            cancel_event.set()
+            raise RuntimeError("provider interrupted")
+        self.adapter.resume = resume
+        self.assertIn("cancelled", self.agent.run_once())
+        self.assertIsNone(self.db.get_checkpoint("j1"))
+        self.assertEqual(self.cloud.events[-1]["type"], "cancelled")
+
+    def test_resume_exception_reports_terminal_event_after_running(self):
+        self.checkpoint()
+        self.cloud.events.clear()
+        def resume(*args):
+            raise RuntimeError("provider crashed")
+        self.adapter.resume = resume
+        self.assertIn("waiting_input", self.agent.run_once())
+        self.assertEqual([(event["seq"], event["type"]) for event in self.cloud.events],
+                         [(1, "running"), (2, "waiting_input")])
+
+    def test_malformed_checkpoint_job_identity_requires_input(self):
+        cp = self.checkpoint()
+        cp.job_id = None
+        self.db.save_checkpoint(cp)
+        self.assertIn("waiting_input", self.agent.run_once())
+        self.assertEqual(self.calls, [])
+
+    def test_adapter_cannot_spawn_after_capability_revocation_inside_start(self):
+        import sys
+        from keji.process import run_streaming
+        marker = self.home / "spawned"
+        self.agent.heartbeat_interval = 2
+        def start(prompt, cwd, session_id, log_file, cancel_event):
+            self.adapter.capabilities = lambda: {"can_dispatch": True, "can_resume": True,
+                                                 "can_enforce_zero_spend": False}
+            code, lines = run_streaming([sys.executable, "-c", "from pathlib import Path; Path(%r).touch()" % str(marker)],
+                                        cwd, log_file, cancel_event=cancel_event)
+            return RunResult(exit_code=code, ok=code == 0)
+        self.adapter.start = start
+        self.assertIn("billing_unverified", self.agent.run_once())
+        self.assertFalse(marker.exists())
+
+    def test_resume_revocation_inside_adapter_blocks_actual_process(self):
+        import sys
+        from keji.process import run_streaming
+        self.checkpoint()
+        marker = self.home / "spawned"
+        self.agent.heartbeat_interval = 2
+        def resume(prompt, cwd, session_id, log_file, cancel_event):
+            self.adapter.capabilities = lambda: {"can_dispatch": True, "can_resume": False,
+                                                 "can_enforce_zero_spend": True}
+            code, lines = run_streaming([sys.executable, "-c", "from pathlib import Path; Path(%r).touch()" % str(marker)],
+                                        cwd, log_file, cancel_event=cancel_event)
+            return RunResult(exit_code=code, ok=code == 0)
+        self.adapter.resume = resume
+        self.assertIn("waiting_input", self.agent.run_once())
+        self.assertFalse(marker.exists())
+        self.assertIsNotNone(self.db.get_checkpoint("j1"))
+
+    def test_crash_fence_surfaces_manual_clearance_in_agent(self):
+        from keji.dispatch import coding_slot_lock
+        path = Path(coding_slot_lock(self.home).path)
+        path.parent.mkdir(parents=True)
+        path.write_text("1234")
+        result = self.agent.run_once()
+        self.assertIn("manual", result)
+        self.assertIn(str(path), result)
+        self.assertEqual(path.read_text(), "1234")
+
     def test_preparation_crossing_lease_deadline_never_spawns(self):
         clock = [1000.0]
         self.claim["lease_expires_at"] = datetime.fromtimestamp(1001, timezone.utc).isoformat()

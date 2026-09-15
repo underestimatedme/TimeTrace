@@ -17,6 +17,7 @@ from keji.agent import Agent
 from keji.cloud import CloudClient
 from keji.credentials import CredentialStore, SessionManager
 from keji.db import Database
+from keji.dispatch import lock_diagnostics
 from keji.models import (BLOCKED, CODEX, EV_SAMPLE_FAILURE, FAILED, RUNNABLE, RUNNING, TOOLS,
                          Sample)
 
@@ -160,7 +161,10 @@ def cmd_agent_doctor(args: argparse.Namespace) -> int:
     for name in TOOLS:
         binary = str(cfg.get(name, {}).get("bin", name))
         print("%s: %s" % (name, shutil.which(binary) or "未找到"))
-    return 0 if paired and db.list_workspaces() else 1
+    diagnostics = lock_diagnostics(home)
+    for message in diagnostics:
+        print("Execution lock: %s" % message)
+    return 0 if paired and db.list_workspaces() and not diagnostics else 1
 
 
 def cmd_agent_install(args: argparse.Namespace) -> int:

@@ -15,12 +15,17 @@ def snapshot(path: str) -> Tuple[str, str]:
     digest = hashlib.sha256()
     for args in (("diff", "--binary", "HEAD", "--"), ("diff", "--cached", "--binary", "HEAD", "--")):
         digest.update(subprocess.check_output(["git", "-C", path] + list(args)))
-    untracked = subprocess.check_output(["git", "-C", path, "ls-files", "--others", "-z"])
-    for name in sorted(untracked.split(b"\0")):
+    # Read tracked bytes too: git diff deliberately hides assume-unchanged and
+    # skip-worktree entries and therefore cannot be our content authority.
+    files = subprocess.check_output(["git", "-C", path, "ls-files", "--cached", "--others", "-z"])
+    for name in sorted(set(files.split(b"\0"))):
         if not name:
             continue
         file = Path(path) / os.fsdecode(name)
         digest.update(name + b"\0")
+        if not file.exists() and not file.is_symlink():
+            digest.update(b"missing\0")
+            continue
         digest.update(str(file.lstat().st_mode).encode() + b"\0")
         if file.is_symlink():
             digest.update(os.fsencode(os.readlink(file)))

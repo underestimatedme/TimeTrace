@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import sys
 from pathlib import Path
 
 from keji import limits, scheduler
@@ -18,7 +19,7 @@ class FakeAdapter:
         return self.live
 
     def capabilities(self):
-        return {"can_enforce_zero_spend": True}
+        return {"can_enforce_zero_spend": True, "can_dispatch": True, "can_resume": True}
 
     def start(self, prompt, cwd, session_id, log_file):
         self.calls.append(("start", prompt, cwd, session_id))
@@ -89,6 +90,87 @@ class SchedulerTest(unittest.TestCase):
                                      ensure_worktree=prepare, log=lambda *args: None)
         self.assertEqual(outcome, "task %d → blocked (billing_unverified)" % task_id)
         self.assertEqual(adapter.calls, [])
+
+    def test_missing_dispatch_or_resume_capability_blocks(self):
+        for missing in ("can_dispatch", "can_resume"):
+            with self.subTest(missing=missing):
+                task_id = self.db.add_task("do", "/repo", tool="claude")
+                if missing == "can_resume":
+                    self.db.update_task(task_id, session_id="native")
+                adapter = FakeAdapter("claude")
+                adapter.capabilities = lambda: {"can_enforce_zero_spend": True, "can_dispatch": True,
+                                                 "can_resume": True, missing: False}
+                outcome = self.run_once({"claude": adapter}, now=100)
+                self.assertIn("blocked", outcome)
+                self.assertEqual(adapter.calls, [])
+                self.db.update_task(task_id, state=DONE)
+
+    def test_billing_revoked_during_logging_cannot_spawn(self):
+        self.db.add_task("do", "/repo", tool="claude")
+        adapter = FakeAdapter("claude")
+        def log(*args):
+            adapter.capabilities = lambda: {"can_enforce_zero_spend": False}
+        outcome = scheduler.run_once(self.db, {"claude": adapter}, self.cfg, self.home,
+                                     ensure_worktree=fake_worktree, log=log)
+        self.assertIn("billing_unverified", outcome)
+        self.assertEqual(adapter.calls, [])
+
+    def test_billing_revoked_inside_adapter_cannot_create_process(self):
+        from keji.process import run_streaming
+        self.db.add_task("do", "/repo", tool="claude")
+        adapter = FakeAdapter("claude")
+        marker = self.home / "spawned"
+        def start(prompt, cwd, session_id, log_file):
+            adapter.capabilities = lambda: {"can_enforce_zero_spend": False}
+            code, lines = run_streaming([sys.executable, "-c", "from pathlib import Path; Path(%r).touch()" % str(marker)], cwd, log_file)
+            return RunResult(ok=code == 0, exit_code=code)
+        adapter.start = start
+        outcome = self.run_once({"claude": adapter}, now=100)
+        self.assertIn("billing_unverified", outcome)
+        self.assertFalse(marker.exists())
+
+    def test_resume_revoked_inside_adapter_cannot_create_process(self):
+        from keji.process import run_streaming
+        task_id = self.db.add_task("do", "/repo", tool="claude")
+        self.db.update_task(task_id, session_id="native")
+        adapter = FakeAdapter("claude")
+        marker = self.home / "spawned"
+        def resume(prompt, cwd, session_id, log_file):
+            adapter.capabilities = lambda: {"can_enforce_zero_spend": True, "can_dispatch": True, "can_resume": False}
+            code, lines = run_streaming([sys.executable, "-c", "from pathlib import Path; Path(%r).touch()" % str(marker)], cwd, log_file)
+            return RunResult(ok=code == 0, exit_code=code)
+        adapter.resume = resume
+        outcome = self.run_once({"claude": adapter}, now=100)
+        self.assertIn("resume_unavailable", outcome)
+        self.assertFalse(marker.exists())
+        self.assertEqual(self.db.get_task(task_id)["session_id"], "native")
+
+    def test_success_hook_resume_keeps_process_authority(self):
+        from keji.process import run_streaming
+        self.db.add_task("do", "/repo", tool="claude", on_success="suggest follow-up")
+        adapter = FakeAdapter("claude")
+        marker = self.home / "hook-spawned"
+        def resume(prompt, cwd, session_id, log_file):
+            adapter.capabilities = lambda: {"can_enforce_zero_spend": False}
+            code, lines = run_streaming([sys.executable, "-c", "from pathlib import Path; Path(%r).touch()" % str(marker)], cwd, log_file)
+            return RunResult(ok=code == 0, exit_code=code, output="[]")
+        adapter.resume = resume
+        outcome = scheduler.run_once(self.db, {"claude": adapter}, self.cfg, self.home,
+                                     ensure_worktree=fake_worktree, log=lambda *args: None)
+        self.assertIn("done", outcome)
+        self.assertFalse(marker.exists())
+        self.assertIn("billing_unverified", self.db.list_events(type_="hook_rejected")[0]["payload"]["reason"])
+
+    def test_crash_fence_surfaces_manual_clearance_in_scheduler(self):
+        from keji.dispatch import coding_slot_lock
+        self.db.add_task("do", "/repo", tool="claude")
+        path = Path(coding_slot_lock(self.home).path)
+        path.parent.mkdir(parents=True)
+        path.write_text("1234")
+        outcome = self.run_once({"claude": FakeAdapter("claude")}, now=100)
+        self.assertIn("manual", outcome)
+        self.assertIn(str(path), outcome)
+        self.assertEqual(path.read_text(), "1234")
 
     def test_missing_or_false_zero_spend_capability_blocks_start_and_resume(self):
         """The scheduler must never bypass the shared billing gate."""

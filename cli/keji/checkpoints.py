@@ -47,10 +47,13 @@ def checkpoint_problem(cp: Checkpoint, provider: str, profile: str, workspace: s
     if cp.schema_version != CHECKPOINT_SCHEMA_VERSION:
         return "checkpoint schema requires manual recovery"
     if (any(not isinstance(getattr(cp, key), str) for key in (
+            "plan_id", "job_id", "attempt_id",
             "provider_session_id", "provider", "tool_profile_id", "canonical_workspace",
             "execution_path", "output_path", "git_head", "dirty_paths_digest"))
             or type(cp.last_output_offset) is not int):
         return "checkpoint fields malformed"
+    if any(not getattr(cp, key).strip() for key in ("plan_id", "job_id", "attempt_id")):
+        return "checkpoint identity missing"
     if not cp.provider_session_id or not cp.provider_session_id.strip():
         return "checkpoint has no native session"
     if cp.provider != provider or not resume_allowed(cp.tool_profile_id, profile, native_resume):

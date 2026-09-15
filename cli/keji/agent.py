@@ -11,8 +11,9 @@ from typing import Any, Callable, Dict
 from keji.db import Database
 from keji import quota, worktree
 from keji.checkpoints import Checkpoint, checkpoint_problem
-from keji.dispatch import (DispatchGate, LockBusy, adapter_capabilities, adapter_zero_spend_verified,
-                           coding_slot_lock, deny_reason, workspace_lock)
+from keji.dispatch import (DispatchDenied, DispatchGate, LockBusy, UnclearedOwner, adapter_capabilities,
+                           adapter_zero_spend_verified, coding_slot_lock, deny_reason,
+                           enforce_spawn_authority, spawn_authority, workspace_lock)
 
 
 def _default_pool_binding(provider: str):
@@ -73,34 +74,38 @@ class Agent:
         log_file = str(self.home / "logs" / ("remote-%s.log" % job_id))
 
         plan_key = job.get("plan_id") or job_id
-        try:
-            checkpoint = self.db.get_checkpoint(plan_key)
-        except (TypeError, ValueError, KeyError):
-            return self._blocked(claim, plan_key, "checkpoint unreadable; manual recovery required")
         deadline = self._deadline(claim)
         reason = self._gate(adapter, job, deadline)
         if reason:
-            return self._blocked(claim, plan_key, reason, checkpoint)
-        if checkpoint:
-            reason = checkpoint_problem(checkpoint, provider, job["tool_profile_id"],
-                                        workspace["path"], adapter_capabilities(adapter).get("can_resume") is True)
-            if reason:
-                return self._blocked(claim, plan_key, reason, checkpoint)
-        elif self.db.plan_started(plan_key) or (existing and existing["state"] != "claimed"):
-            return self._blocked(claim, plan_key, "checkpoint missing for previously started job; manual recovery required")
+            return self._blocked(claim, plan_key, reason)
 
         # Hold both locks through preparation, execution and durable checkpoint/
         # terminal event persistence. A crashed owner leaves a persistent fence.
         try:
             slot = coding_slot_lock(self.home).acquire()
-        except LockBusy:
-            return "job %s → deferred (runner busy)" % job_id
+        except LockBusy as exc:
+            return "job %s → deferred (runner busy)" % job_id + ("; " + str(exc) if isinstance(exc, UnclearedOwner) else "")
         try:
             ws_lock = workspace_lock(self.home, workspace["path"]).acquire()
-        except LockBusy:
+        except LockBusy as exc:
             slot.release()
-            return "job %s → deferred (workspace busy)" % job_id
+            return "job %s → deferred (workspace busy)" % job_id + ("; " + str(exc) if isinstance(exc, UnclearedOwner) else "")
         try:
+            # Another job for this Plan may have finished between claim and
+            # lock acquisition. Recovery evidence is authoritative only here.
+            try:
+                checkpoint = self.db.get_checkpoint(plan_key)
+            except (TypeError, ValueError, KeyError):
+                return self._blocked(claim, plan_key, "checkpoint unreadable; manual recovery required")
+            latest = self.db.get_remote_claim(job_id)
+            if checkpoint:
+                reason = checkpoint_problem(checkpoint, provider, job["tool_profile_id"],
+                                            workspace["path"], adapter_capabilities(adapter).get("can_resume") is True)
+                if reason:
+                    return self._blocked(claim, plan_key, reason, checkpoint)
+            elif (self.db.plan_started(plan_key) or (existing and existing["state"] != "claimed")
+                  or (latest and latest["state"] != "claimed")):
+                return self._blocked(claim, plan_key, "checkpoint missing for previously started job; manual recovery required")
             return self._execute(claim, workspace, adapter, checkpoint, plan_key, log_file, deadline)
         finally:
             ws_lock.release()
@@ -184,6 +189,8 @@ class Agent:
         reason = self._gate(adapter, job, deadline)
         if reason:
             return self._blocked(claim, plan_key, reason, checkpoint)
+        running_announced = False
+        cancel_event = threading.Event()
         try:
             with ThreadPoolExecutor(max_workers=1) as pool:
                 preparation = pool.submit(self.prepare_workspace, workspace["path"], local_id,
@@ -222,6 +229,7 @@ class Agent:
                     return self._blocked(claim, plan_key, reason, checkpoint)
                 self.db.update_remote_claim(job_id, "launching")
                 self._report(claim, [{"seq": 1, "type": "running", "message": "started"}])
+                running_announced = True
                 self.db.update_remote_claim(job_id, "running")
                 # Reporting can block on the network; check authority again at
                 # the actual call boundary, not only before announcing the run.
@@ -232,9 +240,15 @@ class Agent:
                     return self._blocked(claim, plan_key, reason, checkpoint, seq=2)
                 self.db.mark_plan_started(plan_key, job_id, claim["attempt_id"])
                 Path(log_file).touch(exist_ok=True)
-                cancel_event = threading.Event()
                 run = adapter.resume if resuming else adapter.start
                 spawned = False
+                def authority():
+                    if reason:
+                        return reason
+                    boundary_reason = self._gate(adapter, job, deadline)
+                    if not boundary_reason and resuming and adapter_capabilities(adapter).get("can_resume") is not True:
+                        boundary_reason = "checkpoint resume capability changed"
+                    return boundary_reason
                 def invoke():
                     nonlocal reason, spawned
                     # Executor scheduling is also a delay: fence inside the
@@ -247,7 +261,9 @@ class Agent:
                     if reason:
                         return None
                     spawned = True
-                    return run(job["prompt"], execution_path, session_id, log_file, cancel_event)
+                    with spawn_authority(authority):
+                        enforce_spawn_authority(cancel_event)
+                        return run(job["prompt"], execution_path, session_id, log_file, cancel_event)
                 future = pool.submit(invoke)
                 while True:
                     try:
@@ -267,10 +283,23 @@ class Agent:
                     self.db.update_remote_claim(job_id, "fenced")
                     return "job %s → fenced (%s)" % (job_id, reason)
         except Exception as exc:
+            terminal_seq = 2 if running_announced else 1
+            # Cancellation dominates an adapter's shutdown exception. Lease
+            # fencing also must not turn into a resumable recovery failure.
+            if (job.get("desired_action") == "cancel" or job.get("status") == "cancelled"
+                    or reason == "cancelled" or (cancel_event.is_set() and not reason)
+                    or (not reason and isinstance(exc, DispatchDenied) and str(exc) == "cancelled")):
+                return self._blocked(claim, plan_key, "cancelled", checkpoint, seq=terminal_seq)
+            if reason and cancel_event.is_set():
+                self.db.delete_checkpoint(plan_key)
+                self.db.update_remote_claim(job_id, "fenced")
+                return "job %s → fenced (%s)" % (job_id, reason)
+            if isinstance(exc, DispatchDenied):
+                return self._blocked(claim, plan_key, str(exc), checkpoint, seq=terminal_seq)
             # Invalid recovery evidence must survive for manual diagnosis.
             if resuming:
-                return self._blocked(claim, plan_key, "checkpoint recovery failed: %s" % exc, checkpoint)
-            self._report(claim, [{"seq": 2, "type": "failed", "message": "adapter/preparation crashed: %s" % exc}])
+                return self._blocked(claim, plan_key, "checkpoint recovery failed: %s" % exc, checkpoint, seq=terminal_seq)
+            self._report(claim, [{"seq": terminal_seq, "type": "failed", "message": "adapter/preparation crashed: %s" % exc}])
             self.db.update_remote_claim(job_id, "reported")
             return "job %s → failed" % job_id
 

@@ -3,12 +3,23 @@ import sys
 import tempfile
 import time
 import unittest
+import threading
 from pathlib import Path
 
 from keji.process import run_streaming
 
 
 class ProcessTest(unittest.TestCase):
+    def test_already_cancelled_run_never_creates_a_process(self):
+        with tempfile.TemporaryDirectory() as d:
+            marker = Path(d) / "spawned"
+            cancelled = threading.Event()
+            cancelled.set()
+            with self.assertRaisesRegex(RuntimeError, "cancelled"):
+                run_streaming([sys.executable, "-c", "from pathlib import Path; Path(%r).touch()" % str(marker)],
+                              d, str(Path(d) / "run.log"), cancel_event=cancelled)
+            self.assertFalse(marker.exists())
+
     def test_drains_stderr_without_deadlock(self):
         with tempfile.TemporaryDirectory() as d:
             log = str(Path(d) / "run.log")

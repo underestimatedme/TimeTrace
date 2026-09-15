@@ -7,8 +7,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 from keji import hooks, limits, worktree
 from keji.db import Database
-from keji.dispatch import (DispatchGate, LockBusy, adapter_zero_spend_verified,
-                           coding_slot_lock, deny_reason)
+from keji.dispatch import (DispatchDenied, LockBusy, UnclearedOwner, adapter_dispatch_problem,
+                           coding_slot_lock, enforce_spawn_authority, spawn_authority)
 from keji.models import (BLOCKED, CLAUDE, DONE, EV_CIRCUIT_OPEN, EV_SAMPLE_FAILURE,
                          EV_TASK_BLOCKED, EV_TASK_DONE, EV_TASK_FAILED, EV_TASK_RESUMED,
                          EV_TOOL_SWITCHED, EV_WINDOW_RESET, FAILED, PENDING, RUNNABLE,
@@ -136,8 +136,8 @@ def _dispatch(db: Database, adapter: Any, tool: str, task: Dict[str, Any], cfg: 
     cloud agent so the two can never drive a process at the same time."""
     try:
         slot = coding_slot_lock(home).acquire()
-    except LockBusy:
-        return "task %d → deferred (runner busy)" % task["id"]
+    except LockBusy as exc:
+        return "task %d → deferred (runner busy)" % task["id"] + ("; " + str(exc) if isinstance(exc, UnclearedOwner) else "")
     try:
         return _dispatch_locked(db, adapter, tool, task, cfg, home, now, log,
                                 ensure_worktree, hook_runner, rng, clock)
@@ -149,17 +149,11 @@ def _dispatch_locked(db: Database, adapter: Any, tool: str, task: Dict[str, Any]
                      home: Path, now: int, log: Callable[[str], None], ensure_worktree: Callable,
                      hook_runner: Callable, rng: Callable[[], float], clock: Callable[[], int]) -> str:
     task_id = task["id"]
-    reason = deny_reason(DispatchGate(
-        cancelled=False,
-        lease_valid=True,
-        runner_online=True,
-        dependencies_ready=True,
-        zero_spend_verified=adapter_zero_spend_verified(adapter),
-    ))
-    if reason is not None:
+    resuming = bool(task.get("session_id"))
+    reason = adapter_dispatch_problem(adapter, resuming)
+    if reason:
         db.update_task(task_id, last_error=reason, now=now)
         return "task %d → blocked (%s)" % (task_id, reason)
-    resuming = bool(task.get("session_id"))
     session_id = task.get("session_id") or str(uuid.uuid4())
     try:
         wt, branch = task.get("worktree"), task.get("branch")
@@ -175,9 +169,10 @@ def _dispatch_locked(db: Database, adapter: Any, tool: str, task: Dict[str, Any]
         db.add_event(EV_TASK_FAILED, tool=tool, payload={"task_id": task_id, "reason": str(exc)}, at=now)
         return "task %d → failed (worktree)" % task_id
     # Preparation can take long enough for the adapter's authority to change.
-    if not adapter_zero_spend_verified(adapter):
-        db.update_task(task_id, last_error="billing_unverified", now=now)
-        return "task %d → blocked (billing_unverified)" % task_id
+    reason = adapter_dispatch_problem(adapter, resuming)
+    if reason:
+        db.update_task(task_id, last_error=reason, now=now)
+        return "task %d → blocked (%s)" % (task_id, reason)
     db.update_task(task_id, state=RUNNING, tool=tool, session_id=session_id, worktree=wt,
                    branch=branch, now=now)
     logs_dir = Path(home) / "logs"
@@ -191,10 +186,17 @@ def _dispatch_locked(db: Database, adapter: Any, tool: str, task: Dict[str, Any]
     log("task %d: %s with %s (session %s)" % (task_id, "resume" if resuming else "start", tool,
                                               session_id))
     try:
-        if resuming:
-            res = adapter.resume(RESUME_PROMPT % task["prompt"], wt, session_id, log_path)
-        else:
-            res = adapter.start(task["prompt"], wt, session_id, log_path)
+        with spawn_authority(lambda: adapter_dispatch_problem(adapter, resuming)):
+            enforce_spawn_authority()
+            if resuming:
+                res = adapter.resume(RESUME_PROMPT % task["prompt"], wt, session_id, log_path)
+            else:
+                res = adapter.start(task["prompt"], wt, session_id, log_path)
+    except DispatchDenied as exc:
+        reason = str(exc)
+        db.finish_run(run_id, -1, blocked=False, summary="dispatch blocked: " + reason, now=clock())
+        db.update_task(task_id, state=RUNNABLE, session_id=task.get("session_id"), last_error=reason, now=clock())
+        return "task %d → blocked (%s)" % (task_id, reason)
     except Exception as exc:
         res = RunResult(exit_code=-1, session_id=session_id, error="adapter crashed: %s" % exc)
     ended = max(now, clock())
@@ -219,7 +221,10 @@ def _dispatch_locked(db: Database, adapter: Any, tool: str, task: Dict[str, Any]
         if task.get("on_success"):
             fresh = db.get_task(task_id)
             hook_log = str(logs_dir / ("task%d-hook.log" % task_id))
-            hook_runner(db, adapter, fresh, home, cfg, ended, hook_log)
+            # Follow-up generation also resumes the provider session. Keep the
+            # same live guard at its Popen boundary; hooks record any denial.
+            with spawn_authority(lambda: adapter_dispatch_problem(adapter, True)):
+                hook_runner(db, adapter, fresh, home, cfg, ended, hook_log)
         return "task %d → done" % task_id
     err = res.error or "exit %d" % res.exit_code
     db.finish_run(run_id, res.exit_code if res.exit_code else 1, blocked=False, summary=err[:500],

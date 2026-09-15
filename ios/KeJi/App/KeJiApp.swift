@@ -57,11 +57,8 @@ final class AppEnvironment {
             store.workspaceClient = WorkspaceClient(client: client)
             let sync = self.sync
             store.preparePlanDispatch = { [weak sync] in
-                guard let sync else { return false }
-                await sync.pushDirty()
-                await sync.pull()
-                if case .idle = sync.status { return true }
-                return false
+                guard let sync else { throw APIError.noSession }
+                try await sync.prepareForPlanDispatch()
             }
             store.refreshPlanProjection = { [weak sync] in await sync?.pull() }
         }

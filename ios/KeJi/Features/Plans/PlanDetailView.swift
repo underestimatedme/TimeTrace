@@ -27,6 +27,7 @@ struct PlanDetailView: View {
     private func content(_ plan: PlanItem) -> some View {
         let deps = plan.dependsOn.compactMap { store.plan($0) }
         let busy = store.planBusy.contains(plan.id)
+        let executorBlocker = store.planDispatchUnavailableReason(plan.id)
         VStack(alignment: .leading, spacing: 8) {
             Text(plan.title).font(Typo.sans(Typo.lg, weight: .medium)).foregroundStyle(theme.text)
             Text(plan.status.label).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
@@ -66,6 +67,10 @@ struct PlanDetailView: View {
             }
         }
         VStack(spacing: 8) {
+            if let executorBlocker {
+                Text(executorBlocker).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
+                    .accessibilityIdentifier("plan.executor.unavailable")
+            }
             if busy { ProgressView("正在提交…").accessibilityIdentifier("plan.loading") }
             if let error = store.planErrors[plan.id] ?? store.planErrors[plan.taskId] {
                 Text(error).font(Typo.sans(Typo.xs)).foregroundStyle(theme.danger).accessibilityIdentifier("plan.error")
@@ -76,7 +81,7 @@ struct PlanDetailView: View {
                 }.accessibilityIdentifier("plan.accept")
             }
             AppButton("派发执行", variant: .accent, fullWidth: true,
-                      disabled: busy || store.workspaceClient == nil || plan.id.hasPrefix("draft-") || !canDispatchPlan(plan, allPlans: store.plans)) {
+                      disabled: busy || executorBlocker != nil || store.workspaceClient == nil || plan.id.hasPrefix("draft-") || !canDispatchPlan(plan, allPlans: store.plans)) {
                 showDispatch = true
             }.accessibilityIdentifier("plan.dispatch")
             if plan.status == .failed {

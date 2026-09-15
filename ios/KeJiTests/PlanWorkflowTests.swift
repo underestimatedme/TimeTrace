@@ -265,6 +265,191 @@ final class PlanWorkflowTests: XCTestCase {
         XCTAssertEqual(store.timeSessions, sessions)
     }
 
+    func testHumanAndExternalTasksCannotDispatchAIJobs() async throws {
+        store.plans[0].status = .ready
+        let reply = try response(store.plans)
+        var requests = 0
+        PlanHTTPProtocol.handler = { _ in requests += 1; return (200, reply) }
+        for executor in [ExecutorType.human, .external] {
+            store.tasks[0].executorType = executor
+            let sent = await store.dispatchPlan(plan.id, runnerID: "r", workspaceID: "w", toolID: "t")
+            XCTAssertFalse(sent)
+            XCTAssertNotNil(store.planErrors[plan.id])
+        }
+        XCTAssertEqual(requests, 0, "unsupported executor must be rejected before loading or dispatching a runner")
+    }
+
+    func testOldAcceptedCacheCannotUnlockDependenciesOffline() throws {
+        var state = store.snapshot
+        state.plans[0].status = .accepted
+        var dependent = state.plans[0]
+        dependent.id = "dependent"
+        dependent.dependsOn = [plan.id]
+        dependent.status = .ready
+        state.plans.append(dependent)
+        let oldCache = try JSONCoding.encoder.encode(PersistedState(state: state))
+        let loaded = AppStore()
+        loaded.load(try JSONCoding.decoder.decode(PersistedState.self, from: oldCache))
+        XCTAssertNotEqual(loaded.plan(plan.id)?.status, .accepted)
+        XCTAssertFalse(canDispatchPlan(dependent, allPlans: loaded.plans))
+        XCTAssertNotNil(loaded.planErrors[plan.id])
+    }
+
+    func testServerConfirmedAcceptedCacheSurvivesOfflineReload() throws {
+        var accepted = plan!
+        accepted.status = .accepted
+        store.applyPlan(accepted)
+        let loaded = AppStore()
+        loaded.load(try JSONCoding.decoder.decode(PersistedState.self, from: JSONCoding.encoder.encode(store.persisted)))
+        XCTAssertEqual(loaded.plan(plan.id)?.status, .accepted)
+    }
+
+    func testUnverifiedHighRevisionCannotOverrideFreshServerPlan() async throws {
+        var state = store.snapshot
+        state.plans[0].status = .accepted
+        state.plans[0].revision = 99
+        store.load(PersistedState(state: state))
+        var current = plan!
+        current.status = .ready
+        current.revision = 3
+        let reply = try response([current])
+        PlanHTTPProtocol.handler = { _ in (200, reply) }
+        await store.refreshPlans(taskID: plan.taskId)
+        XCTAssertEqual(store.plan(plan.id)?.status, .ready)
+        XCTAssertEqual(store.plan(plan.id)?.revision, 3)
+        XCTAssertNil(store.planErrors[plan.id])
+    }
+
+    func testPlanRefreshFailureBlocksPreparationWithActualReason() async throws {
+        store.hasOnboarded = true
+        let bootstrap = try response(Bootstrap(user: nil, state: store.snapshot, serverTime: nil))
+        PlanHTTPProtocol.handler = { request in
+            if request.url!.path.hasSuffix("/plans") {
+                return (429, Data(#"{"code":42900,"message":"quota exhausted"}"#.utf8))
+            }
+            return (200, bootstrap)
+        }
+        let sync = SyncEngine(store: store, client: api, enabled: true)
+        store.preparePlanDispatch = { try await sync.prepareForPlanDispatch() }
+        let prepared = await store.prepareTaskPlan(plan.taskId)
+        XCTAssertNil(prepared)
+        XCTAssertTrue(store.planErrors[plan.taskId]?.contains("quota exhausted") == true)
+        XCTAssertNotEqual(sync.status, .idle)
+    }
+
+    func testConcurrentPlanRefreshSharesRequestAndCompletion() async throws {
+        let started = expectation(description: "one shared Plan request")
+        let gate = DispatchSemaphore(value: 0)
+        let reply = try response(store.plans)
+        var requests = 0
+        PlanHTTPProtocol.handler = { _ in
+            requests += 1
+            started.fulfill()
+            _ = gate.wait(timeout: .now() + 5)
+            return (200, reply)
+        }
+        let first = Task { await store.refreshPlans(taskID: plan.taskId) }
+        await fulfillment(of: [started], timeout: 3)
+        var returned = false
+        let second = Task { let result = await store.refreshPlans(taskID: plan.taskId); returned = true; return result }
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertFalse(returned)
+        gate.signal()
+        let results = await [first.value, second.value]
+        XCTAssertEqual(results, [true, true])
+        XCTAssertEqual(requests, 1)
+    }
+
+    func testConcurrentForegroundWaitsForPlanRefreshAndDoesNotReportIdleEarly() async throws {
+        store.hasOnboarded = true
+        let started = expectation(description: "Plan refresh pending")
+        let gate = DispatchSemaphore(value: 0)
+        let bootstrap = try response(Bootstrap(user: nil, state: store.snapshot, serverTime: nil))
+        let plansReply = try response(store.plans)
+        PlanHTTPProtocol.handler = { request in
+            if request.url!.path.hasSuffix("/plans") {
+                started.fulfill()
+                _ = gate.wait(timeout: .now() + 5)
+                return (200, plansReply)
+            }
+            return (200, bootstrap)
+        }
+        let sync = SyncEngine(store: store, client: api, enabled: true)
+        let first = Task { await sync.syncOnForeground() }
+        await fulfillment(of: [started], timeout: 3)
+        XCTAssertEqual(sync.status, .syncing)
+        var secondFinished = false
+        let second = Task { await sync.syncOnForeground(); secondFinished = true }
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertFalse(secondFinished, "a coalesced caller must wait for the same completed snapshot and Plans")
+        gate.signal()
+        await first.value
+        await second.value
+        XCTAssertEqual(sync.status, .idle)
+    }
+
+    func testSaveAndStartIntentSurvivesInFlightSyncAndDispatchesOnceWithFreshRevision() async throws {
+        store.hasOnboarded = true
+        var task = store.tasks[0]
+        task.executorType = .ai
+        let taskID = store.addTask(task)
+        let started = expectation(description: "foreground sync in flight")
+        let gate = DispatchSemaphore(value: 0)
+        var snapshot = store.snapshot
+        snapshot.tasks[snapshot.tasks.count - 1].updatedAt = Date(timeIntervalSince1970: 1_789_600_123)
+        let bootstrap = try response(Bootstrap(user: nil, state: snapshot, serverTime: nil))
+        var createdPlan = plan!
+        createdPlan.id = "created-plan"
+        createdPlan.taskId = taskID
+        createdPlan.status = .ready
+        let createdReply = try response(createdPlan)
+        let plansReply = try response([createdPlan])
+        let empty = try response([PlanItem]())
+        let job = RemoteJob(id: "one-job", taskId: taskID, runnerId: "r", workspaceId: "w", toolProfileId: "t",
+                            status: .queued, revision: 1, createdAt: Date(), updatedAt: Date())
+        let jobReply = try response(job)
+        var created = false
+        var dispatches = 0
+        PlanHTTPProtocol.handler = { request in
+            let path = request.url!.path
+            if path.hasSuffix("/sync") {
+                started.fulfill()
+                _ = gate.wait(timeout: .now() + 5)
+                return (200, bootstrap)
+            }
+            if path.hasSuffix("/bootstrap") { return (200, bootstrap) }
+            if path.hasSuffix("/remote-jobs") {
+                dispatches += 1
+                let body = try Self.body(request)
+                XCTAssertEqual(body["plan_id"] as? String, "created-plan")
+                XCTAssertEqual(body["expected_task_revision"] as? Int64, 1_789_600_123_000)
+                return (201, jobReply)
+            }
+            if path.contains(taskID), request.httpMethod == "POST" { created = true; return (201, createdReply) }
+            return (200, path.contains(taskID) && created ? plansReply : empty)
+        }
+        let sync = SyncEngine(store: store, client: api, enabled: true)
+        store.preparePlanDispatch = {
+            try await sync.prepareForPlanDispatch()
+        }
+        let foreground = Task { await sync.syncOnForeground() }
+        await fulfillment(of: [started], timeout: 3)
+        var intentFinished = false
+        let intent = Task { () -> Bool in
+            defer { intentFinished = true }
+            guard let plan = await store.prepareTaskPlan(taskID) else { return false }
+            return await store.dispatchPlan(plan.id, runnerID: "r", workspaceID: "w", toolID: "t")
+        }
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertFalse(intentFinished)
+        gate.signal()
+        await foreground.value
+        let sent = await intent.value
+        XCTAssertTrue(sent)
+        XCTAssertEqual(dispatches, 1)
+        XCTAssertEqual(store.planJobs["created-plan"]?.id, "one-job")
+    }
+
     func testAcceptanceDebouncesWhileReceiptIsPending() async throws {
         let started = expectation(description: "request reached server")
         let gate = DispatchSemaphore(value: 0)

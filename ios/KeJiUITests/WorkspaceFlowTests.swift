@@ -90,7 +90,20 @@ final class WorkspaceFlowTests: XCTestCase {
         capture("plan-cancelled")
     }
 
-    private func createAndDispatch(scenario: String) {
+    func testHumanPlanExplainsUnsupportedWorkflowWithoutOfferingAIRunner() {
+        createAndDispatch(scenario: "human", humanOnly: true)
+        XCTAssertFalse(app.buttons["plan.dispatch"].isEnabled)
+        XCTAssertTrue(app.staticTexts["plan.executor.unavailable"].exists)
+        XCTAssertFalse(app.buttons["plan.accept"].exists)
+        capture("human-plan-blocked")
+    }
+
+    func testSaveAndStartAIExecutesAfterTaskSync() {
+        createAndDispatch(scenario: "save-start", saveAndStart: true)
+        XCTAssertTrue(app.staticTexts["执行中"].waitForExistence(timeout: 10))
+    }
+
+    private func createAndDispatch(scenario: String, humanOnly: Bool = false, saveAndStart: Bool = false) {
         app.terminate()
         app.launchArguments = ["--workspace-fixture", "--online-ui-testing", "--api-base-url",
                                "http://127.0.0.1:18768/\(scenario)-\(UUID().uuidString)", "--screen", "tasks/new"]
@@ -100,8 +113,14 @@ final class WorkspaceFlowTests: XCTestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 5))
         title.tap()
         title.typeText("F08 网络任务\n")
-        app.swipeUp()
-        tap("保存任务")
+        if !humanOnly {
+            tap("AI 来做")
+            tap("Codex")
+        }
+        let saveTitle = saveAndStart ? "保存并开始" : "保存任务"
+        for _ in 0..<5 where !app.buttons[saveTitle].isHittable { app.swipeUp() }
+        tap(saveTitle)
+        if saveAndStart { return }
         tap("project.keji")
         let task = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "F08 网络任务")).firstMatch
         XCTAssertTrue(task.waitForExistence(timeout: 10))
@@ -109,6 +128,7 @@ final class WorkspaceFlowTests: XCTestCase {
         let plan = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "plan.")).firstMatch
         XCTAssertTrue(plan.waitForExistence(timeout: 10), "created task must immediately expose its Plan")
         plan.tap()
+        if humanOnly { return }
         tap("plan.dispatch", timeout: 10)
         tap("plan.dispatch.confirm")
         XCTAssertTrue(app.staticTexts["执行中"].waitForExistence(timeout: 10))

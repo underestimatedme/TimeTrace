@@ -29,6 +29,7 @@ final class SyncEngine {
 
     @ObservationIgnored private var pushTask: _Concurrency.Task<Void, Never>?
     @ObservationIgnored private var inFlight = false
+    @ObservationIgnored private var completionWaiters: [CheckedContinuation<Void, Never>] = []
     @ObservationIgnored private var sessionTask: _Concurrency.Task<Bool, Never>?
     private static let userKey = "keji.sync.user"
 
@@ -106,18 +107,54 @@ final class SyncEngine {
 
     // MARK: - Pull / push
 
+    private func waitForCompletion() async {
+        while inFlight {
+            await withCheckedContinuation { completionWaiters.append($0) }
+        }
+    }
+
+    private func finishSync() {
+        inFlight = false
+        let waiters = completionWaiters
+        completionWaiters = []
+        for waiter in waiters { waiter.resume() }
+    }
+
+    /// Preserve a caller's dispatch intent until both projections are fresh.
+    /// The second pull observes Task revisions changed by explicit Plan creation.
+    func prepareForPlanDispatch() async throws {
+        guard enabled else { throw APIError.offline }
+        await waitForCompletion()
+        await syncOnForeground()
+        try requireCompletedSync()
+        await pull()
+        try requireCompletedSync()
+    }
+
+    private func requireCompletedSync() throws {
+        guard case .idle = status else { throw APIError(code: -7, message: status.label) }
+    }
+
+    private func refreshPlansBeforeCompletingSync() async throws {
+        guard await store.refreshAllPlans() else {
+            let reason = store.tasks.compactMap { store.planErrors[$0.id] }.first ?? "任务仍有待同步修改，请刷新后重试。"
+            throw APIError(code: -7, message: "Plan 同步失败：" + reason)
+        }
+    }
+
     /// `GET /bootstrap` → replace local state except dirty/deleted entities.
     func pull() async {
-        guard enabled, !inFlight else { return }
+        guard enabled else { return }
+        if inFlight { await waitForCompletion(); return }
         inFlight = true
-        defer { inFlight = false }
-        guard await ensureSession() else { return }
+        defer { finishSync() }
         status = .syncing
+        guard await ensureSession() else { return }
         do {
             let bootstrap = try await client.send(Endpoint.bootstrap, as: Bootstrap.self)
             apply(bootstrap)
+            try await refreshPlansBeforeCompletingSync()
             status = .idle
-            await store.refreshAllPlans()
         } catch {
             fail(error)
         }
@@ -136,15 +173,13 @@ final class SyncEngine {
     }
 
     func pushDirty() async {
-        guard enabled, store.hasPendingSync else { return }
-        if inFlight {
-            schedulePush()
-            return
-        }
+        guard enabled else { return }
+        await waitForCompletion()
+        guard store.hasPendingSync else { return }
         inFlight = true
-        defer { inFlight = false }
-        guard await ensureSession() else { return }
+        defer { finishSync() }
         status = .syncing
+        guard await ensureSession() else { return }
 
         let dirty = store.dirty
         let deleted = store.deleted
@@ -158,8 +193,8 @@ final class SyncEngine {
             let bootstrap = try await client.send(Endpoint.sync(request), as: Bootstrap.self)
             store.acknowledge(checkpoint, settings: sendSettings, activeFocus: sendFocus, aiTools: sendTools)
             apply(bootstrap)
+            try await refreshPlansBeforeCompletingSync()
             status = .idle
-            await store.refreshAllPlans()
             if store.hasPendingSync { schedulePush() }
         } catch {
             fail(error)

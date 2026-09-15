@@ -2,9 +2,20 @@ import Foundation
 import CryptoKit
 
 extension AppStore {
-    func refreshPlans(taskID: String) async {
-        guard let workspaceClient, !refreshingPlanTasks.contains(taskID),
-              !(dirty[.tasks]?.contains(taskID) ?? false) else { return }
+    @discardableResult
+    func refreshPlans(taskID: String) async -> Bool {
+        if let ongoing = planRefreshes[taskID] { return await ongoing.value }
+        guard workspaceClient != nil else { return true }
+        guard !(dirty[.tasks]?.contains(taskID) ?? false) else { return false }
+        let refresh = Task { await fetchPlans(taskID: taskID) }
+        planRefreshes[taskID] = refresh
+        let result = await refresh.value
+        planRefreshes[taskID] = nil
+        return result
+    }
+
+    private func fetchPlans(taskID: String) async -> Bool {
+        guard let workspaceClient else { return false }
         refreshingPlanTasks.insert(taskID)
         defer { refreshingPlanTasks.remove(taskID) }
         do {
@@ -14,30 +25,43 @@ extension AppStore {
             }
             let incoming = remote.map { item in
                 // An older GET must not overwrite a newer action receipt.
-                if let current = plan(item.id), current.revision > item.revision { return current }
+                if let current = plan(item.id), confirmedPlanRevisions[item.id] == current.revision,
+                   current.revision > item.revision { return current }
                 return item
             }
             plans.removeAll { $0.taskId == taskID }
             plans.append(contentsOf: incoming)
+            for item in incoming {
+                confirmedPlanRevisions[item.id] = item.revision
+                if planErrors[item.id]?.hasPrefix("缓存中的验收") == true { planErrors[item.id] = nil }
+            }
             planErrors[taskID] = nil
             commit()
-        } catch { recordPlanError(error, id: taskID) }
+            return true
+        } catch { recordPlanError(error, id: taskID); return false }
     }
 
-    func refreshAllPlans() async {
-        for taskID in tasks.map(\.id) { await refreshPlans(taskID: taskID) }
+    @discardableResult
+    func refreshAllPlans() async -> Bool {
+        var success = true
+        for taskID in tasks.map(\.id) {
+            if !(await refreshPlans(taskID: taskID)) { success = false }
+        }
+        return success
     }
 
     func prepareTaskPlan(_ taskID: String) async -> PlanItem? {
-        if let preparePlanDispatch, !(await preparePlanDispatch()) {
-            planErrors[taskID] = "任务尚未同步，联网后请刷新 Plans。"
+        do { try await preparePlanDispatch?() }
+        catch {
+            recordPlanError(error, id: taskID)
             return nil
         }
-        await refreshPlans(taskID: taskID)
+        guard await refreshPlans(taskID: taskID) else { return nil }
         return plans(forTask: taskID).first { !$0.id.hasPrefix("draft-") }
     }
 
     func loadPlanRunners(for id: String) async {
+        if let reason = planDispatchUnavailableReason(id) { planErrors[id] = reason; return }
         guard let workspaceClient else { planErrors[id] = "离线：连接服务后才能派发。"; return }
         do { planRunners = try await workspaceClient.runners() }
         catch { recordPlanError(error, id: id) }
@@ -57,13 +81,15 @@ extension AppStore {
 
     @discardableResult
     func dispatchPlan(_ id: String, runnerID: String, workspaceID: String, toolID: String) async -> Bool {
+        if let reason = planDispatchUnavailableReason(id) { planErrors[id] = reason; return false }
         guard !planBusy.contains(id), let initial = plan(id), canDispatchPlan(initial, allPlans: plans),
               !id.hasPrefix("draft-") else { return false }
         guard let workspaceClient else { planErrors[id] = "离线：连接服务后才能派发。"; return false }
         planBusy.insert(id)
         defer { planBusy.remove(id) }
         do {
-            if let preparePlanDispatch, !(await preparePlanDispatch()) { throw APIError.offline }
+            try await preparePlanDispatch?()
+            if let reason = planDispatchUnavailableReason(id) { throw APIError(code: 42200, message: reason) }
             guard let current = plan(id), canDispatchPlan(current, allPlans: plans),
                   let task = task(current.taskId), !(dirty[.tasks]?.contains(task.id) ?? false),
                   !runnerID.isEmpty, !workspaceID.isEmpty, !toolID.isEmpty else {
@@ -172,9 +198,18 @@ extension AppStore {
     }
 
     func applyPlan(_ plan: PlanItem) {
+        confirmedPlanRevisions[plan.id] = plan.revision
         if let index = plans.firstIndex(where: { $0.id == plan.id }) { plans[index] = plan }
         else { plans.append(plan) }
         commit()
+    }
+
+    func planDispatchUnavailableReason(_ id: String) -> String? {
+        guard let plan = plan(id), let task = task(plan.taskId) else { return "任务不可用，请刷新后重试。" }
+        guard task.executorType == .ai || task.executorType == .collaboration else {
+            return "人工或外部任务不能派发给 AI。服务暂不支持人工 Plan 的待验收流程；请继续记录人工任务，待该流程开放后再验收。"
+        }
+        return nil
     }
 
     func recordPlanError(_ error: Error, id: String) {

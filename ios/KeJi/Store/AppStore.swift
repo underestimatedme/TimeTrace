@@ -23,9 +23,11 @@ final class AppStore {
     var planBusy: Set<String> = []
     var planJobs: [String: RemoteJob] = [:]
     @ObservationIgnored var workspaceClient: WorkspaceClient?
-    @ObservationIgnored var preparePlanDispatch: (() async -> Bool)?
+    @ObservationIgnored var preparePlanDispatch: (() async throws -> Void)?
     @ObservationIgnored var refreshPlanProjection: (() async -> Void)?
     var refreshingPlanTasks: Set<String> = []
+    @ObservationIgnored var planRefreshes: [String: Task<Bool, Never>] = [:]
+    var confirmedPlanRevisions: [String: Int] = [:]
     var planRunners: [RunnerInventory] = []
     /// Transient account quota from the server (WorkspaceClient); not persisted.
     /// Offline/sample builds seed it so the AI tab can render quota windows.
@@ -229,6 +231,7 @@ final class AppStore {
         plans = migrateDefaultPlans(data.state).plans
         planJobs = [:]
         planErrors = [:]
+        confirmedPlanRevisions = [:]
         settings = data.state.settings
         aiTools = data.state.aiTools
         activeFocus = data.state.activeFocus
@@ -300,6 +303,12 @@ final class AppStore {
         // Real accounts fetch migrated Plans from Valley; local Task completion
         // must never fabricate an accepted Plan. Only demo fixtures migrate locally.
         plans = persisted.useSampleData ? migrateDefaultPlans(persisted.state).plans : persisted.state.plans
+        confirmedPlanRevisions = persisted.planCacheVersion == 1 ? (persisted.confirmedPlanRevisions ?? [:]) : [:]
+        planErrors = [:]
+        for index in plans.indices where plans[index].status == .accepted && confirmedPlanRevisions[plans[index].id] != plans[index].revision {
+            plans[index].status = .unknown
+            planErrors[plans[index].id] = "缓存中的验收尚未由服务器确认。请联网刷新 Plan；确认前不会解锁依赖。"
+        }
         planJobs = persisted.planJobs ?? [:]
         settings = persisted.state.settings
         aiTools = persisted.state.aiTools
@@ -317,7 +326,8 @@ final class AppStore {
     var persisted: PersistedState {
         PersistedState(state: snapshot, sampleDailyStats: sampleDailyStats, hasOnboarded: hasOnboarded,
                        useSampleData: useSampleData, dirty: dirty, deleted: deleted, settingsDirty: settingsDirty,
-                       activeFocusDirty: activeFocusDirty, aiToolsDirty: aiToolsDirty, planJobs: planJobs)
+                       activeFocusDirty: activeFocusDirty, aiToolsDirty: aiToolsDirty, planJobs: planJobs,
+                       planCacheVersion: 1, confirmedPlanRevisions: confirmedPlanRevisions)
     }
 }
 
@@ -333,4 +343,6 @@ struct PersistedState: Codable {
     var activeFocusDirty = false
     var aiToolsDirty = false
     var planJobs: [String: RemoteJob]? = nil
+    var planCacheVersion: Int? = nil
+    var confirmedPlanRevisions: [String: Int]? = nil
 }

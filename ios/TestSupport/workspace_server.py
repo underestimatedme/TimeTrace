@@ -49,6 +49,8 @@ class Handler(BaseHTTPRequestHandler):
                 data = [p for p in state["plans"].values() if p["task_id"] == task_id]
         elif path == "/remote-jobs":
             assert body.get("plan_id") in state["plans"], body
+            task = next(t for t in state["tasks"] if t["id"] == body["task_id"])
+            assert task["executor_type"] in ["ai", "collaboration"], task
             assert body.get("expected_task_revision", 0) > 0, body
             data = dict(body, id="job-ui", status="queued", revision=1, created_at=NOW, updated_at=NOW)
             state["jobs"]["job-ui"] = data

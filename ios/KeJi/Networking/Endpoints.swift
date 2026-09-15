@@ -46,6 +46,47 @@ struct Endpoint {
                  body: RemoteJobCommandRequest(action: action, expectedRevision: expectedRevision,
                                                idempotencyKey: idempotencyKey))
     }
+
+    // MARK: - Workspace (Plans / quota / reports)
+
+    static let accountQuota = Endpoint(method: .get, path: "/quota", requiresAuth: true, body: nil)
+    static func taskPlans(taskID: String) -> Endpoint {
+        Endpoint(method: .get, path: "/tasks/\(taskID)/plans", requiresAuth: true, body: nil)
+    }
+    static func acceptPlan(id: String, expectedRevision: Int, evidenceIDs: [String], criteria: [CriterionResultBody]) -> Endpoint {
+        Endpoint(method: .post, path: "/plans/\(id)/accept", requiresAuth: true,
+                 body: AcceptPlanBody(expectedRevision: expectedRevision, evidenceIds: evidenceIDs, criteria: criteria))
+    }
+    static func cancelPlan(id: String, expectedRevision: Int) -> Endpoint {
+        Endpoint(method: .post, path: "/plans/\(id)/cancel", requiresAuth: true,
+                 body: RevisionBody(expectedRevision: expectedRevision))
+    }
+    static func report(date: String) -> Endpoint {
+        Endpoint(method: .get, path: "/reports?date=\(date)", requiresAuth: true, body: nil)
+    }
+    static func generateReport(date: String, zone: String) -> Endpoint {
+        Endpoint(method: .post, path: "/reports", requiresAuth: true, body: GenerateReportBody(date: date, zone: zone))
+    }
+}
+
+struct CriterionResultBody: Codable, Equatable {
+    var index: Int
+    var accepted: Bool
+}
+
+struct AcceptPlanBody: Encodable {
+    var expectedRevision: Int
+    var evidenceIds: [String]
+    var criteria: [CriterionResultBody]
+}
+
+struct RevisionBody: Encodable {
+    var expectedRevision: Int
+}
+
+struct GenerateReportBody: Encodable {
+    var date: String
+    var zone: String
 }
 
 struct APIError: Error, LocalizedError, Equatable {

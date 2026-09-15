@@ -5,6 +5,8 @@ never treated as full, and a manually-sourced claim can never grant the
 billing-safety capability that gates unattended execution.
 """
 import math
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -94,24 +96,31 @@ def _iso(epoch: Optional[float]) -> Optional[str]:
 def payload_from_reading(bucket_key: str, tool: str, used_percent: Any, reset_at: Optional[float],
                          window_mins: Optional[int], pool_id: str, profile_id: str, now: float,
                          source: str = "runner", confidence: str = "exact",
-                         default_ttl: float = 3600.0) -> Dict[str, Any]:
+                         default_ttl: float = 3600.0, pool_authoritative: bool = False) -> Dict[str, Any]:
     """Wrap one vendor rate-limit reading as a Valley sample. A reset time is
     only trusted when it is still in the future; otherwise the reading is fresh
     for a bounded horizon and carries no reset boundary."""
     scope = bucket_key.rsplit(":", 1)[-1] if ":" in bucket_key else (bucket_key or "primary")
+    limit_id = bucket_key.rsplit(":", 1)[0] if ":" in bucket_key else bucket_key
     trusted_reset = reset_at if (reset_at is not None and reset_at > now) else None
     expires = trusted_reset if trusted_reset is not None else now + (window_mins * 60 if window_mins else default_ttl)
     window = make_window(used_percent, trusted_reset, now, expires)
-    # Millisecond resolution so two genuinely distinct readings in the same
-    # second are not collapsed by the (runner_id, sample_id) dedup.
+    # Dedup must retain pool/profile and complete limit/window identity too.
+    # A fixed-size digest fits the API's 80-character sample-id bound even for
+    # long vendor limit names; reposting the same payload is still idempotent.
+    identity = [pool_id, profile_id, tool, bucket_key, window_mins, now,
+                window.used_percent, trusted_reset, source, confidence, pool_authoritative]
+    sample_id = hashlib.sha256(json.dumps(identity, separators=(",", ":")).encode()).hexdigest()
     return sample_payload(
-        sample_id="%s:%s:%d" % (tool, bucket_key, int(now * 1000)), pool_id=pool_id, profile_id=profile_id,
+        sample_id=sample_id, pool_id=pool_id, profile_id=profile_id,
         scope=scope, kind=tool, window=window, source=source, confidence=confidence,
+        limit_id=limit_id, window_mins=window_mins, pool_authoritative=pool_authoritative,
     )
 
 
 def sample_payload(sample_id: str, pool_id: str, profile_id: str, scope: str, kind: str,
-                   window: Window, source: str, confidence: str) -> Dict[str, Any]:
+                   window: Window, source: str, confidence: str, limit_id: str = "",
+                   window_mins: Optional[int] = None, pool_authoritative: bool = False) -> Dict[str, Any]:
     """Wire shape for POST /runner/quota/samples. Carries only opaque ids and
     de-identified readings — never tokens, account emails, or environment."""
     return {
@@ -120,6 +129,9 @@ def sample_payload(sample_id: str, pool_id: str, profile_id: str, scope: str, ki
         "profile_id": profile_id,
         "scope": scope,
         "kind": kind,
+        "limit_id": limit_id,
+        "window_mins": window_mins,
+        "pool_authoritative": pool_authoritative,
         "used_percent": window.used_percent,
         "reset_at": _iso(window.reset_at),
         "observed_at": _iso(window.observed_at),

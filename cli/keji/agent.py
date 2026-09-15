@@ -16,8 +16,7 @@ from keji.dispatch import (DispatchGate, LockBusy, adapter_capabilities, adapter
 
 
 def _default_pool_binding(provider: str):
-    """Opaque per-provider account pool + local profile reference. R4 replaces
-    this with an explicit user-chosen profile↔pool binding."""
+    """Display-only grouping. It does not identify an authenticated account."""
     return "pool-" + provider, provider + "-personal"
 
 
@@ -61,7 +60,7 @@ class Agent:
             self._report(claim, [{"seq": 1, "type": "failed", "message": "unknown workspace"}])
             self.db.update_remote_claim(job_id, "reported")
             return "job %s → rejected (unknown workspace)" % job_id
-        provider = job["tool_profile_id"].split("-", 1)[0]
+        provider = job.get("provider")
         adapter = self.adapters.get(provider)
         if adapter is None:
             self._report(claim, [{"seq": 1, "type": "failed", "message": "tool unavailable"}])
@@ -220,13 +219,18 @@ class Agent:
         if not samples:
             return 0
         now = now if now is not None else time.time()
-        pool_id, profile_id = self._pool_binding(provider)
+        binding = self._pool_binding(provider)
+        pool_id, profile_id = binding[:2]
+        # Two-field legacy/display bindings remain non-authoritative. Only an
+        # explicitly verified third flag can identify the authenticated pool.
+        authoritative = len(binding) == 3 and binding[2] is True
         payloads = []
         for s in samples:
             try:
                 payloads.append(quota.payload_from_reading(
                     s.bucket_key, s.tool, s.used_pct, s.reset_at, s.window_mins,
                     pool_id, profile_id, now, source=getattr(s, "source", "runner"),
+                    pool_authoritative=authoritative,
                 ))
             except ValueError:
                 continue

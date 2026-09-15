@@ -27,7 +27,7 @@ class FakeCloud:
         return {"accepted": len(samples)}
 
     def claim(self, token):
-        return {"job": {"id": "j1", "workspace_id": "ws1", "tool_profile_id": "codex-default", "prompt": "do it"},
+        return {"job": {"id": "j1", "workspace_id": "ws1", "tool_profile_id": "codex-default", "provider": "codex", "prompt": "do it"},
                 "attempt_id": "a1", "lease_epoch": 1}
 
     def append_events(self, token, job_id, attempt_id, epoch, events):
@@ -50,6 +50,34 @@ class Adapter:
 
 
 class AgentTest(unittest.TestCase):
+    def test_pool_authority_must_be_explicit_not_inferred_from_callback(self):
+        for binding, expected in ((lambda provider: ("pool", "custom-profile"), False),
+                                  (lambda provider: ("pool", "custom-profile", True), True)):
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as d:
+                db = Database(Path(d) / "keji.db")
+                cloud = FakeCloud()
+                agent = Agent(db, cloud, {}, Path(d), lambda: "token", pool_binding=binding)
+                samples = [Sample(bucket_key="codex:codex:primary", tool="codex", used_pct=6,
+                                  reset_at=2000, window_mins=300)]
+                self.assertEqual(agent._post_samples("codex", Adapter(), samples, now=1000), 1)
+                self.assertEqual(cloud.quota_posts[0][1][0]["pool_authoritative"], expected)
+
+    def test_explicit_provider_dispatches_custom_profile_and_missing_provider_blocks(self):
+        for provider, expected in (("codex", "awaiting_review"), (None, "rejected (tool unavailable)")):
+            with self.subTest(provider=provider), tempfile.TemporaryDirectory() as d:
+                db = Database(Path(d) / "keji.db")
+                repo = Path(d) / "repo"; init_repo(repo)
+                db.upsert_workspace("ws1", "repo", str(repo), "main")
+                cloud, adapter = FakeCloud(), Adapter()
+                claim = cloud.claim("token")
+                claim["job"]["tool_profile_id"] = "custom-profile" if provider else "codex-default"
+                claim["job"]["provider"] = provider
+                cloud.claim = lambda token: claim
+                agent = Agent(db, cloud, {"codex": adapter}, Path(d), lambda: "token",
+                              prepare_workspace=lambda repo, task_id, home, base: (repo, "branch"))
+                self.assertEqual(agent.run_once(), "job j1 → " + expected)
+                self.assertEqual(hasattr(adapter, "args"), provider is not None)
+
     def test_claim_is_persisted_before_execution_and_completed(self):
         with tempfile.TemporaryDirectory() as d:
             db = Database(Path(d) / "keji.db")

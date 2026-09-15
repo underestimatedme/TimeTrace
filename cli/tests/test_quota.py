@@ -74,12 +74,35 @@ class SamplePayloadTest(unittest.TestCase):
         # RFC3339 timestamps, opaque ids only; no tokens/emails/env.
         allowed = {"sample_id", "pool_id", "profile_id", "scope", "kind",
                    "used_percent", "reset_at", "observed_at", "expires_at",
-                   "source", "confidence"}
+                   "source", "confidence", "limit_id", "window_mins", "pool_authoritative"}
         self.assertEqual(set(payload), allowed)
         self.assertTrue(payload["observed_at"].endswith("Z"))
 
 
 class ReadingPayloadTest(unittest.TestCase):
+    def test_sample_dedup_identity_includes_pool_profile_and_window_duration(self):
+        payloads = [payload_from_reading("codex:" + "long_limit_" * 12 + ":primary", "codex", 6,
+                    None, minutes, pool, profile, 1000)
+                    for pool, profile, minutes in (("pool-a", "profile-a", 300),
+                                                   ("pool-b", "profile-a", 300),
+                                                   ("pool-a", "profile-b", 300),
+                                                   ("pool-a", "profile-a", 10080))]
+        self.assertEqual(len({p["sample_id"] for p in payloads}), 4)
+        self.assertTrue(all(len(p["sample_id"]) <= 80 for p in payloads))
+
+    def test_colliding_primary_limits_preserve_identity(self):
+        import json
+        from pathlib import Path
+        from keji.adapters.codex import parse_rate_limits
+        readings = parse_rate_limits(json.loads((Path(__file__).parent / "fixtures/codex_ratelimits.json").read_text()))
+        payloads = [payload_from_reading(s.bucket_key, s.tool, s.used_pct, s.reset_at,
+                    s.window_mins, "account-pool", "custom-profile", 1788300000) for s in readings]
+        identities = {(p.get("limit_id"), p["scope"], p.get("window_mins")) for p in payloads}
+        self.assertEqual(identities, {("codex:codex", "primary", 300),
+                                     ("codex:codex", "secondary", 10080),
+                                     ("codex:base_model_inference", "primary", 10080)})
+        self.assertTrue(all(p.get("pool_authoritative") is False for p in payloads))
+
     def test_distinct_subsecond_readings_are_not_tied(self):
         # Two readings in the same second must not collapse to the same
         # observed_at / sample_id (else the server's latest-wins reduce ties).

@@ -14,15 +14,29 @@ def snapshot(path: str) -> Tuple[str, str]:
     head = _git("-C", path, "rev-parse", "HEAD")
     digest = hashlib.sha256()
     for args in (("diff", "--binary", "HEAD", "--"), ("diff", "--cached", "--binary", "HEAD", "--")):
-        digest.update(subprocess.check_output(["git", "-C", path] + list(args)))
+        digest.update(subprocess.check_output(["git", "-C", path, args[0], "--ignore-submodules=all"] + list(args[1:])))
+    # A gitlink belongs to the parent index, not to the child working tree.
+    # Bind its commit (and conflict stage) without opening the child directory.
+    gitlinks = {}
+    index = subprocess.check_output(["git", "-C", path, "ls-files", "--stage", "-z"])
+    for entry in index.split(b"\0"):
+        if not entry:
+            continue
+        metadata, name = entry.split(b"\t", 1)
+        mode, commit, stage = metadata.split()
+        if mode == b"160000":
+            gitlinks.setdefault(name, []).append(stage + b":" + commit)
     # Read tracked bytes too: git diff deliberately hides assume-unchanged and
     # skip-worktree entries and therefore cannot be our content authority.
     files = subprocess.check_output(["git", "-C", path, "ls-files", "--cached", "--others", "-z"])
     for name in sorted(set(files.split(b"\0"))):
         if not name:
             continue
-        file = Path(path) / os.fsdecode(name)
         digest.update(name + b"\0")
+        if name in gitlinks:
+            digest.update(b"gitlink\0" + b"\0".join(sorted(gitlinks[name])) + b"\0")
+            continue
+        file = Path(path) / os.fsdecode(name)
         if not file.exists() and not file.is_symlink():
             digest.update(b"missing\0")
             continue

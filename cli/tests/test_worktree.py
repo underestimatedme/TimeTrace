@@ -70,6 +70,29 @@ class WorktreeTest(unittest.TestCase):
         (self.repo / "README.md").write_text("changed while hidden from git diff\n")
         self.assertNotEqual(worktree.snapshot(str(self.repo)), before)
 
+    def test_snapshot_binds_gitlink_commit_without_reading_child_worktree(self):
+        child = Path(self.tmp.name) / "child"
+        child.mkdir()
+        git("init", "-q", "-b", "main", cwd=child)
+        git("config", "user.email", "t@example.com", cwd=child)
+        git("config", "user.name", "t", cwd=child)
+        (child / "source.txt").write_text("first\n")
+        git("add", ".", cwd=child)
+        git("commit", "-qm", "child initial", cwd=child)
+        git("-c", "protocol.file.allow=always", "submodule", "add", str(child), "deps/child", cwd=self.repo)
+        git("commit", "-qm", "add submodule", cwd=self.repo)
+        before = worktree.snapshot(str(self.repo))
+        checked_out = self.repo / "deps" / "child"
+        (checked_out / "source.txt").write_text("local child worktree changes\n")
+        self.assertEqual(worktree.snapshot(str(self.repo)), before)
+        git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-am", "child next", cwd=checked_out)
+        next_commit = git("rev-parse", "HEAD", cwd=checked_out)
+        # The parent index owns the gitlink identity; child state alone is not
+        # the parent's checkpoint evidence.
+        self.assertEqual(worktree.snapshot(str(self.repo)), before)
+        git("update-index", "--cacheinfo", "160000,%s,deps/child" % next_commit, cwd=self.repo)
+        self.assertNotEqual(worktree.snapshot(str(self.repo)), before)
+
 
 if __name__ == "__main__":
     unittest.main()

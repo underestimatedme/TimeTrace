@@ -1,4 +1,5 @@
 import json
+import io
 import tempfile
 import threading
 import time
@@ -6,6 +7,7 @@ import unittest
 import subprocess
 from datetime import datetime, timezone
 from unittest.mock import patch
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from keji.agent import Agent
@@ -551,6 +553,60 @@ class RecoveryFenceTest(unittest.TestCase):
         self.assertIn("manual", result)
         self.assertIn(str(path), result)
         self.assertEqual(path.read_text(), "1234")
+
+    def test_daemon_prints_crash_diagnostic_once_across_repeated_claims(self):
+        from types import SimpleNamespace
+        from keji import cli
+        from keji.dispatch import coding_slot_lock
+        path = Path(coding_slot_lock(self.home).path)
+        path.parent.mkdir(parents=True)
+        path.write_text("1234")
+        claims = []
+        def claim(token):
+            if len(claims) == 3:
+                raise KeyboardInterrupt()
+            claims.append(True)
+            self.claim["job"]["id"] = "job-%d" % len(claims)
+            return self.claim
+        self.cloud.claim = claim
+        self.cloud.update_inventory = lambda *args: None
+        class Output(io.StringIO):
+            flushed = False
+
+            def flush(self):
+                self.flushed = True
+                super().flush()
+        output = Output()
+        with redirect_stdout(output), patch("keji.agent.time.sleep"), \
+                patch("keji.cli._open", return_value=(self.home, {}, self.db)), \
+                patch("keji.cli._cloud", return_value=self.cloud), \
+                patch("keji.cli._adapters", return_value={"codex": self.adapter}), \
+                patch("keji.cli._acquire_execution_lock", return_value=object()), \
+                patch("keji.cli.SessionManager", return_value=SimpleNamespace(token=lambda: "token")), \
+                self.assertRaises(KeyboardInterrupt):
+            cli.cmd_agent_run(SimpleNamespace(once=False, interval=5))
+        self.assertEqual(output.getvalue().count("manual recovery required"), 1)
+        self.assertIn(str(path), output.getvalue())
+        self.assertIn("writer descendants", output.getvalue())
+        self.assertTrue(output.flushed, "daemon output must reach a redirected log immediately")
+        self.assertEqual(path.read_text(), "1234")
+
+    def test_invalid_embedded_plan_identity_preserves_stored_evidence(self):
+        cp = self.checkpoint()
+        for index, identity in enumerate(([], None, "", "other-plan")):
+            with self.subTest(identity=identity):
+                row = cp.to_row()
+                row["plan_id"] = identity
+                evidence = json.dumps(row)
+                self.db.conn.execute("UPDATE checkpoint SET data=? WHERE plan_id=?", (evidence, "j1"))
+                self.claim["attempt_id"] = "invalid-%d" % index
+                self.assertIn("waiting_input", self.agent.run_once())
+                self.assertEqual(self.calls, [])
+                stored = self.db.conn.execute("SELECT data FROM checkpoint WHERE plan_id=?", ("j1",)).fetchone()
+                self.assertIsNotNone(stored)
+                self.assertEqual(stored["data"], evidence)
+                self.assertEqual(self.db.conn.execute("SELECT COUNT(*) FROM checkpoint").fetchone()[0], 1)
+                self.assertEqual(self.cloud.events[-1]["type"], "waiting_input")
 
     def test_preparation_crossing_lease_deadline_never_spawns(self):
         clock = [1000.0]

@@ -99,8 +99,11 @@ class Agent:
                 return self._blocked(claim, plan_key, "checkpoint unreadable; manual recovery required")
             latest = self.db.get_remote_claim(job_id)
             if checkpoint:
-                reason = checkpoint_problem(checkpoint, provider, job["tool_profile_id"],
-                                            workspace["path"], adapter_capabilities(adapter).get("can_resume") is True)
+                if checkpoint.plan_id != plan_key:
+                    reason = "checkpoint plan identity differs from stored key"
+                else:
+                    reason = checkpoint_problem(checkpoint, provider, job["tool_profile_id"],
+                                                workspace["path"], adapter_capabilities(adapter).get("can_resume") is True)
                 if reason:
                     return self._blocked(claim, plan_key, reason, checkpoint)
             elif (self.db.plan_started(plan_key) or (existing and existing["state"] != "claimed")
@@ -166,7 +169,9 @@ class Agent:
         cancelled = reason == "cancelled"
         if cancelled:
             self.db.delete_checkpoint(plan_key)
-        elif checkpoint:
+        elif checkpoint and checkpoint.plan_id == plan_key:
+            # The database lookup key is trusted; malformed embedded identity
+            # must not redirect a write or prevent the waiting_input event.
             checkpoint.reason = reason
             self.db.save_checkpoint(checkpoint)
         event_type = "cancelled" if cancelled else "waiting_input"
@@ -336,12 +341,23 @@ class Agent:
         self.db.update_remote_claim(job_id, "reported")
         return "job %s → %s" % (job_id, outcome)
 
-    def run_forever(self, interval: int = 5) -> None:
+    def run_forever(self, interval: int = 5, log: Callable[[str], None] = None) -> None:
+        log = log or (lambda message: print(message, flush=True))
         backoff = interval
+        manual_diagnostics = set()
         while True:
             try:
                 outcome = self.run_once()
                 backoff = interval
+                if "; manual recovery required " in outcome:
+                    # Job IDs may change on every claim; deduplicate the actual
+                    # lock diagnostic so a persistent fence is visible once.
+                    diagnostic = outcome.partition("; ")[2]
+                    if diagnostic not in manual_diagnostics:
+                        log(diagnostic)
+                        manual_diagnostics.add(diagnostic)
+                elif outcome != "idle" and "deferred (" not in outcome:
+                    manual_diagnostics.clear()
                 if outcome == "idle":
                     # No work: refresh quota so parked plans recover promptly.
                     try:

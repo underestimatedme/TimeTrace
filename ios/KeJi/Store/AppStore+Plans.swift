@@ -1,20 +1,190 @@
 import Foundation
+import CryptoKit
 
 extension AppStore {
-    func plan(_ id: String) -> PlanItem? { plans.first { $0.id == id } }
+    func refreshPlans(taskID: String) async {
+        guard let workspaceClient, !refreshingPlanTasks.contains(taskID),
+              !(dirty[.tasks]?.contains(taskID) ?? false) else { return }
+        refreshingPlanTasks.insert(taskID)
+        defer { refreshingPlanTasks.remove(taskID) }
+        do {
+            var remote = try await workspaceClient.plans(taskID: taskID)
+            if remote.isEmpty, let draft = plans.first(where: { $0.taskId == taskID && $0.id.hasPrefix("draft-") }) {
+                remote = [try await workspaceClient.createPlan(taskID: taskID, draft: draft)]
+            }
+            let incoming = remote.map { item in
+                // An older GET must not overwrite a newer action receipt.
+                if let current = plan(item.id), current.revision > item.revision { return current }
+                return item
+            }
+            plans.removeAll { $0.taskId == taskID }
+            plans.append(contentsOf: incoming)
+            planErrors[taskID] = nil
+            commit()
+        } catch { recordPlanError(error, id: taskID) }
+    }
+
+    func refreshAllPlans() async {
+        for taskID in tasks.map(\.id) { await refreshPlans(taskID: taskID) }
+    }
+
+    func prepareTaskPlan(_ taskID: String) async -> PlanItem? {
+        if let preparePlanDispatch, !(await preparePlanDispatch()) {
+            planErrors[taskID] = "任务尚未同步，联网后请刷新 Plans。"
+            return nil
+        }
+        await refreshPlans(taskID: taskID)
+        return plans(forTask: taskID).first { !$0.id.hasPrefix("draft-") }
+    }
+
+    func loadPlanRunners(for id: String) async {
+        guard let workspaceClient else { planErrors[id] = "离线：连接服务后才能派发。"; return }
+        do { planRunners = try await workspaceClient.runners() }
+        catch { recordPlanError(error, id: id) }
+    }
+
+    func refreshPlanJob(_ id: String) async {
+        guard let workspaceClient, let plan = plan(id) else { return }
+        if let existing = planJobs[id] {
+            do {
+                let job = try await workspaceClient.job(id: existing.id)
+                planJobs[id] = job
+                commit()
+            } catch { recordPlanError(error, id: id) }
+        }
+        await refreshPlans(taskID: plan.taskId)
+    }
+
+    @discardableResult
+    func dispatchPlan(_ id: String, runnerID: String, workspaceID: String, toolID: String) async -> Bool {
+        guard !planBusy.contains(id), let initial = plan(id), canDispatchPlan(initial, allPlans: plans),
+              !id.hasPrefix("draft-") else { return false }
+        guard let workspaceClient else { planErrors[id] = "离线：连接服务后才能派发。"; return false }
+        planBusy.insert(id)
+        defer { planBusy.remove(id) }
+        do {
+            if let preparePlanDispatch, !(await preparePlanDispatch()) { throw APIError.offline }
+            guard let current = plan(id), canDispatchPlan(current, allPlans: plans),
+                  let task = task(current.taskId), !(dirty[.tasks]?.contains(task.id) ?? false),
+                  !runnerID.isEmpty, !workspaceID.isEmpty, !toolID.isEmpty else {
+                throw APIError(code: 42200, message: "请刷新 Plan 并选择可用电脑、工作区及工具。")
+            }
+            let identity = [id, String(current.revision), runnerID, workspaceID, toolID].joined(separator: "|")
+            let key = SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
+            var instructions = [current.title]
+            if !task.description.isEmpty { instructions.append(task.description) }
+            if !current.criteria.isEmpty { instructions.append("验收项：\n" + current.criteria.map { "- " + $0 }.joined(separator: "\n")) }
+            let request = RemoteJobRequest(taskId: task.id, runnerId: runnerID, workspaceId: workspaceID,
+                toolProfileId: toolID, prompt: instructions.joined(separator: "\n\n"),
+                idempotencyKey: "ios-" + key, expectedTaskRevision: Int64(task.updatedAt.timeIntervalSince1970 * 1000), planId: id)
+            let job = try await workspaceClient.dispatch(request)
+            planJobs[id] = job
+            planErrors[id] = nil
+            commit()
+            await refreshPlans(taskID: current.taskId)
+            return true
+        } catch {
+            recordPlanError(error, id: id)
+            if let api = error as? APIError, (40900..<41000).contains(api.code) {
+                await refreshPlans(taskID: initial.taskId)
+            }
+            return false
+        }
+    }
+
+    @discardableResult
+    func cancelPlan(_ id: String, expectedRevision: Int) async -> Bool {
+        await mutatePlan(id, expectedRevision: expectedRevision, retry: false)
+    }
+
+    @discardableResult
+    func retryPlan(_ id: String, expectedRevision: Int) async -> Bool {
+        guard plan(id)?.status == .failed else { return false }
+        return await mutatePlan(id, expectedRevision: expectedRevision, retry: true)
+    }
+
+    private func mutatePlan(_ id: String, expectedRevision: Int, retry: Bool) async -> Bool {
+        guard !planBusy.contains(id), let workspaceClient else {
+            planErrors[id] = "离线或请求进行中，请稍后重试。"; return false
+        }
+        planBusy.insert(id)
+        defer { planBusy.remove(id) }
+        do {
+            let receipt = try await (retry
+                ? workspaceClient.retryPlan(id: id, expectedRevision: expectedRevision)
+                : workspaceClient.cancelPlan(id: id, expectedRevision: expectedRevision))
+            applyPlan(receipt)
+            planErrors[id] = retry ? nil : "取消请求已提交，当前状态：\(receipt.status.label)。"
+            await refreshPlanProjection?()
+            return true
+        } catch { recordPlanError(error, id: id); return false }
+    }
+
+    func plan(_ id: String) -> PlanItem? {
+        if let exact = plans.first(where: { $0.id == id }) { return exact }
+        if id.hasPrefix("draft-") { return plans.first { $0.taskId == String(id.dropFirst(6)) } }
+        return nil
+    }
+
+    /// The view owns task cancellation; all fetching and polling stays in the store.
+    func monitorPlan(_ id: String) async {
+        while !Task.isCancelled {
+            guard let current = plan(id) else { return }
+            await refreshPlanJob(current.id)
+            do { try await Task.sleep(for: .seconds(3)) }
+            catch { return }
+        }
+    }
 
     /// Plans for a task, ordered by priority then creation (deterministic).
     func plans(forTask taskId: String) -> [PlanItem] {
         plans.filter { $0.taskId == taskId }.sorted { ($0.priority, $0.createdAt) < ($1.priority, $1.createdAt) }
     }
 
-    /// Optimistic local accept, used for offline drafts and UI fixtures. In
-    /// production, acceptance is confirmed by the server via PlanClient (I3);
-    /// only a server-returned `accepted` advances delivery goals.
-    func markPlanAccepted(_ id: String) {
-        guard let idx = plans.firstIndex(where: { $0.id == id }) else { return }
-        plans[idx].status = .accepted
-        plans[idx].revision += 1
-        onChange?()
+    @discardableResult
+    func acceptPlan(_ id: String, expectedRevision: Int, evidenceIDs: [String],
+                    criteria: [CriterionResultBody]) async -> Bool {
+        guard !planBusy.contains(id), let plan = plan(id) else { return false }
+        guard plan.status == .awaitingReview, plan.revision == expectedRevision,
+              criteria.count == plan.criteria.count,
+              Set(criteria.map(\.index)) == Set(plan.criteria.indices),
+              criteria.allSatisfy(\.accepted) else {
+            planErrors[id] = "请重新检查当前版本及全部验收项。"
+            return false
+        }
+        guard let workspaceClient else {
+            planErrors[id] = "离线：仅保存草稿，连接服务后才能验收。"
+            return false
+        }
+        planBusy.insert(id)
+        defer { planBusy.remove(id) }
+        do {
+            let receipt = try await workspaceClient.acceptPlan(id: id, expectedRevision: expectedRevision,
+                                                              evidenceIDs: evidenceIDs, criteria: criteria)
+            applyPlan(receipt)
+            planErrors[id] = nil
+            await refreshPlanProjection?()
+            return receipt.status == .accepted
+        } catch {
+            recordPlanError(error, id: id)
+            return false
+        }
+    }
+
+    func applyPlan(_ plan: PlanItem) {
+        if let index = plans.firstIndex(where: { $0.id == plan.id }) { plans[index] = plan }
+        else { plans.append(plan) }
+        commit()
+    }
+
+    func recordPlanError(_ error: Error, id: String) {
+        if let api = error as? APIError, (40900..<41000).contains(api.code) {
+            if let current = api.currentPlan { applyPlan(current) }
+            planErrors[id] = "版本冲突：已显示服务端当前状态，请刷新并重新审核后再提交。"
+        } else {
+            if let api = error as? APIError, api.code == 40300 {
+                planErrors[id] = "请先登录账号，再刷新以创建或操作 Plan。"
+            } else { planErrors[id] = error.localizedDescription }
+        }
     }
 }

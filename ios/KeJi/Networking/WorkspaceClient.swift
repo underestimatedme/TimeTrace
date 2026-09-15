@@ -16,6 +16,24 @@ final class WorkspaceClient {
         try await client.send(.taskPlans(taskID: taskID), as: [PlanItem].self)
     }
 
+    func createPlan(taskID: String, draft: PlanItem) async throws -> PlanItem {
+        try await client.send(.createPlan(taskID: taskID, draft: draft), as: PlanItem.self)
+    }
+
+    func runners() async throws -> [RunnerInventory] { try await client.send(.runners, as: [RunnerInventory].self) }
+
+    func dispatch(_ request: RemoteJobRequest) async throws -> RemoteJob {
+        try await client.send(.createRemoteJob(request), as: RemoteJob.self)
+    }
+
+    func job(id: String) async throws -> RemoteJob {
+        try await client.send(.remoteJob(id: id), as: RemoteJob.self)
+    }
+
+    func retryPlan(id: String, expectedRevision: Int) async throws -> PlanItem {
+        try await client.send(.retryPlan(id: id, expectedRevision: expectedRevision), as: PlanItem.self)
+    }
+
     func acceptPlan(id: String, expectedRevision: Int, evidenceIDs: [String] = [],
                     criteria: [CriterionResultBody] = []) async throws -> PlanItem {
         try await client.send(.acceptPlan(id: id, expectedRevision: expectedRevision,

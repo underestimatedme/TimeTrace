@@ -1,7 +1,7 @@
 import XCTest
 
-/// I2 offline workspace flow: projects → keji → quota → plan.03, where dispatch
-/// is gated until its dependencies (plan.01, plan.02) are accepted.
+/// Run TestSupport/workspace_server.py on the host before the HTTP scenarios.
+/// Offline fixtures never unlock dependencies; HTTP scenarios use the real client.
 final class WorkspaceFlowTests: XCTestCase {
     private var app: XCUIApplication!
 
@@ -29,7 +29,7 @@ final class WorkspaceFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["AI 活跃（累计）"].exists)
     }
 
-    func testDispatchGatedByAcceptedDependencies() {
+    func testOfflineCannotAcceptDependenciesOrUnlockDispatch() {
         // Drill down to plan.03.
         tap("project.keji")
         tap("task.quota")
@@ -39,11 +39,11 @@ final class WorkspaceFlowTests: XCTestCase {
         XCTAssertTrue(dispatch.waitForExistence(timeout: 5))
         XCTAssertFalse(dispatch.isEnabled, "dispatch must be disabled while dependencies are unaccepted")
 
-        // Accept both dependencies.
+        // Offline fixtures must never turn a local tap into accepted delivery.
         for dep in ["plan.01", "plan.02"] {
             tap("subpage.back")            // back to task.quota
             tap(dep)
-            tap("plan.accept")
+            XCTAssertFalse(app.buttons["plan.accept"].exists)
         }
 
         // Return to plan.03; dispatch is now enabled.
@@ -51,6 +51,73 @@ final class WorkspaceFlowTests: XCTestCase {
         tap("plan.03")
         let dispatch2 = app.buttons["plan.dispatch"].firstMatch
         XCTAssertTrue(dispatch2.waitForExistence(timeout: 5))
-        XCTAssertTrue(dispatch2.isEnabled, "dispatch must enable once dependencies are accepted")
+        XCTAssertFalse(dispatch2.isEnabled, "offline work must not unlock dependencies")
+    }
+
+    func testCreateDispatchWaitAndAcceptThroughHTTP() {
+        createAndDispatch(scenario: "happy")
+        XCTAssertTrue(app.staticTexts["待验收"].waitForExistence(timeout: 15))
+        tap("plan.accept")
+        tap("plan.evidence.job-ui")
+        tap("plan.accept.confirm")
+        XCTAssertTrue(app.staticTexts["已验收"].waitForExistence(timeout: 10))
+        capture("plan-accepted")
+    }
+
+    func testConflictRequiresFreshReviewInsteadOfAutomaticRetry() {
+        createAndDispatch(scenario: "conflict")
+        XCTAssertTrue(app.staticTexts["待验收"].waitForExistence(timeout: 15))
+        tap("plan.accept")
+        tap("plan.evidence.job-ui")
+        tap("plan.accept.confirm")
+        XCTAssertTrue(app.staticTexts["plan.review.stale"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["plan.accept.confirm"].isEnabled)
+        XCTAssertFalse(app.staticTexts["已验收"].exists)
+        capture("plan-conflict-review")
+        tap("关闭")
+        XCTAssertTrue(app.staticTexts["plan.error"].waitForExistence(timeout: 5))
+        tap("plan.accept")
+        XCTAssertTrue(app.buttons["plan.criterion.0"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["plan.accept.confirm"].isEnabled)
+    }
+
+    func testCancelledPlanCannotBeAccepted() {
+        createAndDispatch(scenario: "cancel")
+        tap("plan.cancel")
+        XCTAssertTrue(app.staticTexts["已取消"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["plan.accept"].exists)
+        XCTAssertFalse(app.buttons["plan.dispatch"].isEnabled)
+        capture("plan-cancelled")
+    }
+
+    private func createAndDispatch(scenario: String) {
+        app.terminate()
+        app.launchArguments = ["--workspace-fixture", "--online-ui-testing", "--api-base-url",
+                               "http://127.0.0.1:18768/\(scenario)-\(UUID().uuidString)", "--screen", "tasks/new"]
+        app.launchEnvironment["KEJI_OFFLINE"] = "0"
+        app.launch()
+        let title = app.textFields["输入任务名称"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        title.tap()
+        title.typeText("F08 网络任务\n")
+        app.swipeUp()
+        tap("保存任务")
+        tap("project.keji")
+        let task = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "F08 网络任务")).firstMatch
+        XCTAssertTrue(task.waitForExistence(timeout: 10))
+        task.tap()
+        let plan = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "plan.")).firstMatch
+        XCTAssertTrue(plan.waitForExistence(timeout: 10), "created task must immediately expose its Plan")
+        plan.tap()
+        tap("plan.dispatch", timeout: 10)
+        tap("plan.dispatch.confirm")
+        XCTAssertTrue(app.staticTexts["执行中"].waitForExistence(timeout: 10))
+    }
+
+    private func capture(_ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 }

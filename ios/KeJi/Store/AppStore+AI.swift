@@ -156,6 +156,11 @@ extension AppStore {
 
     /// Completes the task, closes the waiting_human session and books an estimated 8-minute review.
     func completeAIReview(_ taskId: String) {
+        if workspaceClient != nil || !useSampleData,
+           plans(forTask: taskId).contains(where: { !$0.id.hasPrefix("draft-") }) {
+            planErrors[taskId] = "请打开 Plan 详情，审核执行证据后提交验收。"
+            return
+        }
         guard task(taskId)?.status == .waitingHuman else { return }
         let at = Date()
         withTask(taskId, at: at) { t in

@@ -53,6 +53,13 @@ struct Endpoint {
     static func taskPlans(taskID: String) -> Endpoint {
         Endpoint(method: .get, path: "/tasks/\(taskID)/plans", requiresAuth: true, body: nil)
     }
+    static func createPlan(taskID: String, draft: PlanItem) -> Endpoint {
+        Endpoint(method: .post, path: "/tasks/\(taskID)/plans", requiresAuth: true, body: CreatePlanBody(draft: draft))
+    }
+    static func retryPlan(id: String, expectedRevision: Int) -> Endpoint {
+        Endpoint(method: .post, path: "/plans/\(id)/retry", requiresAuth: true,
+                 body: RevisionBody(expectedRevision: expectedRevision))
+    }
     static func acceptPlan(id: String, expectedRevision: Int, evidenceIDs: [String], criteria: [CriterionResultBody]) -> Endpoint {
         Endpoint(method: .post, path: "/plans/\(id)/accept", requiresAuth: true,
                  body: AcceptPlanBody(expectedRevision: expectedRevision, evidenceIds: evidenceIDs, criteria: criteria))
@@ -74,6 +81,25 @@ struct CriterionResultBody: Codable, Equatable {
     var accepted: Bool
 }
 
+struct CreatePlanBody: Encodable {
+    var title: String
+    var priority: Int
+    var status = "ready"
+    var criteria: [String]
+    var dependsOn: [String]
+    var estimatedHumanMinutes: Int
+    var estimatedAiMinutes: Int
+    var workWeight: Double
+    var risk: Int
+    var executionPolicy: PlanExecutionPolicy
+
+    init(draft: PlanItem) {
+        title = draft.title; priority = draft.priority; criteria = draft.criteria; dependsOn = draft.dependsOn
+        estimatedHumanMinutes = draft.estimatedHumanMinutes; estimatedAiMinutes = draft.estimatedAiMinutes
+        workWeight = draft.workWeight; risk = draft.risk; executionPolicy = draft.executionPolicy
+    }
+}
+
 struct AcceptPlanBody: Encodable {
     var expectedRevision: Int
     var evidenceIds: [String]
@@ -92,6 +118,7 @@ struct GenerateReportBody: Encodable {
 struct APIError: Error, LocalizedError, Equatable {
     var code: Int
     var message: String
+    var currentPlan: PlanItem? = nil
 
     var errorDescription: String? { message }
 

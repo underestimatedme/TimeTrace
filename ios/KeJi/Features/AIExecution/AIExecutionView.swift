@@ -39,6 +39,8 @@ struct AIExecutionView: View {
             do {
                 let job = try await remote.refresh(jobID: jobID)
                 store.applyRemoteJob(job)
+                if let planID = job.planId { store.planJobs[planID] = job; store.commit() }
+                await store.refreshPlans(taskID: job.taskId)
                 if [.awaitingReview, .completed, .failed, .cancelled, .expired, .interrupted].contains(job.status) { return }
             } catch {
                 try? await _Concurrency.Task.sleep(nanoseconds: 5_000_000_000)
@@ -143,8 +145,10 @@ struct AIExecutionView: View {
                     AppButton("审核完成", icon: "checkmark", variant: .accent, fullWidth: true) {
                         if let jobID = execution?.remoteJobId {
                             _Concurrency.Task {
-                                do { try await remote.completeReview(jobID: jobID); _ = try await remote.refresh(jobID: jobID); router.go(.today) }
-                                catch { commandError = "审核状态提交失败，请重试" }
+                                await store.refreshPlans(taskID: task.id)
+                                if let plan = store.plans(forTask: task.id).first(where: { store.planJobs[$0.id]?.id == jobID || $0.status == .awaitingReview }) {
+                                    router.push(.plan(plan.id))
+                                } else { commandError = "请刷新任务的 Plan 后完成验收。" }
                             }
                         } else {
                             store.completeAIReview(task.id)

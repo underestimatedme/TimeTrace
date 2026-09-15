@@ -160,7 +160,13 @@ struct TodayView: View {
             Text(task.title).font(Typo.sans(Typo.sm, weight: .medium)).foregroundStyle(theme.text)
             HStack(spacing: 8) {
                 AppButton("立即审核", variant: .accent, size: .sm) { router.push(.taskDetail(task.id)) }
-                AppButton("标记完成", variant: .secondary, size: .sm) { store.completeAIReview(task.id) }
+                AppButton("标记完成", variant: .secondary, size: .sm) {
+                    if let plan = store.plans(forTask: task.id).first(where: { $0.status == .awaitingReview }) {
+                        router.push(.plan(plan.id))
+                    } else if store.workspaceClient != nil {
+                        router.push(.taskDetail(task.id))
+                    } else { store.completeAIReview(task.id) }
+                }
             }
             .padding(.top, 12)
         }

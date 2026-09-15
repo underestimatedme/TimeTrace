@@ -7,7 +7,6 @@ struct TaskCreateView: View {
     @Environment(AppRouter.self) private var router
     @Environment(RemoteExecutionClient.self) private var remote
     @Environment(AppEnvironment.self) private var appEnv
-    @Environment(SyncEngine.self) private var sync
 
     enum SaveAction { case save, start, schedule }
 
@@ -25,7 +24,6 @@ struct TaskCreateView: View {
     @State private var runnerId = ""
     @State private var workspaceId = ""
     @State private var toolId = ""
-    @State private var dispatchError: String?
 
     private var projectGoals: [Goal] { store.goals.filter { $0.projectId == projectId } }
     private var showsAI: Bool { executorType == .ai || executorType == .collaboration }
@@ -110,9 +108,6 @@ struct TaskCreateView: View {
                         }
                     }
                 }
-                if let dispatchError {
-                    Text(dispatchError).font(Typo.sans(Typo.xs)).foregroundStyle(theme.danger)
-                }
             }
 
             HStack(alignment: .top, spacing: 16) {
@@ -174,27 +169,14 @@ struct TaskCreateView: View {
         case .start:
             router.go(.projects)
             if executorType == .ai {
-                router.push(.ai(id))
-                if store.task(id) != nil, let runner = selectedRunner,
-                   let workspace = runner.workspaces.first(where: { $0.id == workspaceId }),
-                   let tool = availableTools.first(where: { $0.id == toolId }) {
+                router.push(.taskDetail(id))
+                if !appEnv.options.offline {
                     _Concurrency.Task {
-                        do {
-                            await sync.pushDirty()
-                            guard case .idle = sync.status, let syncedTask = store.task(id) else {
-                                throw APIError.offline
-                            }
-                            let job = try await remote.dispatch(task: syncedTask, runner: runner, workspace: workspace, tool: tool)
-                            store.startRemoteAIExecution(id, job: job, provider: tool.provider)
-                        } catch {
-                            dispatchError = error.localizedDescription
-                            store.failRemoteAIExecution(id, provider: aiProvider, message: error.localizedDescription)
+                        if let plan = await store.prepareTaskPlan(id) {
+                            router.push(.plan(plan.id))
+                            await store.dispatchPlan(plan.id, runnerID: runnerId, workspaceID: workspaceId, toolID: toolId)
                         }
                     }
-                } else if appEnv.options.offline {
-                    store.startAIExecution(id)
-                } else {
-                    dispatchError = "请先选择可用的电脑、工作区和 AI 工具"
                 }
             } else {
                 store.startFocus(id)

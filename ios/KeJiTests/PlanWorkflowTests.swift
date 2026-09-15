@@ -1,0 +1,306 @@
+import XCTest
+@testable import KeJi
+
+private final class PlanHTTPProtocol: URLProtocol {
+    static var handler: ((URLRequest) throws -> (Int, Data))!
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        do {
+            let (status, data) = try Self.handler(request)
+            client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status,
+                                httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch { client?.urlProtocol(self, didFailWithError: error) }
+    }
+    override func stopLoading() {}
+}
+
+@MainActor
+final class PlanWorkflowTests: XCTestCase {
+    private var api: APIClient!
+    private var session: URLSession!
+    private var store: AppStore!
+    private var plan: PlanItem!
+
+    override func setUp() {
+        super.setUp()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [PlanHTTPProtocol.self]
+        session = URLSession(configuration: configuration)
+        api = APIClient(baseURL: URL(string: "https://plans.invalid/api/v1")!,
+                        keychain: KeychainStore(account: "plan-test-" + UUID().uuidString), session: session)
+        api.storeTokens(SessionTokens(accessToken: "test", refreshToken: "", expiresIn: 900))
+        store = AppStore()
+        store.workspaceClient = WorkspaceClient(client: api)
+        store.tasks = SampleData.createWorkspaceFixture().state.tasks
+        plan = SampleData.createWorkspaceFixture().state.plans[0]
+        plan.status = .awaitingReview
+        plan.revision = 7
+        plan.criteria = ["Tests pass", "Result reviewed"]
+        store.plans = [plan]
+    }
+
+    override func tearDown() {
+        api.clearTokens()
+        session.invalidateAndCancel()
+        PlanHTTPProtocol.handler = nil
+        super.tearDown()
+    }
+
+    private func response<T: Encodable>(_ value: T, code: Int = 0) throws -> Data {
+        try JSONSerialization.data(withJSONObject: ["code": code, "message": "revision conflict",
+            "data": JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(value))])
+    }
+
+    private var results: [CriterionResultBody] {
+        [.init(index: 0, accepted: true), .init(index: 1, accepted: true)]
+    }
+
+    func testAcceptanceSubmitsCompleteReviewAndOnlyAppliesServerReceipt() async throws {
+        var accepted = plan!
+        accepted.status = .accepted
+        accepted.revision = 8
+        let reply = try response(accepted)
+        let id = plan.id
+        var calls = 0
+        PlanHTTPProtocol.handler = { request in
+            calls += 1
+            XCTAssertEqual(request.url?.path, "/api/v1/plans/\(id)/accept")
+            XCTAssertEqual(request.httpMethod, "POST")
+            let body = try Self.body(request)
+            XCTAssertEqual(body["expected_revision"] as? Int, 7)
+            XCTAssertEqual(body["evidence_ids"] as? [String], ["job-1"])
+            let criteria = body["criteria"] as? [[String: Any]]
+            XCTAssertEqual(criteria?.count, 2)
+            XCTAssertEqual(criteria?.map { $0["index"] as? Int }, [0, 1])
+            XCTAssertEqual(criteria?.map { $0["accepted"] as? Bool }, [true, true])
+            return (200, reply)
+        }
+        let ok = await store.acceptPlan(plan.id, expectedRevision: 7, evidenceIDs: ["job-1"], criteria: results)
+        XCTAssertTrue(ok)
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(store.plan(plan.id)?.status, .accepted)
+        XCTAssertEqual(store.plan(plan.id)?.revision, 8)
+    }
+
+    func testConflictAdoptsCurrentPlanButNeverRetriesAcceptance() async throws {
+        var current = plan!
+        current.revision = 9
+        current.status = .cancelled
+        let reply = try response(current, code: 40901)
+        var calls = 0
+        PlanHTTPProtocol.handler = { _ in calls += 1; return (409, reply) }
+        let ok = await store.acceptPlan(plan.id, expectedRevision: 7, evidenceIDs: ["job-1"], criteria: results)
+        XCTAssertFalse(ok)
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(store.plan(plan.id)?.revision, 9)
+        XCTAssertEqual(store.plan(plan.id)?.status, .cancelled)
+        XCTAssertNotNil(store.planErrors[plan.id])
+    }
+
+    func testOfflineAndRateLimitDoNotAcceptOrUnlockDependents() async throws {
+        for status in [-1, 429] {
+            PlanHTTPProtocol.handler = { _ in
+                if status == -1 { throw URLError(.notConnectedToInternet) }
+                return (429, Data(#"{"code":42900,"message":"quota exhausted"}"#.utf8))
+            }
+            let ok = await store.acceptPlan(plan.id, expectedRevision: 7, evidenceIDs: ["job-1"], criteria: results)
+            XCTAssertFalse(ok)
+            XCTAssertEqual(store.plan(plan.id)?.status, .awaitingReview)
+            XCTAssertEqual(store.plan(plan.id)?.revision, 7)
+            XCTAssertNotNil(store.planErrors[plan.id])
+            XCTAssertFalse(store.planBusy.contains(plan.id))
+        }
+    }
+
+    func testIncompleteReviewNeverContactsServer() async {
+        PlanHTTPProtocol.handler = { _ in XCTFail("invalid review reached server"); throw URLError(.badURL) }
+        let ok = await store.acceptPlan(plan.id, expectedRevision: 7, evidenceIDs: [], criteria: [])
+        XCTAssertFalse(ok)
+        XCTAssertEqual(store.plan(plan.id)?.status, .awaitingReview)
+    }
+
+    func testRefreshCreatesAnExplicitPlanForSyncedDraftThenReplacesDraft() async throws {
+        let id = store.addTask(store.tasks[0])
+        store.clearDirty([.tasks: [id]], deleted: [:], settings: false, activeFocus: false, aiTools: false)
+        var created = plan!
+        created.id = "new-plan"
+        created.taskId = id
+        created.status = .ready
+        let reply = try response(created)
+        let empty = try response([PlanItem]())
+        var methods: [String] = []
+        PlanHTTPProtocol.handler = { request in
+            methods.append(request.httpMethod!)
+            XCTAssertEqual(request.url?.path, "/api/v1/tasks/\(id)/plans")
+            if request.httpMethod == "POST" {
+                let body = try Self.body(request)
+                XCTAssertEqual(body["status"] as? String, "ready")
+                XCTAssertNotNil(body["title"])
+                return (201, reply)
+            }
+            return (200, empty)
+        }
+        await store.refreshPlans(taskID: id)
+        XCTAssertEqual(methods, ["GET", "POST"])
+        XCTAssertEqual(store.plans(forTask: id).map(\.id), ["new-plan"])
+    }
+
+    func testRefreshReplacesStalePlanStateAndDoesNotInventPlanForEmptyTask() async throws {
+        var current = plan!
+        current.status = .running
+        current.revision = 11
+        let reply = try response([current])
+        PlanHTTPProtocol.handler = { _ in (200, reply) }
+        await store.refreshPlans(taskID: plan.taskId)
+        XCTAssertEqual(store.plan(plan.id)?.status, .running)
+        XCTAssertEqual(store.plan(plan.id)?.revision, 11)
+        let empty = try response([PlanItem]())
+        PlanHTTPProtocol.handler = { request in XCTAssertEqual(request.httpMethod, "GET"); return (200, empty) }
+        await store.refreshPlans(taskID: plan.taskId)
+        XCTAssertTrue(store.plans(forTask: plan.taskId).isEmpty)
+    }
+
+    func testDispatchSendsPlanAndTaskRevisionAndPersistsEvidenceJob() async throws {
+        store.plans[0].status = .ready
+        store.plans[0].title = "Review quota"
+        store.plans[0].criteria = ["Attach report"]
+        store.tasks[0].description = "Capture remaining quota"
+        let date = Date(timeIntervalSince1970: 1_789_500_000)
+        store.tasks[0].updatedAt = date
+        let job = RemoteJob(id: "job-1", taskId: plan.taskId, runnerId: "runner", workspaceId: "workspace",
+                            toolProfileId: "tool", status: .queued, revision: 1, createdAt: date, updatedAt: date)
+        let reply = try response(job)
+        var current = plan!
+        current.status = .queued
+        let plans = try response([current])
+        PlanHTTPProtocol.handler = { request in
+            if request.httpMethod == "POST" {
+                XCTAssertEqual(request.url?.path, "/api/v1/remote-jobs")
+                let body = try Self.body(request)
+                XCTAssertEqual(body["plan_id"] as? String, current.id)
+                XCTAssertEqual(body["expected_task_revision"] as? Int64, 1_789_500_000_000)
+                XCTAssertEqual(body["runner_id"] as? String, "runner")
+                XCTAssertEqual(body["prompt"] as? String, "Review quota\n\nCapture remaining quota\n\n验收项：\n- Attach report")
+                XCTAssertFalse((body["idempotency_key"] as? String ?? "").isEmpty)
+                return (201, reply)
+            }
+            return (200, plans)
+        }
+        let ok = await store.dispatchPlan(plan.id, runnerID: "runner", workspaceID: "workspace", toolID: "tool")
+        XCTAssertTrue(ok)
+        XCTAssertEqual(store.planJobs[plan.id]?.id, "job-1")
+        XCTAssertEqual(store.plan(plan.id)?.status, .queued)
+        let reloaded = AppStore()
+        reloaded.load(try JSONCoding.decoder.decode(PersistedState.self, from: JSONCoding.encoder.encode(store.persisted)))
+        XCTAssertEqual(reloaded.planJobs[plan.id]?.id, "job-1")
+    }
+
+    func testDispatchFailureHasNoJobAndNoSuccessfulStatus() async throws {
+        store.plans[0].status = .ready
+        PlanHTTPProtocol.handler = { _ in (429, Data(#"{"code":42900,"message":"quota exhausted"}"#.utf8)) }
+        let ok = await store.dispatchPlan(plan.id, runnerID: "r", workspaceID: "w", toolID: "t")
+        XCTAssertFalse(ok)
+        XCTAssertNil(store.planJobs[plan.id])
+        XCTAssertEqual(store.plan(plan.id)?.status, .ready)
+        XCTAssertNotNil(store.planErrors[plan.id])
+    }
+
+    func testCancellationAndExplicitRetryUseCurrentRevision() async throws {
+        for action in ["cancel", "retry"] {
+            store.plans[0].status = action == "retry" ? .failed : .running
+            var receipt = store.plans[0]
+            receipt.status = action == "retry" ? .ready : .cancelled
+            receipt.revision = 8
+            let reply = try response(receipt)
+            PlanHTTPProtocol.handler = { request in
+                XCTAssertTrue(request.url!.path.hasSuffix("/\(action)"))
+                XCTAssertEqual(try Self.body(request)["expected_revision"] as? Int, 7)
+                return (200, reply)
+            }
+            let ok: Bool
+            if action == "retry" { ok = await store.retryPlan(plan.id, expectedRevision: 7) }
+            else { ok = await store.cancelPlan(plan.id, expectedRevision: 7) }
+            XCTAssertTrue(ok)
+            XCTAssertEqual(store.plan(plan.id)?.status, receipt.status)
+            store.plans[0].revision = 7
+        }
+    }
+
+    func testForegroundSyncRefreshesAuthoritativePlans() async throws {
+        store.hasOnboarded = true
+        var snapshot = SampleData.createWorkspaceFixture().state
+        snapshot.plans = []
+        let bootstrap = try response(Bootstrap(user: nil, state: snapshot, serverTime: nil))
+        var current = plan!
+        current.status = .running
+        current.revision = 12
+        let plansReply = try response([current])
+        PlanHTTPProtocol.handler = { request in
+            (200, request.url!.path.hasSuffix("/bootstrap") ? bootstrap : plansReply)
+        }
+        let sync = SyncEngine(store: store, client: api, enabled: true)
+        await sync.syncOnForeground()
+        XCTAssertEqual(store.plan(plan.id)?.status, .running)
+        XCTAssertEqual(store.plan(plan.id)?.revision, 12)
+    }
+
+    func testLoadingLegacyCompletedTaskDoesNotFabricateAcceptedPlan() {
+        var snapshot = SampleData.createWorkspaceFixture().state
+        snapshot.plans = []
+        snapshot.tasks[0].completedAt = Date()
+        let loaded = AppStore()
+        loaded.load(PersistedState(state: snapshot))
+        XCTAssertTrue(loaded.plans.isEmpty)
+    }
+
+    func testLegacyReviewCannotCompleteTaskWithAuthoritativePlan() {
+        store.tasks[0].status = .waitingHuman
+        let sessions = store.timeSessions
+        store.completeAIReview(plan.taskId)
+        XCTAssertEqual(store.task(plan.taskId)?.status, .waitingHuman)
+        XCTAssertNil(store.task(plan.taskId)?.completedAt)
+        XCTAssertEqual(store.timeSessions, sessions)
+    }
+
+    func testAcceptanceDebouncesWhileReceiptIsPending() async throws {
+        let started = expectation(description: "request reached server")
+        let gate = DispatchSemaphore(value: 0)
+        var accepted = plan!
+        accepted.status = .accepted
+        let reply = try response(accepted)
+        var calls = 0
+        PlanHTTPProtocol.handler = { _ in
+            calls += 1
+            started.fulfill()
+            _ = gate.wait(timeout: .now() + 5)
+            return (200, reply)
+        }
+        let first = Task { await store.acceptPlan(plan.id, expectedRevision: 7, evidenceIDs: ["job-1"], criteria: results) }
+        await fulfillment(of: [started], timeout: 3)
+        XCTAssertTrue(store.planBusy.contains(plan.id))
+        XCTAssertEqual(store.plan(plan.id)?.status, .awaitingReview)
+        let second = await store.acceptPlan(plan.id, expectedRevision: 7, evidenceIDs: ["job-1"], criteria: results)
+        XCTAssertFalse(second)
+        gate.signal()
+        let firstResult = await first.value
+        XCTAssertTrue(firstResult)
+        XCTAssertEqual(calls, 1)
+    }
+
+    nonisolated private static func body(_ request: URLRequest) throws -> [String: Any] {
+        var data = request.httpBody ?? Data()
+        if let stream = request.httpBodyStream {
+            stream.open(); defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let n = stream.read(&buffer, maxLength: buffer.count)
+                if n <= 0 { break }
+                data.append(contentsOf: buffer.prefix(n))
+            }
+        }
+        return try JSONSerialization.jsonObject(with: data) as! [String: Any]
+    }
+}

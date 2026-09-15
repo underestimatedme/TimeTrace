@@ -2,6 +2,27 @@ import XCTest
 @testable import KeJi
 
 final class PlanSyncTests: XCTestCase {
+    @MainActor
+    func testNewTaskImmediatelyHasOnlyAnUnacceptedDraftPlan() {
+        let store = AppStore()
+        let task = SampleData.createWorkspaceFixture().state.tasks[0]
+        let id = store.addTask(task)
+        XCTAssertEqual(store.plans(forTask: id).count, 1)
+        XCTAssertEqual(store.plans(forTask: id).first?.status, .draft)
+    }
+
+    @MainActor
+    func testRunningAndCancelledPlansCannotBeLocallyAccepted() async {
+        for status in [PlanState.running, .cancelled] {
+            let store = AppStore()
+            var plan = SampleData.createWorkspaceFixture().state.plans[0]
+            plan.status = status
+            store.plans = [plan]
+            let accepted = await store.acceptPlan(plan.id, expectedRevision: plan.revision, evidenceIDs: [], criteria: [])
+            XCTAssertFalse(accepted)
+            XCTAssertEqual(store.plan(plan.id)?.status, status)
+        }
+    }
     private let legacyJSON = Data(#"""
     {"projects":[{"id":"p1","name":"P","description":"","icon":"x","color":"#fff","status":"active","created_at":"2026-09-14T10:00:00Z","updated_at":"2026-09-14T10:00:00Z"}],
      "tasks":[{"id":"t1","project_id":"p1","goal_id":null,"title":"T","description":"","executor_type":"ai","ai_provider":null,"collaboration_mode":null,"status":"planned","priority":"high","estimated_minutes":30,"due_date":null,"scheduled_start":null,"scheduled_end":null,"created_at":"2026-09-14T10:00:00Z","completed_at":null,"result_summary":null,"updated_at":"2026-09-14T10:00:00Z"}]}

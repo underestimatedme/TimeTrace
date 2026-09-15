@@ -10,6 +10,10 @@ extension AppStore {
         task.createdAt = at
         task.updatedAt = at
         tasks.append(task)
+        var draft = defaultPlan(for: task, now: at)
+        draft.id = "draft-" + task.id
+        draft.status = .draft
+        plans.append(draft)
         markDirty(.tasks, task.id)
         commit()
         return task.id

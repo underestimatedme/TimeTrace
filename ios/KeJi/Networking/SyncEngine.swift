@@ -117,6 +117,7 @@ final class SyncEngine {
             let bootstrap = try await client.send(Endpoint.bootstrap, as: Bootstrap.self)
             apply(bootstrap)
             status = .idle
+            await store.refreshAllPlans()
         } catch {
             fail(error)
         }
@@ -158,6 +159,7 @@ final class SyncEngine {
             store.acknowledge(checkpoint, settings: sendSettings, activeFocus: sendFocus, aiTools: sendTools)
             apply(bootstrap)
             status = .idle
+            await store.refreshAllPlans()
             if store.hasPendingSync { schedulePush() }
         } catch {
             fail(error)

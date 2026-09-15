@@ -49,9 +49,22 @@ final class AppEnvironment {
             store.updateSettings { $0.theme = theme }
         }
 
-        let client = APIClient(baseURL: options.apiBaseURL)
+        let client = APIClient(baseURL: options.apiBaseURL,
+                               keychain: options.uiTesting ? KeychainStore(account: "ui-test-session") : KeychainStore())
         sync = SyncEngine(store: store, client: client, enabled: !options.offline)
         remote = RemoteExecutionClient(client: client)
+        if !options.offline {
+            store.workspaceClient = WorkspaceClient(client: client)
+            let sync = self.sync
+            store.preparePlanDispatch = { [weak sync] in
+                guard let sync else { return false }
+                await sync.pushDirty()
+                await sync.pull()
+                if case .idle = sync.status { return true }
+                return false
+            }
+            store.refreshPlanProjection = { [weak sync] in await sync?.pull() }
+        }
         store.onChange = { [weak self] in self?.scheduleSave() }
         if options.sampleData { scheduleSave() }
 

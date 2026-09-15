@@ -48,6 +48,11 @@ final class APIClient {
         let request = try buildRequest(endpoint)
         let (data, response) = try await perform(request)
         let http = response as? HTTPURLResponse
+        if http?.statusCode == 409,
+           let conflict = try? JSONCoding.decoder.decode(APIEnvelope<PlanItem>.self, from: data) {
+            throw APIError(code: conflict.code == 0 ? 40900 : conflict.code,
+                           message: conflict.message, currentPlan: conflict.data)
+        }
         let envelope: APIEnvelope<T>
         do {
             envelope = try JSONCoding.decoder.decode(APIEnvelope<T>.self, from: data)

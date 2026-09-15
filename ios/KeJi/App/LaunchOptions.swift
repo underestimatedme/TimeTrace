@@ -39,5 +39,12 @@ struct LaunchOptions {
             i += 1
         }
         if ProcessInfo.processInfo.environment["KEJI_OFFLINE"] == "1" { offline = true }
+        #if DEBUG
+        // Opt-in HTTP integration testing against a caller-supplied local server.
+        if arguments.contains("--online-ui-testing"), apiBaseURL?.host == "127.0.0.1" {
+            uiTesting = true
+            offline = false
+        }
+        #endif
     }
 }

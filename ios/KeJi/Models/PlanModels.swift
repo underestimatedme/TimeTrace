@@ -1,6 +1,23 @@
 import Foundation
 import CryptoKit
 
+/// Review rows are immutable for one captured revision; IDs survive view updates.
+struct PlanReviewDraft: Identifiable {
+    let id = UUID()
+    let plan: PlanItem
+    let job: RemoteJob?
+    let criteria: [Criterion]
+    struct Criterion: Identifiable {
+        let id = UUID()
+        let index: Int
+        let title: String
+    }
+    init(plan: PlanItem, job: RemoteJob?) {
+        self.plan = plan; self.job = job
+        criteria = plan.criteria.enumerated().map { Criterion(index: $0.offset, title: $0.element) }
+    }
+}
+
 /// Execution status of a Plan, projected by the server. Snake_case values match
 /// the Valley contract; an unrecognized value decodes to `.unknown` so one new
 /// server state never fails the whole snapshot.

@@ -18,6 +18,7 @@ struct TaskDetailView: View {
                 MissingPlaceholder(text: "任务不存在")
             }
         }
+        .task { await appEnv.sync.syncOnForeground() }
     }
 
     @ViewBuilder
@@ -49,6 +50,10 @@ struct TaskDetailView: View {
         Spacer().frame(height: 24)
 
         let taskPlans = store.plans(forTask: task.id)
+        if let error = store.planErrors[task.id] {
+            Text(error).font(Typo.sans(Typo.xs)).foregroundStyle(theme.danger)
+            AppButton("刷新 Plans", variant: .secondary) { Task { await appEnv.sync.syncOnForeground() } }
+        }
         if !taskPlans.isEmpty {
             SectionTitle("Plans")
             VStack(spacing: 8) {
@@ -88,7 +93,10 @@ struct TaskDetailView: View {
 
         HStack(spacing: 8) {
             if task.status == .waitingHuman {
-                AppButton("审核完成", variant: .accent, fullWidth: true) { store.completeAIReview(task.id) }
+                AppButton("审核完成", variant: .accent, fullWidth: true) {
+                    if let plan = taskPlans.first(where: { $0.status == .awaitingReview }) { router.push(.plan(plan.id)) }
+                    else if taskPlans.isEmpty { store.completeAIReview(task.id) }
+                }
             }
             if TaskStatus.startable.contains(task.status) && (task.executorType != .ai || appEnv.options.offline) {
                 AppButton("开始执行", variant: .accent, fullWidth: true) {

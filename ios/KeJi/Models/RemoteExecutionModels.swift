@@ -73,6 +73,7 @@ struct RemoteJob: Codable, Identifiable, Equatable {
     var prompt: String?
     var createdAt: Date
     var updatedAt: Date
+    var planId: String? = nil
 }
 
 struct DeviceApprovalRequest: Encodable { var userCode: String }
@@ -99,4 +100,5 @@ struct RemoteJobRequest: Encodable {
     var prompt: String
     var idempotencyKey: String
     var expectedTaskRevision: Int64
+    var planId: String? = nil
 }

@@ -4,6 +4,12 @@ import XCTest
 /// Proves the iOS models decode Valley's actual wire shapes (snake_case, RFC3339)
 /// and that endpoint paths match the server routes.
 final class WorkspaceContractTests: XCTestCase {
+    func testRemoteJobRetainsPlanIdentityForReviewEvidence() throws {
+        let json = Data(#"{"id":"job-7","task_id":"task-2","plan_id":"plan-3","runner_id":"runner-1","workspace_id":"ws-1","tool_profile_id":"codex-1","status":"awaiting_review","revision":4,"created_at":"2026-09-15T06:00:00Z","updated_at":"2026-09-15T07:00:00Z"}"#.utf8)
+        let job = try JSONCoding.decoder.decode(RemoteJob.self, from: json)
+        XCTAssertEqual(job.planId, "plan-3")
+        XCTAssertEqual(job.status, .awaitingReview)
+    }
     func testAccountQuotaDecodesValleyShape() throws {
         let json = Data(#"""
         {"pools":[{"pool_id":"pool-codex","availability":"blocked","windows":[

@@ -16,9 +16,17 @@ final class AppStore {
     /// Daily stats shipped with the sample data; empty when the user starts from scratch.
     var sampleDailyStats: [DailyStats] = []
     var experiments: [EfficiencyExperiment] = []
-    /// Plans (项目 → 任务 → Plan). Server-authoritative via PlanClient; not part
+    /// Plans (项目 → 任务 → Plan). Server-authoritative via WorkspaceClient; not part
     /// of the legacy sync snapshot. Persisted locally and migrated on load.
     var plans: [PlanItem] = []
+    var planErrors: [String: String] = [:]
+    var planBusy: Set<String> = []
+    var planJobs: [String: RemoteJob] = [:]
+    @ObservationIgnored var workspaceClient: WorkspaceClient?
+    @ObservationIgnored var preparePlanDispatch: (() async -> Bool)?
+    @ObservationIgnored var refreshPlanProjection: (() async -> Void)?
+    var refreshingPlanTasks: Set<String> = []
+    var planRunners: [RunnerInventory] = []
     /// Transient account quota from the server (WorkspaceClient); not persisted.
     /// Offline/sample builds seed it so the AI tab can render quota windows.
     var accountQuota: AccountQuota?
@@ -219,6 +227,8 @@ final class AppStore {
         aiExecutions = data.state.aiExecutions
         experiments = data.state.experiments
         plans = migrateDefaultPlans(data.state).plans
+        planJobs = [:]
+        planErrors = [:]
         settings = data.state.settings
         aiTools = data.state.aiTools
         activeFocus = data.state.activeFocus
@@ -287,10 +297,10 @@ final class AppStore {
         timeSessions = persisted.state.timeSessions
         aiExecutions = persisted.state.aiExecutions
         experiments = persisted.state.experiments
-        // Bring the local cache up to schema v2: ensure every Task has a default
-        // Plan. Idempotent, so re-loading a migrated cache is a no-op.
-        let migrated = migrateDefaultPlans(persisted.state)
-        plans = migrated.plans
+        // Real accounts fetch migrated Plans from Valley; local Task completion
+        // must never fabricate an accepted Plan. Only demo fixtures migrate locally.
+        plans = persisted.useSampleData ? migrateDefaultPlans(persisted.state).plans : persisted.state.plans
+        planJobs = persisted.planJobs ?? [:]
         settings = persisted.state.settings
         aiTools = persisted.state.aiTools
         activeFocus = persisted.state.activeFocus
@@ -307,7 +317,7 @@ final class AppStore {
     var persisted: PersistedState {
         PersistedState(state: snapshot, sampleDailyStats: sampleDailyStats, hasOnboarded: hasOnboarded,
                        useSampleData: useSampleData, dirty: dirty, deleted: deleted, settingsDirty: settingsDirty,
-                       activeFocusDirty: activeFocusDirty, aiToolsDirty: aiToolsDirty)
+                       activeFocusDirty: activeFocusDirty, aiToolsDirty: aiToolsDirty, planJobs: planJobs)
     }
 }
 
@@ -322,4 +332,5 @@ struct PersistedState: Codable {
     var settingsDirty = false
     var activeFocusDirty = false
     var aiToolsDirty = false
+    var planJobs: [String: RemoteJob]? = nil
 }

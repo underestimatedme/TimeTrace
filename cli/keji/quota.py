@@ -85,7 +85,10 @@ def merge_capabilities(verified: Optional[Dict[str, Any]]) -> Dict[str, bool]:
 def _iso(epoch: Optional[float]) -> Optional[str]:
     if epoch is None:
         return None
-    return datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Millisecond precision (RFC3339 fractional seconds): whole-second timestamps
+    # collapse distinct readings taken in the same second into a tie.
+    dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.") + ("%03dZ" % (dt.microsecond // 1000))
 
 
 def payload_from_reading(bucket_key: str, tool: str, used_percent: Any, reset_at: Optional[float],
@@ -99,8 +102,10 @@ def payload_from_reading(bucket_key: str, tool: str, used_percent: Any, reset_at
     trusted_reset = reset_at if (reset_at is not None and reset_at > now) else None
     expires = trusted_reset if trusted_reset is not None else now + (window_mins * 60 if window_mins else default_ttl)
     window = make_window(used_percent, trusted_reset, now, expires)
+    # Millisecond resolution so two genuinely distinct readings in the same
+    # second are not collapsed by the (runner_id, sample_id) dedup.
     return sample_payload(
-        sample_id="%s:%s:%d" % (tool, bucket_key, int(now)), pool_id=pool_id, profile_id=profile_id,
+        sample_id="%s:%s:%d" % (tool, bucket_key, int(now * 1000)), pool_id=pool_id, profile_id=profile_id,
         scope=scope, kind=tool, window=window, source=source, confidence=confidence,
     )
 

@@ -6,6 +6,7 @@ from keji.quota import (
     default_capabilities,
     make_window,
     merge_capabilities,
+    payload_from_reading,
     sample_payload,
 )
 
@@ -76,6 +77,17 @@ class SamplePayloadTest(unittest.TestCase):
                    "source", "confidence"}
         self.assertEqual(set(payload), allowed)
         self.assertTrue(payload["observed_at"].endswith("Z"))
+
+
+class ReadingPayloadTest(unittest.TestCase):
+    def test_distinct_subsecond_readings_are_not_tied(self):
+        # Two readings in the same second must not collapse to the same
+        # observed_at / sample_id (else the server's latest-wins reduce ties).
+        p1 = payload_from_reading("codex:weekly", "codex", 100.0, None, 10080, "pool", "prof", 1789438863.502)
+        p2 = payload_from_reading("codex:weekly", "codex", 12.0, None, 10080, "pool", "prof", 1789438863.778)
+        self.assertNotEqual(p1["observed_at"], p2["observed_at"])
+        self.assertNotEqual(p1["sample_id"], p2["sample_id"])
+        self.assertRegex(p1["observed_at"], r"\.\d{3}Z$")
 
 
 class AdapterCapabilityTest(unittest.TestCase):

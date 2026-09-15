@@ -117,7 +117,7 @@ struct AIExecutionView: View {
                     AppButton("暂停", icon: "pause", variant: .secondary, fullWidth: true) { store.pauseAIExecution(task.id) }
                     AppButton("取消", icon: "xmark", variant: .danger, fullWidth: true) {
                         store.cancelAIExecution(task.id)
-                        router.go(.tasks)
+                        router.go(.projects)
                     }
                 }
             }

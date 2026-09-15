@@ -172,7 +172,7 @@ struct TaskCreateView: View {
         let id = store.addTask(buildTask())
         switch action {
         case .start:
-            router.go(.tasks)
+            router.go(.projects)
             if executorType == .ai {
                 router.push(.ai(id))
                 if store.task(id) != nil, let runner = selectedRunner,
@@ -201,7 +201,7 @@ struct TaskCreateView: View {
                 router.push(.focus(id))
             }
         case .save, .schedule:
-            router.go(.tasks)
+            router.go(.projects)
         }
     }
 

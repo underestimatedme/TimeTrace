@@ -11,10 +11,10 @@ struct MainTabView: View {
             Group {
                 switch router.tab {
                 case .today: TodayView()
-                case .tasks: TasksView()
+                case .projects: ProjectsView()
                 case .timeline: TimeFlowView()
-                case .insights: InsightsView()
-                case .profile: ProfileView()
+                case .ai: AIToolsView()
+                case .mine: ProfileView()
                 }
             }
             .id(router.tab)
@@ -44,6 +44,7 @@ struct MainTabView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("workspace.tab.\(tab.rawValue)")
             }
         }
         .background(theme.bgElevated.opacity(0.95).background(.ultraThinMaterial))

@@ -79,6 +79,17 @@ class SchedulerTest(unittest.TestCase):
         self.assertEqual(out, "task 1 → deferred (runner busy)")
         self.assertEqual(ad.calls, [])  # adapter never invoked
 
+    def test_preparation_revoking_billing_capability_blocks_spawn(self):
+        task_id = self.db.add_task("do", "/repo", tool="claude")
+        adapter = FakeAdapter("claude")
+        def prepare(*args):
+            adapter.capabilities = lambda: {"can_enforce_zero_spend": False}
+            return fake_worktree(*args)
+        outcome = scheduler.run_once(self.db, {"claude": adapter}, self.cfg, self.home,
+                                     ensure_worktree=prepare, log=lambda *args: None)
+        self.assertEqual(outcome, "task %d → blocked (billing_unverified)" % task_id)
+        self.assertEqual(adapter.calls, [])
+
     def test_missing_or_false_zero_spend_capability_blocks_start_and_resume(self):
         """The scheduler must never bypass the shared billing gate."""
         for capabilities in ({}, {"can_enforce_zero_spend": False}):

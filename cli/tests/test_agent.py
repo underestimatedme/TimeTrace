@@ -4,6 +4,8 @@ import threading
 import time
 import unittest
 import subprocess
+from datetime import datetime, timezone
+from unittest.mock import patch
 from pathlib import Path
 
 from keji.agent import Agent
@@ -15,6 +17,8 @@ from keji.models import RunResult, Sample
 def init_repo(path: Path) -> None:
     path.mkdir()
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
+    subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                    "commit", "--allow-empty", "-qm", "initial"], cwd=path, check=True)
 
 
 class FakeCloud:
@@ -28,14 +32,15 @@ class FakeCloud:
 
     def claim(self, token):
         return {"job": {"id": "j1", "workspace_id": "ws1", "tool_profile_id": "codex-default", "provider": "codex", "prompt": "do it"},
-                "attempt_id": "a1", "lease_epoch": 1}
+                "attempt_id": "a1", "lease_epoch": 1,
+                "lease_expires_at": datetime.fromtimestamp(time.time() + 90, timezone.utc).isoformat()}
 
     def append_events(self, token, job_id, attempt_id, epoch, events):
         self.events.extend(events)
 
     def renew(self, token, attempt_id, epoch):
         self.renewed = (attempt_id, epoch)
-        return {}
+        return {"lease_expires_at": datetime.fromtimestamp(time.time() + 90, timezone.utc).isoformat()}
 
 
 class Adapter:
@@ -133,7 +138,9 @@ class AgentTest(unittest.TestCase):
     def test_cancel_command_stops_adapter_and_is_acknowledged(self):
         class CancelCloud(FakeCloud):
             def renew(self, token, attempt_id, epoch):
-                return {"desired_action": "cancel"}
+                if hasattr(self, "renewed"):
+                    return {"desired_action": "cancel"}
+                return super().renew(token, attempt_id, epoch)
         class CancellableAdapter(Adapter):
             def start(self, prompt, cwd, session_id, log_file, cancel_event=None):
                 self.cancelled = cancel_event.wait(.5)
@@ -395,6 +402,283 @@ class AgentTest(unittest.TestCase):
                 self.assertFalse(hasattr(adapter, "args"))
             finally:
                 held.release()
+
+
+class RecoveryFenceTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name)
+        self.repo = self.home / "repo"
+        init_repo(self.repo)
+        self.db = Database(self.home / "keji.db")
+        self.db.upsert_workspace("ws1", "repo", str(self.repo), "main")
+        self.cloud = FakeCloud()
+        self.claim = self.cloud.claim("token")
+        self.cloud.claim = lambda token: self.claim
+        self.calls = []
+        calls = self.calls
+
+        class BlockingAdapter(Adapter):
+            def start(self, prompt, cwd, session_id, log_file, cancel_event=None):
+                calls.append(("start", cwd, session_id))
+                Path(cwd, "dirty.txt").write_text("first change")
+                Path(log_file).write_text("quota output\n")
+                return RunResult(exit_code=1, blocked=True, session_id="native-session", error="quota")
+
+            def resume(self, prompt, cwd, session_id, log_file, cancel_event=None):
+                calls.append(("resume", cwd, session_id))
+                return RunResult(exit_code=0, ok=True, session_id=session_id)
+
+        self.adapter = BlockingAdapter()
+        self.agent = Agent(self.db, self.cloud, {"codex": self.adapter}, self.home, lambda: "token",
+                           prepare_workspace=lambda *args: (str(self.repo), "main"), heartbeat_interval=.01)
+
+    def checkpoint(self):
+        self.assertEqual(self.agent.run_once(), "job j1 → waiting_quota")
+        self.claim["attempt_id"] = "a2"
+        self.calls.clear()
+        return self.db.get_checkpoint("j1")
+
+    def test_preparation_crossing_lease_deadline_never_spawns(self):
+        clock = [1000.0]
+        self.claim["lease_expires_at"] = datetime.fromtimestamp(1001, timezone.utc).isoformat()
+        def prepare(*args):
+            clock[0] = 1002
+            return str(self.repo), "main"
+        self.agent.prepare_workspace = prepare
+        with patch("keji.agent.time.time", side_effect=lambda: clock[0]):
+            self.assertIn("lease", self.agent.run_once())
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.cloud.events[-1]["type"], "waiting_input")
+
+    def test_renew_failure_after_preparation_never_spawns(self):
+        def fail(*args):
+            raise OSError("network lost")
+        self.cloud.renew = fail
+        self.assertIn("lease", self.agent.run_once())
+        self.assertEqual(self.calls, [])
+
+    def test_resume_capability_change_while_reporting_running_never_spawns(self):
+        self.checkpoint()
+        original = self.cloud.append_events
+        def report(*args):
+            original(*args)
+            if args[-1][0]["type"] == "running":
+                self.adapter.capabilities = lambda: {"can_dispatch": True, "can_resume": False,
+                                                     "can_enforce_zero_spend": True}
+        self.cloud.append_events = report
+        self.assertIn("waiting_input", self.agent.run_once())
+        self.assertEqual(self.calls, [])
+        self.assertIsNotNone(self.db.get_checkpoint("j1"))
+
+    def test_cancellation_while_reporting_running_never_spawns(self):
+        self.checkpoint()
+        original = self.cloud.append_events
+        def report(*args):
+            original(*args)
+            if args[-1][0]["type"] == "running":
+                self.cloud.renew = lambda *args: {"desired_action": "cancel"}
+        self.cloud.append_events = report
+        self.assertIn("cancel", self.agent.run_once())
+        self.assertEqual(self.calls, [])
+        self.assertIsNone(self.db.get_checkpoint("j1"))
+
+    def test_duplicate_cancelled_claim_invalidates_checkpoint(self):
+        self.checkpoint()
+        self.db.save_remote_claim(self.claim, state="running")
+        self.claim["job"]["desired_action"] = "cancel"
+        self.assertIn("cancel", self.agent.run_once())
+        self.assertIsNone(self.db.get_checkpoint("j1"))
+
+    def test_preparation_renews_lease_and_retains_failure_until_it_finishes(self):
+        preparing = threading.Event()
+        renewed = threading.Event()
+        def prepare(*args):
+            preparing.set()
+            self.assertTrue(renewed.wait(2))
+            return str(self.repo), "main"
+        def renew(*args):
+            self.assertTrue(preparing.is_set())
+            renewed.set()
+            raise OSError("renew denied")
+        self.agent.prepare_workspace = prepare
+        self.cloud.renew = renew
+        self.assertIn("lease renewal failed", self.agent.run_once())
+        self.assertTrue(renewed.is_set())
+        self.assertEqual(self.calls, [])
+
+    def test_resume_preparation_crossing_deadline_never_spawns(self):
+        self.checkpoint()
+        clock = [1000.0]
+        self.claim["lease_expires_at"] = datetime.fromtimestamp(1001, timezone.utc).isoformat()
+        def prepare(*args):
+            clock[0] = 1002
+            return str(self.repo), "main"
+        self.agent.prepare_workspace = prepare
+        with patch("keji.agent.time.time", side_effect=lambda: clock[0]):
+            self.assertIn("lease", self.agent.run_once())
+        self.assertEqual(self.calls, [])
+        self.assertIsNotNone(self.db.get_checkpoint("j1"))
+
+    def test_executor_delay_cannot_start_after_lease_deadline(self):
+        from concurrent.futures import ThreadPoolExecutor
+        real_submit = ThreadPoolExecutor.submit
+        clock = [1000.0]
+        self.claim["lease_expires_at"] = datetime.fromtimestamp(1001, timezone.utc).isoformat()
+        self.cloud.renew = lambda *args: {"lease_expires_at": datetime.fromtimestamp(1001, timezone.utc).isoformat()}
+        submissions = []
+        def delayed_submit(pool, fn, *args, **kwargs):
+            submissions.append(fn)
+            if len(submissions) == 2:
+                def late():
+                    clock[0] = 1002
+                    return fn(*args, **kwargs)
+                return real_submit(pool, late)
+            return real_submit(pool, fn, *args, **kwargs)
+        with patch("keji.agent.time.time", side_effect=lambda: clock[0]), patch.object(ThreadPoolExecutor, "submit", delayed_submit):
+            self.assertIn("lease", self.agent.run_once())
+        self.assertEqual(self.calls, [])
+
+    def test_missing_native_session_is_not_replaced_by_generated_uuid(self):
+        self.adapter.start = lambda *args: RunResult(exit_code=1, blocked=True, session_id=None)
+        cp = self.checkpoint()
+        self.assertFalse(cp.provider_session_id)
+        self.assertIn("waiting_input", self.agent.run_once())
+        self.assertEqual(self.calls, [])
+
+    def test_malformed_checkpoint_requires_input_and_preserves_evidence(self):
+        cp = self.checkpoint()
+        cp.provider_session_id = 42
+        self.db.save_checkpoint(cp)
+        self.assertIn("waiting_input", self.agent.run_once())
+        self.assertEqual(self.calls, [])
+        self.assertIsNotNone(self.db.get_checkpoint("j1"))
+
+    def test_result_returned_after_lease_expiry_cannot_create_checkpoint(self):
+        clock = [1000.0]
+        self.claim["lease_expires_at"] = datetime.fromtimestamp(1001, timezone.utc).isoformat()
+        self.cloud.renew = lambda *args: {"lease_expires_at": datetime.fromtimestamp(1001, timezone.utc).isoformat()}
+        def expired(*args):
+            clock[0] = 1002
+            return RunResult(exit_code=1, blocked=True, session_id="native")
+        self.adapter.start = expired
+        with patch("keji.agent.time.time", side_effect=lambda: clock[0]):
+            self.assertIn("fenced", self.agent.run_once())
+        self.assertIsNone(self.db.get_checkpoint("j1"))
+
+    def test_hung_renewal_cannot_extend_writer_past_deadline(self):
+        expires = datetime.fromtimestamp(time.time() + .15, timezone.utc).isoformat()
+        self.claim["lease_expires_at"] = expires
+        renewals = []
+        release = threading.Event()
+        self.addCleanup(release.set)
+        def renew(*args):
+            renewals.append(True)
+            if len(renewals) > 1:
+                release.wait(.8)
+            return {"lease_expires_at": expires}
+        self.cloud.renew = renew
+        stopped = []
+        def writer(prompt, cwd, session_id, log_file, cancel_event):
+            stopped.append(cancel_event.wait(1))
+            return RunResult(exit_code=143, error="cancelled")
+        self.adapter.start = writer
+        started = time.monotonic()
+        self.assertIn("fenced", self.agent.run_once())
+        self.assertLess(time.monotonic() - started, .45)
+        self.assertEqual(stopped, [True])
+
+    def test_cancellation_after_preparation_invalidates_checkpoint(self):
+        self.checkpoint()
+        self.cloud.renew = lambda *args: {"desired_action": "cancel"}
+        self.assertIn("cancel", self.agent.run_once())
+        self.assertEqual(self.calls, [])
+        self.assertIsNone(self.db.get_checkpoint("j1"))
+
+    def test_initial_cancellation_invalidates_checkpoint(self):
+        self.checkpoint()
+        self.claim["job"]["desired_action"] = "cancel"
+        self.assertIn("cancel", self.agent.run_once())
+        self.assertIsNone(self.db.get_checkpoint("j1"))
+
+    def test_capability_revocation_during_preparation_never_spawns(self):
+        def prepare(*args):
+            self.adapter.capabilities = lambda: {"can_enforce_zero_spend": False}
+            return str(self.repo), "main"
+        self.agent.prepare_workspace = prepare
+        self.assertIn("billing_unverified", self.agent.run_once())
+        self.assertEqual(self.calls, [])
+
+    def test_checkpoint_records_actual_worktree_state_and_output(self):
+        actual = self.home / "execution"
+        subprocess.run(["git", "-C", str(self.repo), "worktree", "add", "-qb", "execution", str(actual)], check=True)
+        self.agent.prepare_workspace = lambda *args: (str(actual), "execution")
+        cp = self.checkpoint()
+        self.assertEqual(cp.execution_path, str(actual.resolve()))
+        self.assertEqual(cp.provider, "codex")
+        self.assertEqual(cp.git_head, subprocess.check_output(["git", "-C", str(actual), "rev-parse", "HEAD"], text=True).strip())
+        self.assertTrue(cp.dirty_paths_digest)
+        self.assertEqual(cp.last_output_offset, 13)
+        self.assertEqual(Path(cp.output_path).read_text(), "quota output\n")
+        self.assertEqual(self.agent.run_once(), "job j1 → awaiting_review")
+        self.assertEqual(self.calls, [("resume", str(actual.resolve()), "native-session")])
+
+    def test_invalid_checkpoint_never_falls_back_to_start(self):
+        for change in ("session", "provider", "profile", "resume", "path", "dirty", "head", "output", "legacy"):
+            with self.subTest(change=change):
+                # Each case has an independently generated real checkpoint.
+                case = RecoveryFenceTest()
+                case.setUp()
+                try:
+                    cp = case.checkpoint()
+                    if change == "session": cp.provider_session_id = ""
+                    elif change == "provider": cp.provider = "claude"
+                    elif change == "profile": cp.tool_profile_id = "different-profile"
+                    elif change == "resume": case.adapter.capabilities = lambda: {"can_enforce_zero_spend": True, "can_dispatch": True, "can_resume": False}
+                    elif change == "path": cp.execution_path = str(case.home)
+                    elif change == "dirty": Path(case.repo, "dirty.txt").write_text("other change")
+                    elif change == "head":
+                        subprocess.run(["git", "-C", str(case.repo), "-c", "user.name=Test", "-c", "user.email=t@example.invalid", "commit", "--allow-empty", "-qm", "changed"], check=True)
+                    elif change == "output": Path(case.home, "logs", "remote-j1.log").write_text("")
+                    elif change == "legacy": cp.schema_version = 1
+                    case.db.save_checkpoint(cp)
+                    self.assertIn("waiting_input", case.agent.run_once())
+                    self.assertEqual(case.calls, [])
+                    self.assertIsNotNone(case.db.get_checkpoint("j1"))
+                    self.assertIn("checkpoint", case.cloud.events[-1]["message"])
+                finally:
+                    case.doCleanups()
+
+    def test_started_attempt_without_checkpoint_requires_input(self):
+        self.db.save_remote_claim(self.claim, state="running")
+        self.claim["attempt_id"] = "a2"
+        self.assertIn("waiting_input", self.agent.run_once())
+        self.assertEqual(self.calls, [])
+
+    def test_new_job_for_started_plan_without_checkpoint_requires_input(self):
+        self.claim["job"]["plan_id"] = "plan-1"
+        self.assertEqual(self.agent.run_once(), "job j1 → waiting_quota")
+        self.db.delete_checkpoint("plan-1")
+        self.claim["job"]["id"] = "j2"
+        self.claim["attempt_id"] = "a2"
+        self.calls.clear()
+        self.assertIn("waiting_input", self.agent.run_once())
+        self.assertEqual(self.calls, [])
+
+    def test_cancelling_plan_cannot_be_bypassed_with_new_job_id(self):
+        self.claim["job"]["plan_id"] = "plan-1"
+        self.assertEqual(self.agent.run_once(), "job j1 → waiting_quota")
+        self.claim["job"]["desired_action"] = "cancel"
+        self.claim["attempt_id"] = "a2"
+        self.assertIn("cancel", self.agent.run_once())
+        self.assertIsNone(self.db.get_checkpoint("plan-1"))
+        del self.claim["job"]["desired_action"]
+        self.claim["job"]["id"] = "j2"
+        self.claim["attempt_id"] = "a3"
+        self.calls.clear()
+        self.assertIn("waiting_input", self.agent.run_once())
+        self.assertEqual(self.calls, [])
 
 
 if __name__ == "__main__":

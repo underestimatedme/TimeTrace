@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict
 
 from keji.db import Database
 from keji import quota, worktree
-from keji.checkpoints import Checkpoint, resume_allowed
+from keji.checkpoints import Checkpoint, checkpoint_problem
 from keji.dispatch import (DispatchGate, LockBusy, adapter_capabilities, adapter_zero_spend_verified,
                            coding_slot_lock, deny_reason, workspace_lock)
 
@@ -48,6 +48,9 @@ class Agent:
         job = claim["job"]
         job_id = job["id"]
         existing = self.db.get_remote_claim(job_id)
+        if job.get("status") == "cancelled" or job.get("desired_action") == "cancel":
+            self.db.save_remote_claim(claim)
+            return self._blocked(claim, job.get("plan_id") or job_id, "cancelled", seq=2 if existing else 1)
         if (existing and existing["attempt_id"] == claim["attempt_id"]
                 and existing["state"] in ("launching", "running", "reported")):
             return "job %s → duplicate ignored" % job_id
@@ -69,41 +72,25 @@ class Agent:
         self.home.joinpath("logs").mkdir(parents=True, exist_ok=True)
         log_file = str(self.home / "logs" / ("remote-%s.log" % job_id))
 
-        # Resume the original provider session when a durable checkpoint exists
-        # for this Plan and the tool profile is unchanged; otherwise start fresh.
         plan_key = job.get("plan_id") or job_id
-        tool_profile_id = job["tool_profile_id"]
-        native_resume = adapter_capabilities(adapter).get("can_resume") is True
-        checkpoint = self.db.get_checkpoint(plan_key)
-        resuming = bool(
-            checkpoint and checkpoint.provider_session_id
-            and resume_allowed(checkpoint.tool_profile_id, tool_profile_id, native_resume)
-        )
-        session_id = checkpoint.provider_session_id if resuming else str(uuid.uuid4())
-        lease_deadline = (datetime.fromisoformat(
-            claim["lease_expires_at"].replace("Z", "+00:00")
-        ).timestamp() if claim.get("lease_expires_at") else time.time() + 90)
+        try:
+            checkpoint = self.db.get_checkpoint(plan_key)
+        except (TypeError, ValueError, KeyError):
+            return self._blocked(claim, plan_key, "checkpoint unreadable; manual recovery required")
+        deadline = self._deadline(claim)
+        reason = self._gate(adapter, job, deadline)
+        if reason:
+            return self._blocked(claim, plan_key, reason, checkpoint)
+        if checkpoint:
+            reason = checkpoint_problem(checkpoint, provider, job["tool_profile_id"],
+                                        workspace["path"], adapter_capabilities(adapter).get("can_resume") is True)
+            if reason:
+                return self._blocked(claim, plan_key, reason, checkpoint)
+        elif self.db.plan_started(plan_key) or (existing and existing["state"] != "claimed"):
+            return self._blocked(claim, plan_key, "checkpoint missing for previously started job; manual recovery required")
 
-        # One gate for every start/resume: nothing runs while cancelled, past its
-        # lease, without ready dependencies, or without a verified zero-additional-
-        # spend guarantee.
-        gate = DispatchGate(
-            cancelled=(job.get("status") == "cancelled" or job.get("desired_action") == "cancel"),
-            lease_valid=lease_deadline > time.time(),
-            runner_online=True,
-            dependencies_ready=True,
-            zero_spend_verified=self._zero_spend(adapter, job),
-        )
-        reason = deny_reason(gate)
-        if reason is not None:
-            event_type = "cancelled" if reason == "cancelled" else "waiting_input"
-            self._report(claim, [{"seq": 1, "type": event_type, "message": "dispatch blocked: %s" % reason}])
-            self.db.update_remote_claim(job_id, "reported")
-            return "job %s → blocked (%s)" % (job_id, reason)
-
-        # Fence local and remote dispatch through file locks: one coding slot per
-        # runner, one writer per canonical workspace. A second process is denied
-        # and defers rather than double-running the Plan/working directory.
+        # Hold both locks through preparation, execution and durable checkpoint/
+        # terminal event persistence. A crashed owner leaves a persistent fence.
         try:
             slot = coding_slot_lock(self.home).acquire()
         except LockBusy:
@@ -113,77 +100,209 @@ class Agent:
         except LockBusy:
             slot.release()
             return "job %s → deferred (workspace busy)" % job_id
-
-        error = ""
-        lease_lost = False
         try:
-            self.db.update_remote_claim(job_id, "launching")
-            self._report(claim, [{"seq": 1, "type": "running", "message": "started"}])
-            self.db.update_remote_claim(job_id, "running")
-            local_id = int(hashlib.sha256(job_id.encode("utf-8")).hexdigest()[:12], 16)
-            execution_path, _ = self.prepare_workspace(workspace["path"], local_id, self.home, workspace["default_branch"])
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                cancel_event = threading.Event()
-                run = adapter.resume if resuming else adapter.start
-                future = pool.submit(run, job["prompt"], execution_path, session_id, log_file, cancel_event)
-                while True:
-                    try:
-                        result = future.result(timeout=self.heartbeat_interval)
-                        break
-                    except TimeoutError:
-                        try:
-                            lease = self.cloud.renew(self.access_token(), claim["attempt_id"], claim["lease_epoch"])
-                        except Exception:
-                            lease = {}
-                            if time.time() >= lease_deadline - 2:
-                                lease_lost = True
-                                cancel_event.set()
-                        if lease.get("lease_expires_at"):
-                            lease_deadline = datetime.fromisoformat(
-                                lease["lease_expires_at"].replace("Z", "+00:00")
-                            ).timestamp()
-                        if lease.get("desired_action") == "cancel":
-                            cancel_event.set()
-            if cancel_event.is_set():
-                result = None
-                error = "lease lost" if lease_lost else "cancelled by user"
-        except Exception as exc:
-            result = None
-            error = "adapter crashed: %s" % exc
+            return self._execute(claim, workspace, adapter, checkpoint, plan_key, log_file, deadline)
         finally:
             ws_lock.release()
             slot.release()
-        if lease_lost:
-            self.db.update_remote_claim(job_id, "fenced")
-            return "job %s → fenced (lease lost)" % job_id
-        if result is not None and result.ok:
+
+    @staticmethod
+    def _deadline(lease):
+        try:
+            return datetime.fromisoformat(lease["lease_expires_at"].replace("Z", "+00:00")).timestamp()
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return 0.0
+
+    def _gate(self, adapter, job, deadline):
+        reason = deny_reason(DispatchGate(
+            cancelled=job.get("status") == "cancelled" or job.get("desired_action") == "cancel",
+            lease_valid=deadline > time.time(), runner_online=True, dependencies_ready=True,
+            zero_spend_verified=self._zero_spend(adapter, job),
+        ))
+        if reason:
+            return reason
+        if adapter_capabilities(adapter).get("can_dispatch") is not True:
+            return "dispatch_unavailable"
+        return ""
+
+    def _renew(self, claim, adapter, deadline):
+        # Once a lease expires the old owner cannot regain execution authority.
+        reason = self._gate(adapter, claim["job"], deadline)
+        if reason:
+            return deadline, reason
+        done = threading.Event()
+        answer = []
+        def request():
+            try:
+                answer.append(self.cloud.renew(self.access_token(), claim["attempt_id"], claim["lease_epoch"]))
+            except Exception:
+                pass
+            finally:
+                done.set()
+        # A blocked HTTP/credential call must not hold the writer past expiry.
+        # The abandoned daemon can finish its request but cannot grant a lease
+        # or mutate the claim after this wait has failed.
+        threading.Thread(target=request, daemon=True).start()
+        if not done.wait(max(0, deadline - time.time())):
+            return deadline, "lease_expired"
+        lease = answer[0] if answer else None
+        if not isinstance(lease, dict):
+            return deadline, "lease renewal failed"
+        if lease.get("desired_action") == "cancel":
+            claim["job"]["desired_action"] = "cancel"
+        renewed = self._deadline(lease)
+        # Include time spent in the renewal request: a late response cannot
+        # bridge an interval in which this owner no longer held a lease.
+        if time.time() >= deadline and claim["job"].get("desired_action") != "cancel":
+            return deadline, "lease_expired"
+        return renewed, self._gate(adapter, claim["job"], renewed)
+
+    def _blocked(self, claim, plan_key, reason, checkpoint=None, seq=1):
+        cancelled = reason == "cancelled"
+        if cancelled:
+            self.db.delete_checkpoint(plan_key)
+        elif checkpoint:
+            checkpoint.reason = reason
+            self.db.save_checkpoint(checkpoint)
+        event_type = "cancelled" if cancelled else "waiting_input"
+        self._report(claim, [{"seq": seq, "type": event_type, "message": "dispatch blocked: %s" % reason}])
+        self.db.update_remote_claim(claim["job"]["id"], "reported")
+        if cancelled:
+            return "job %s → cancelled" % claim["job"]["id"]
+        if reason.startswith("checkpoint"):
+            return "job %s → waiting_input (%s)" % (claim["job"]["id"], reason)
+        return "job %s → blocked (%s)" % (claim["job"]["id"], reason)
+
+    def _execute(self, claim, workspace, adapter, checkpoint, plan_key, log_file, deadline):
+        job = claim["job"]
+        job_id = job["id"]
+        resuming = checkpoint is not None
+        session_id = checkpoint.provider_session_id if resuming else str(uuid.uuid4())
+        # Reuse the original execution worktree even if recovery has a new job id.
+        execution_job = checkpoint.job_id if resuming else job_id
+        local_id = int(hashlib.sha256(execution_job.encode("utf-8")).hexdigest()[:12], 16)
+        reason = self._gate(adapter, job, deadline)
+        if reason:
+            return self._blocked(claim, plan_key, reason, checkpoint)
+        try:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                preparation = pool.submit(self.prepare_workspace, workspace["path"], local_id,
+                                          self.home, workspace["default_branch"])
+                reason = ""
+                while True:
+                    try:
+                        wait = self.heartbeat_interval if reason else min(self.heartbeat_interval, max(.001, (deadline - time.time()) / 2))
+                        execution_path, _ = preparation.result(timeout=wait)
+                        break
+                    except TimeoutError:
+                        if not reason:
+                            deadline, reason = self._renew(claim, adapter, deadline)
+                        # Preparation may still be using git. Keep locks until it
+                        # stops; a failed renewal never authorises a later spawn.
+                if reason:
+                    return self._blocked(claim, plan_key, reason, checkpoint)
+                execution_path = str(Path(execution_path).resolve())
+                if resuming:
+                    reason = checkpoint_problem(checkpoint, job["provider"], job["tool_profile_id"],
+                                                workspace["path"], adapter_capabilities(adapter).get("can_resume") is True)
+                    if not reason and checkpoint.execution_path != execution_path:
+                        reason = "checkpoint execution directory changed"
+                    if not reason and not worktree.same_repository(execution_path, workspace["path"]):
+                        reason = "checkpoint repository changed"
+                    if not reason and worktree.snapshot(execution_path) != (checkpoint.git_head, checkpoint.dirty_paths_digest):
+                        reason = "checkpoint git state changed"
+                    if reason:
+                        return self._blocked(claim, plan_key, reason, checkpoint)
+
+                # Check authority again after potentially slow git operations.
+                reason = self._gate(adapter, job, deadline)
+                if not reason and resuming and adapter_capabilities(adapter).get("can_resume") is not True:
+                    reason = "checkpoint resume capability changed"
+                if reason:
+                    return self._blocked(claim, plan_key, reason, checkpoint)
+                self.db.update_remote_claim(job_id, "launching")
+                self._report(claim, [{"seq": 1, "type": "running", "message": "started"}])
+                self.db.update_remote_claim(job_id, "running")
+                # Reporting can block on the network; check authority again at
+                # the actual call boundary, not only before announcing the run.
+                deadline, reason = self._renew(claim, adapter, deadline)
+                if not reason and resuming and adapter_capabilities(adapter).get("can_resume") is not True:
+                    reason = "checkpoint resume capability changed"
+                if reason:
+                    return self._blocked(claim, plan_key, reason, checkpoint, seq=2)
+                self.db.mark_plan_started(plan_key, job_id, claim["attempt_id"])
+                Path(log_file).touch(exist_ok=True)
+                cancel_event = threading.Event()
+                run = adapter.resume if resuming else adapter.start
+                spawned = False
+                def invoke():
+                    nonlocal reason, spawned
+                    # Executor scheduling is also a delay: fence inside the
+                    # worker, at the call that can actually create a process.
+                    if reason or cancel_event.is_set():
+                        return None
+                    reason = self._gate(adapter, job, deadline)
+                    if not reason and resuming and adapter_capabilities(adapter).get("can_resume") is not True:
+                        reason = "checkpoint resume capability changed"
+                    if reason:
+                        return None
+                    spawned = True
+                    return run(job["prompt"], execution_path, session_id, log_file, cancel_event)
+                future = pool.submit(invoke)
+                while True:
+                    try:
+                        wait = self.heartbeat_interval if reason else min(self.heartbeat_interval, max(.001, (deadline - time.time()) / 2))
+                        result = future.result(timeout=wait)
+                        break
+                    except TimeoutError:
+                        if not reason:
+                            deadline, reason = self._renew(claim, adapter, deadline)
+                            if reason:
+                                cancel_event.set()
+                reason = reason or self._gate(adapter, job, deadline)
+                if reason:
+                    if not spawned or reason == "cancelled":
+                        return self._blocked(claim, plan_key, reason, checkpoint, seq=2)
+                    self.db.delete_checkpoint(plan_key)
+                    self.db.update_remote_claim(job_id, "fenced")
+                    return "job %s → fenced (%s)" % (job_id, reason)
+        except Exception as exc:
+            # Invalid recovery evidence must survive for manual diagnosis.
+            if resuming:
+                return self._blocked(claim, plan_key, "checkpoint recovery failed: %s" % exc, checkpoint)
+            self._report(claim, [{"seq": 2, "type": "failed", "message": "adapter/preparation crashed: %s" % exc}])
+            self.db.update_remote_claim(job_id, "reported")
+            return "job %s → failed" % job_id
+
+        if result.ok:
+            self.db.delete_checkpoint(plan_key)
             event = {"seq": 2, "type": "completed", "message": "completed",
                      "result_summary": (result.output or "completed")[:1000]}
             outcome = "awaiting_review"
-            self.db.delete_checkpoint(plan_key)  # done: no stale resume
-        else:
-            message = error if result is None else (result.error or "exit %s" % result.exit_code)
-            event_type = "cancelled" if error == "cancelled by user" else ("waiting_quota" if result is not None and result.blocked else "failed")
-            event = {"seq": 2, "type": event_type, "message": message[:1000]}
-            outcome = event_type
-            if event_type == "waiting_quota":
-                # Report the exhaustion reading so Valley's gate parks siblings
-                # and knows when the pool recovers.
-                if result is not None and result.samples:
-                    self._post_samples(provider, adapter, result.samples)
-                # Durable checkpoint so natural quota recovery can resume the same
-                # provider session in the same workspace.
-                self.db.save_checkpoint(Checkpoint(
-                    plan_id=plan_key, job_id=job_id, attempt_id=claim["attempt_id"],
-                    tool_profile_id=tool_profile_id,
-                    provider_session_id=(result.session_id or session_id),
-                    canonical_workspace=workspace["path"], git_head="", dirty_paths_digest="",
-                    last_output_offset=0, completed_criteria=[],
+        elif result.blocked:
+            if result.samples:
+                self._post_samples(job["provider"], adapter, result.samples)
+            try:
+                head, dirty_digest = worktree.snapshot(execution_path)
+                cp = Checkpoint(
+                    plan_id=plan_key, job_id=execution_job, attempt_id=claim["attempt_id"],
+                    tool_profile_id=job["tool_profile_id"], provider=job["provider"],
+                    # Only an adapter-confirmed native session is resumable.
+                    provider_session_id=result.session_id or "",
+                    canonical_workspace=workspace["path"], execution_path=execution_path,
+                    git_head=head, dirty_paths_digest=dirty_digest, output_path=str(Path(log_file).resolve()),
+                    last_output_offset=Path(log_file).stat().st_size, completed_criteria=[],
                     side_effect_summary=(result.output or "")[:200], reason="waiting_quota",
-                ))
-            else:
-                # cancelled / failed: drop any checkpoint so nothing auto-resumes.
-                self.db.delete_checkpoint(plan_key)
+                )
+                self.db.save_checkpoint(cp)
+            except Exception as exc:
+                return self._blocked(claim, plan_key, "checkpoint capture failed: %s" % exc, checkpoint, seq=2)
+            outcome = "waiting_quota"
+            event = {"seq": 2, "type": outcome, "message": (result.error or "quota blocked")[:1000]}
+        else:
+            self.db.delete_checkpoint(plan_key)
+            outcome = "failed"
+            event = {"seq": 2, "type": outcome, "message": (result.error or "exit %s" % result.exit_code)[:1000]}
         self._report(claim, [event])
         self.db.update_remote_claim(job_id, "reported")
         return "job %s → %s" % (job_id, outcome)

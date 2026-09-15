@@ -1,9 +1,45 @@
 """Per-task git worktree isolation with push disabled (spec §8)."""
 import subprocess
+import hashlib
+import os
 from pathlib import Path
 from typing import List, Tuple
 
 NO_PUSH_URL = "no_push://blocked"
+
+
+def snapshot(path: str) -> Tuple[str, str]:
+    """Bind HEAD, index, tracked changes and untracked content (including ignored
+    files). Filenames alone cannot detect edits to an already-dirty file."""
+    head = _git("-C", path, "rev-parse", "HEAD")
+    digest = hashlib.sha256()
+    for args in (("diff", "--binary", "HEAD", "--"), ("diff", "--cached", "--binary", "HEAD", "--")):
+        digest.update(subprocess.check_output(["git", "-C", path] + list(args)))
+    untracked = subprocess.check_output(["git", "-C", path, "ls-files", "--others", "-z"])
+    for name in sorted(untracked.split(b"\0")):
+        if not name:
+            continue
+        file = Path(path) / os.fsdecode(name)
+        digest.update(name + b"\0")
+        digest.update(str(file.lstat().st_mode).encode() + b"\0")
+        if file.is_symlink():
+            digest.update(os.fsencode(os.readlink(file)))
+        elif file.is_file():
+            with file.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        else:
+            raise ValueError("cannot checkpoint untracked non-file: %s" % file)
+        digest.update(b"\0")
+    return head, digest.hexdigest()
+
+
+def same_repository(path: str, registered: str) -> bool:
+    """A saved execution path must still belong to the registered repository."""
+    def common(p):
+        value = _git("-C", p, "rev-parse", "--git-common-dir")
+        return (Path(p) / value).resolve()
+    return common(path) == common(registered)
 
 
 def _git(*args: str, cwd: str = None) -> str:

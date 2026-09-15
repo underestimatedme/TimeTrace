@@ -97,6 +97,11 @@ CREATE TABLE IF NOT EXISTS checkpoint (
     data       TEXT NOT NULL,
     updated_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS remote_plan_started (
+    plan_id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    attempt_id TEXT NOT NULL
+);
 """
 
 
@@ -179,6 +184,17 @@ class Database:
         self.conn.execute("UPDATE remote_outbox SET sent_at=? WHERE id=?", (now or _now(), event_id))
 
     # ---- checkpoints ------------------------------------------------------
+    def mark_plan_started(self, plan_id: str, job_id: str, attempt_id: str) -> None:
+        """A durable tombstone: deleting a checkpoint must never grant a fresh
+        start to a new job for an already-started Plan."""
+        self.conn.execute(
+            "INSERT OR IGNORE INTO remote_plan_started (plan_id,job_id,attempt_id) VALUES (?,?,?)",
+            (plan_id, job_id, attempt_id),
+        )
+
+    def plan_started(self, plan_id: str) -> bool:
+        return self.conn.execute("SELECT 1 FROM remote_plan_started WHERE plan_id=?", (plan_id,)).fetchone() is not None
+
     def save_checkpoint(self, checkpoint: Any, now: Optional[int] = None) -> None:
         """Atomically persist one checkpoint per plan (INSERT OR REPLACE is a
         single autocommit statement). Stores no secrets or CLI environment."""

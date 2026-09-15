@@ -5,10 +5,11 @@ A checkpoint captures just enough to resume the *same* provider session in the
 environment. Resume is only ever the original tool/session; a different tool or a
 missing native session is not a resume.
 """
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
+from pathlib import Path
 from typing import Any, Dict, List
 
-CHECKPOINT_SCHEMA_VERSION = 1
+CHECKPOINT_SCHEMA_VERSION = 2
 
 
 @dataclass
@@ -26,6 +27,9 @@ class Checkpoint:
     side_effect_summary: str
     reason: str
     schema_version: int = CHECKPOINT_SCHEMA_VERSION
+    provider: str = ""
+    execution_path: str = ""
+    output_path: str = ""
 
     def to_row(self) -> Dict[str, Any]:
         return asdict(self)
@@ -33,7 +37,37 @@ class Checkpoint:
     @classmethod
     def from_row(cls, row: Dict[str, Any]) -> "Checkpoint":
         allowed = {f: row[f] for f in cls.__dataclass_fields__ if f in row}
+        allowed.setdefault("schema_version", 1)
         return cls(**allowed)
+
+
+def checkpoint_problem(cp: Checkpoint, provider: str, profile: str, workspace: str,
+                       native_resume: bool) -> str:
+    """Fail closed for incomplete/changed recovery evidence; never start fresh."""
+    if cp.schema_version != CHECKPOINT_SCHEMA_VERSION:
+        return "checkpoint schema requires manual recovery"
+    if (any(not isinstance(getattr(cp, key), str) for key in (
+            "provider_session_id", "provider", "tool_profile_id", "canonical_workspace",
+            "execution_path", "output_path", "git_head", "dirty_paths_digest"))
+            or type(cp.last_output_offset) is not int):
+        return "checkpoint fields malformed"
+    if not cp.provider_session_id or not cp.provider_session_id.strip():
+        return "checkpoint has no native session"
+    if cp.provider != provider or not resume_allowed(cp.tool_profile_id, profile, native_resume):
+        return "checkpoint provider/profile/resume capability changed"
+    if cp.canonical_workspace != workspace:
+        return "checkpoint registered workspace changed"
+    if not cp.execution_path or not Path(cp.execution_path).is_dir():
+        return "checkpoint execution directory missing"
+    if str(Path(cp.execution_path).resolve()) != cp.execution_path:
+        return "checkpoint execution directory changed"
+    if not cp.git_head or not cp.dirty_paths_digest:
+        return "checkpoint git evidence missing"
+    if not cp.output_path or not Path(cp.output_path).is_file():
+        return "checkpoint output missing"
+    if cp.last_output_offset < 0 or Path(cp.output_path).stat().st_size < cp.last_output_offset:
+        return "checkpoint output truncated"
+    return ""
 
 
 def resume_allowed(original_profile: str, requested_profile: str, native_resume: bool) -> bool:

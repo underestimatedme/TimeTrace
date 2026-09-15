@@ -60,7 +60,13 @@ class LockBusy(RuntimeError):
 class FileLock:
     """Non-blocking exclusive advisory lock over a lock file. flock treats each
     open file description independently, so a second acquirer — even in the same
-    process — is denied while the first holds it."""
+    process — is denied while the first holds it.
+
+    A durable ownership marker also fences an unclean exit: flock alone is
+    released when the parent dies, even if a provider child is still writing.
+    Never reclaim based on parent PID liveness. An uncleared marker requires
+    manual verification that ALL descendants have stopped before clearing it.
+    """
 
     def __init__(self, path: str):
         self.path = str(path)
@@ -76,13 +82,22 @@ class FileLock:
             if exc.errno in (errno.EACCES, errno.EAGAIN):
                 raise LockBusy(self.path) from exc
             raise
-        os.write(fd, str(os.getpid()).encode())
+        try:
+            if os.read(fd, 1):
+                raise LockBusy("uncleared owner; verify orphan processes before clearing %s" % self.path)
+            os.write(fd, str(os.getpid()).encode())
+            os.fsync(fd)
+        except Exception:
+            os.close(fd)
+            raise
         self._fd = fd
         return self
 
     def release(self) -> None:
         if self._fd is not None:
             try:
+                os.ftruncate(self._fd, 0)
+                os.fsync(self._fd)
                 fcntl.flock(self._fd, fcntl.LOCK_UN)
             finally:
                 os.close(self._fd)

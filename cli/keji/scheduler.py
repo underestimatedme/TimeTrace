@@ -174,6 +174,10 @@ def _dispatch_locked(db: Database, adapter: Any, tool: str, task: Dict[str, Any]
         db.update_task(task_id, state=FAILED, last_error="worktree: %s" % exc, now=now)
         db.add_event(EV_TASK_FAILED, tool=tool, payload={"task_id": task_id, "reason": str(exc)}, at=now)
         return "task %d → failed (worktree)" % task_id
+    # Preparation can take long enough for the adapter's authority to change.
+    if not adapter_zero_spend_verified(adapter):
+        db.update_task(task_id, last_error="billing_unverified", now=now)
+        return "task %d → blocked (billing_unverified)" % task_id
     db.update_task(task_id, state=RUNNING, tool=tool, session_id=session_id, worktree=wt,
                    branch=branch, now=now)
     logs_dir = Path(home) / "logs"

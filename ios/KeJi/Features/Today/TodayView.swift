@@ -79,7 +79,20 @@ struct TodayView: View {
         let totalToday = store.tasks.filter { $0.dueDate == today || isToday($0.scheduledStart) }.count
         let progress = totalToday > 0 ? Double(completedToday) / Double(totalToday) * 100 : 0
         return VStack(alignment: .leading, spacing: 0) {
-            Text(Format.date(store.now)).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted).padding(.bottom, 4)
+            HStack {
+                Text(Format.date(store.now)).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
+                Spacer()
+                Button { router.push(.reports(.all)) } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "chart.bar.doc.horizontal").font(.system(size: 12))
+                        Text("报告").font(Typo.sans(Typo.xs))
+                    }
+                    .foregroundStyle(theme.accent)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("reports.open")
+            }
+            .padding(.bottom, 4)
             Text("\(Format.greeting(now: store.now))，\(store.settings.name)")
                 .font(Typo.sans(Typo.xl2, weight: .light)).foregroundStyle(theme.text)
             HStack(alignment: .center, spacing: 16) {

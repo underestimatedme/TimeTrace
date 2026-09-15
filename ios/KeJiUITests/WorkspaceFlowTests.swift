@@ -18,6 +18,17 @@ final class WorkspaceFlowTests: XCTestCase {
         el.tap()
     }
 
+    func testReportsOpenFromTodayShowsSeparatedTimes() {
+        app.terminate()
+        app.launchArguments = ["--ui-testing", "--offline", "--sample-data", "--screen", "today"]
+        app.launch()
+        tap("reports.open")
+        XCTAssertTrue(app.staticTexts["报告"].waitForExistence(timeout: 5))
+        // Human and AI time are shown as separate sections (never summed).
+        XCTAssertTrue(app.staticTexts["人工投入"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["AI 活跃（累计）"].exists)
+    }
+
     func testDispatchGatedByAcceptedDependencies() {
         // Drill down to plan.03.
         tap("project.keji")

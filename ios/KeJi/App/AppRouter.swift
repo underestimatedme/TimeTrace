@@ -28,10 +28,18 @@ enum AppTab: String, CaseIterable, Hashable {
     }
 }
 
+/// Reports keep their scope: from Today's top-right they cover all projects; from
+/// a project's detail they stay within that project.
+enum ReportScope: Hashable {
+    case all
+    case project(String)
+}
+
 enum Route: Hashable {
     case taskCreate
     case taskDetail(String)
     case plan(String)
+    case reports(ReportScope)
     case focus(String)
     case ai(String)
     case projects

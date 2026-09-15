@@ -32,7 +32,11 @@ struct ProjectDetailView: View {
             StatCard(label: "人工投入", value: Format.duration(Stats.humanSeconds(sessions)), valueColor: theme.accent)
             StatCard(label: "AI 投入", value: Format.duration(Stats.aiActiveSeconds(sessions)), valueColor: theme.ai)
         }
-        .padding(.bottom, 24)
+        .padding(.bottom, 12)
+
+        AppButton("本项目报告", variant: .secondary, fullWidth: true) { router.push(.reports(.project(project.id))) }
+            .accessibilityIdentifier("reports.open.project")
+            .padding(.bottom, 24)
 
         SectionTitle("目标")
         VStack(spacing: 8) {

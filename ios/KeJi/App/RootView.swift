@@ -64,6 +64,7 @@ struct MainShellView: View {
         case .taskCreate: TaskCreateView()
         case .taskDetail(let id): TaskDetailView(taskId: id)
         case .plan(let id): PlanDetailView(planId: id)
+        case .reports(let scope): ReportsView(scope: scope)
         case .focus(let id): FocusView(taskId: id)
         case .ai(let id): AIExecutionView(taskId: id)
         case .projects: ProjectsView()

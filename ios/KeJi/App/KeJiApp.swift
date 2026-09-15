@@ -44,6 +44,7 @@ final class AppEnvironment {
         } else if let persisted = stateStore.load() {
             store.load(persisted)
         }
+        store.loadPreferences()
         if let theme = options.theme {
             store.updateSettings { $0.theme = theme }
         }

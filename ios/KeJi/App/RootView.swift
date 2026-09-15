@@ -73,6 +73,10 @@ struct MainShellView: View {
         case .aiTools: AIToolsView()
         case .appearance: AppearanceView()
         case .account: AccountView()
+        case .privacy: PrivacyView()
+        case .homeCustomization: HomeCustomizationView()
+        case .notifications: NotificationPreferencesView()
+        case .feedback: FeedbackView()
         }
     }
 }

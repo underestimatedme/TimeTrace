@@ -22,6 +22,8 @@ final class AppStore {
     /// Transient account quota from the server (WorkspaceClient); not persisted.
     /// Offline/sample builds seed it so the AI tab can render quota windows.
     var accountQuota: AccountQuota?
+    /// Display/behaviour preferences (theme lives in settings). Persisted locally.
+    var preferences: UserPreferences = .defaults
     var settings: UserSettings = .defaults()
     var aiTools: [AIToolConnection] = AIToolConnection.defaults
     var activeFocus: ActiveFocus?
@@ -139,6 +141,19 @@ final class AppStore {
     }
 
     func markSettingsDirty() { generation &+= 1; settingsGeneration = generation; settingsDirty = true; onDirty?() }
+
+    // MARK: - Preferences (local display/behaviour; not synced)
+
+    private let preferencesStore = PreferencesStore()
+
+    func loadPreferences() { preferences = preferencesStore.load() }
+
+    func updatePreferences(_ transform: (inout UserPreferences) -> Void) {
+        var updated = preferences
+        transform(&updated)
+        preferences = updated
+        preferencesStore.save(updated)
+    }
     func markActiveFocusDirty() { generation &+= 1; focusGeneration = generation; activeFocusDirty = true; onDirty?() }
     func markAIToolsDirty() { generation &+= 1; toolsGeneration = generation; aiToolsDirty = true; onDirty?() }
 

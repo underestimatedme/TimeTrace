@@ -48,6 +48,10 @@ enum Route: Hashable {
     case aiTools
     case appearance
     case account
+    case privacy
+    case homeCustomization
+    case notifications
+    case feedback
 }
 
 enum RootPhase { case splash, onboarding, main }

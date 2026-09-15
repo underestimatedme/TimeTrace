@@ -28,10 +28,11 @@ struct ProfileView: View {
             MenuItem(icon: "target", label: "每周时间目标", value: "\(store.settings.weeklyTimeGoalHours) 小时"),
             MenuItem(icon: "clock", label: "工作时间设置", value: "\(store.settings.workStartHour):00 – \(store.settings.workEndHour):00"),
             MenuItem(icon: "cpu", label: "AI 工具管理", route: .aiTools),
-            MenuItem(icon: "shield", label: "数据与隐私"),
-            MenuItem(icon: "square.and.arrow.down", label: "导出数据"),
-            MenuItem(icon: "bell", label: "通知设置"),
+            MenuItem(icon: "shield", label: "数据与隐私", route: .privacy),
+            MenuItem(icon: "bell", label: "通知设置", route: .notifications),
+            MenuItem(icon: "square.grid.2x2", label: "首页个性化", route: .homeCustomization),
             MenuItem(icon: "paintpalette", label: "外观设置", value: ThemeMeta.meta(for: store.settings.theme).name, route: .appearance),
+            MenuItem(icon: "bubble.left", label: "反馈", route: .feedback),
             MenuItem(icon: "info.circle", label: "关于刻迹", value: "v0.1.0"),
         ]
     }

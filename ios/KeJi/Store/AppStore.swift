@@ -156,6 +156,14 @@ final class AppStore {
         commit()
     }
 
+    /// Deterministic workspace used by the I2 UI flow test: a project, a task,
+    /// and three plans where plan.03 depends on plan.01 and plan.02.
+    func resetToWorkspaceFixture() {
+        hasOnboarded = true
+        replaceAll(with: SampleData.createWorkspaceFixture(), useSample: true)
+        commit()
+    }
+
     /// Fresh users have no projects; TaskCreate needs one to attach tasks to.
     @discardableResult
     func ensureDefaultProject() -> Project {
@@ -191,6 +199,7 @@ final class AppStore {
         timeSessions = data.state.timeSessions
         aiExecutions = data.state.aiExecutions
         experiments = data.state.experiments
+        plans = migrateDefaultPlans(data.state).plans
         settings = data.state.settings
         aiTools = data.state.aiTools
         activeFocus = data.state.activeFocus

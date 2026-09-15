@@ -15,6 +15,7 @@ struct LaunchOptions {
     var offline = false
     var apiBaseURL: URL?
     var uiTesting = false
+    var workspaceFixture = false
 
     static let current = LaunchOptions(arguments: ProcessInfo.processInfo.arguments)
 
@@ -29,6 +30,7 @@ struct LaunchOptions {
             case "--sample-data": sampleData = true
             case "--offline": offline = true
             case "--ui-testing": uiTesting = true; offline = true
+            case "--workspace-fixture": workspaceFixture = true; sampleData = true; uiTesting = true; offline = true
             case "--screen": screen = value(); i += 1
             case "--theme": theme = value().flatMap(ThemeName.init(rawValue:)); i += 1
             case "--api-base-url": apiBaseURL = value().flatMap(URL.init(string:)); i += 1

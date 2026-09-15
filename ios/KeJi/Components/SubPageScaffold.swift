@@ -44,6 +44,7 @@ struct SubPageScaffold<Content: View, Action: View>: View {
                     .foregroundStyle(theme.textSecondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("subpage.back")
                 Spacer()
                 action().frame(minWidth: 60, alignment: .trailing)
             }

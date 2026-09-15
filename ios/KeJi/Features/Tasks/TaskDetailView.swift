@@ -48,6 +48,27 @@ struct TaskDetailView: View {
         if let project { infoCard("所属项目", "\(project.icon) \(project.name)").padding(.top, 8) }
         Spacer().frame(height: 24)
 
+        let taskPlans = store.plans(forTask: task.id)
+        if !taskPlans.isEmpty {
+            SectionTitle("Plans")
+            VStack(spacing: 8) {
+                ForEach(taskPlans) { plan in
+                    Button { router.push(.plan(plan.id)) } label: {
+                        Card {
+                            HStack {
+                                Text(plan.title).font(Typo.sans(Typo.sm)).foregroundStyle(theme.text)
+                                Spacer()
+                                Text(plan.status.label).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("plan.\(plan.id)")
+                }
+            }
+            .padding(.bottom, 24)
+        }
+
         SectionTitle("流程时间线")
         timeline(task).padding(.bottom, 24)
 

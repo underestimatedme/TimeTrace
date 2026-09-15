@@ -31,6 +31,7 @@ enum AppTab: String, CaseIterable, Hashable {
 enum Route: Hashable {
     case taskCreate
     case taskDetail(String)
+    case plan(String)
     case focus(String)
     case ai(String)
     case projects

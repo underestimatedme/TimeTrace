@@ -17,6 +17,23 @@ enum PlanState: String, Codable, CaseIterable {
         let raw = try decoder.singleValueContainer().decode(String.self)
         self = PlanState(rawValue: raw) ?? .unknown
     }
+
+    var label: String {
+        switch self {
+        case .draft: return "草稿"
+        case .ready: return "待开始"
+        case .queued: return "排队中"
+        case .running: return "执行中"
+        case .waitingQuota: return "等待额度"
+        case .waitingLocalAuth: return "等待授权"
+        case .waitingInput: return "等待输入"
+        case .awaitingReview: return "待验收"
+        case .accepted: return "已验收"
+        case .failed: return "失败"
+        case .cancelled: return "已取消"
+        case .unknown: return "未知状态"
+        }
+    }
 }
 
 /// Per-Plan execution policy. Mirrors the workspace API `execution_policy`.
@@ -78,6 +95,15 @@ struct PlanItem: Codable, Identifiable, Equatable {
     }
 }
 
+/// A Plan can be dispatched only from a pre-execution state and only once every
+/// Plan it depends on is accepted. The server re-validates dependencies on
+/// dispatch; this drives the button's enabled state in the UI.
+func canDispatchPlan(_ plan: PlanItem, allPlans: [PlanItem]) -> Bool {
+    guard plan.status == .draft || plan.status == .ready else { return false }
+    let accepted = Set(allPlans.filter { $0.status == .accepted }.map { $0.id })
+    return plan.dependsOn.allSatisfy { accepted.contains($0) }
+}
+
 /// Deterministic default Plan id for a legacy Task. Must match Valley V1's
 /// `timetrace:default-plan:v1:` SHA256 namespace so client and server agree.
 func defaultPlanID(taskID: String) -> String {
@@ -106,13 +132,12 @@ func defaultPlan(for task: TaskItem, now: Date = Date()) -> PlanItem {
 /// schema version 2. Existing plans (by id) are preserved unchanged.
 func migrateDefaultPlans(_ snapshot: StateSnapshot, now: Date = Date()) -> StateSnapshot {
     var result = snapshot
-    var existing = Set(snapshot.plans.map { $0.id })
-    for task in snapshot.tasks {
-        let pid = defaultPlanID(taskID: task.id)
-        if !existing.contains(pid) {
-            result.plans.append(defaultPlan(for: task, now: now))
-            existing.insert(pid)
-        }
+    // A task already carrying any plan (e.g. user-created or server-fetched) is
+    // left alone; only tasks with no plan get a default. Idempotent.
+    var tasksWithPlans = Set(snapshot.plans.map { $0.taskId })
+    for task in snapshot.tasks where !tasksWithPlans.contains(task.id) {
+        result.plans.append(defaultPlan(for: task, now: now))
+        tasksWithPlans.insert(task.id)
     }
     result.schemaVersion = max(result.schemaVersion, 2)
     return result

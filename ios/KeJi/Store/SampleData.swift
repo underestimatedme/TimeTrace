@@ -14,6 +14,31 @@ enum SampleData {
         return Bundle(state: state, dailyStats: [])
     }
 
+    /// Deterministic workspace for the I2 UI flow test: project `keji`, task
+    /// `quota`, and plans `plan.01/02/03` where plan.03 depends on 01 and 02.
+    static func createWorkspaceFixture(now: Date = Date()) -> Bundle {
+        var state = StateSnapshot()
+        state.settings = UserSettings.defaults(now: now)
+        state.aiTools = AIToolConnection.defaults
+        state.projects = [Project(id: "keji", name: "刻迹", description: "AI 工作台", icon: "⏳",
+                                  color: "#5b9bd5", status: .active, createdAt: now, updatedAt: now)]
+        state.tasks = [TaskItem(id: "quota", projectId: "keji", goalId: nil, title: "统一额度窗口",
+                                description: "", executorType: .ai, aiProvider: nil, collaborationMode: nil,
+                                status: .planned, priority: .high, estimatedMinutes: 45, dueDate: nil,
+                                scheduledStart: nil, scheduledEnd: nil, createdAt: now, completedAt: nil,
+                                resultSummary: nil, updatedAt: now)]
+        func plan(_ id: String, _ title: String, _ deps: [String]) -> PlanItem {
+            PlanItem(id: id, taskId: "quota", revision: 1, title: title, priority: 2, status: .ready,
+                     criteria: ["满足验收项"], dependsOn: deps, estimatedHumanMinutes: 10, estimatedAiMinutes: 30,
+                     workWeight: 1, risk: 2, executionPolicy: .balanced, createdAt: now, updatedAt: now)
+        }
+        state.plans = [plan("01", "采样契约", []),
+                       plan("02", "三态判定", []),
+                       plan("03", "领取门禁", ["01", "02"])]
+        state.schemaVersion = 2
+        return Bundle(state: state, dailyStats: [])
+    }
+
     static func createSampleData(now: Date = Date()) -> Bundle {
         let cal = Format.calendar
         let human = TimeSession.humanExecutor

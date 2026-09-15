@@ -60,6 +60,7 @@ struct ProjectDetailView: View {
                     Card { Text(task.title).font(Typo.sans(Typo.sm)).foregroundStyle(theme.text) }
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("task.\(task.id)")
             }
         }
     }

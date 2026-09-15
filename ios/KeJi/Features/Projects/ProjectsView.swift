@@ -50,5 +50,6 @@ struct ProjectsView: View {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("project.\(project.id)")
     }
 }

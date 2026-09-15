@@ -37,7 +37,9 @@ final class AppEnvironment {
         self.router = router
         self.stateStore = stateStore
 
-        if options.sampleData {
+        if options.workspaceFixture {
+            store.resetToWorkspaceFixture()
+        } else if options.sampleData {
             store.resetToSample()
         } else if let persisted = stateStore.load() {
             store.load(persisted)

@@ -201,6 +201,35 @@ class AgentTest(unittest.TestCase):
                     self.assertEqual(db.get_remote_claim("j1")["state"], "reported")
                     self.assertEqual(cloud.events[-1]["type"], "waiting_input")
 
+    def test_raising_capabilities_property_blocks_without_execution(self):
+        class RaisingPropertyAdapter:
+            def __init__(self):
+                self.calls = []
+
+            @property
+            def capabilities(self):
+                raise RuntimeError("property unavailable")
+
+            def start(self, *args):
+                self.calls.append("start")
+                return RunResult(exit_code=0, ok=True)
+
+            def resume(self, *args):
+                self.calls.append("resume")
+                return RunResult(exit_code=0, ok=True)
+
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "keji.db")
+            repo = Path(d) / "repo"; init_repo(repo)
+            db.upsert_workspace("ws1", "repo", str(repo), "main")
+            cloud, adapter = FakeCloud(), RaisingPropertyAdapter()
+            agent = Agent(db, cloud, {"codex": adapter}, Path(d), lambda: "token",
+                          prepare_workspace=lambda repo, task_id, home, base: (repo, "keji/test"))
+            self.assertEqual(agent.run_once(), "job j1 → blocked (billing_unverified)")
+            self.assertEqual(adapter.calls, [])
+            self.assertEqual(db.get_remote_claim("j1")["state"], "reported")
+            self.assertEqual(cloud.events[-1]["type"], "waiting_input")
+
     def test_unverified_billing_blocks_resume_before_running(self):
         class UnverifiedResumingAdapter(Adapter):
             def __init__(self):

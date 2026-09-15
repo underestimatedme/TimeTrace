@@ -36,12 +36,12 @@ def deny_reason(gate: DispatchGate) -> Optional[str]:
     return next((reason for blocked, reason in checks if blocked), None)
 
 
-def adapter_capabilities(adapter: Any) -> Dict[str, bool]:
+def adapter_capabilities(adapter: Any) -> Dict[str, Any]:
     """Read an adapter capability declaration without trusting its surface."""
-    capabilities = getattr(adapter, "capabilities", None)
-    if not callable(capabilities):
-        return {}
     try:
+        capabilities = getattr(adapter, "capabilities", None)
+        if not callable(capabilities):
+            return {}
         caps = capabilities()
     except Exception:
         return {}

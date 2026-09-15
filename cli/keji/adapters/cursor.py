@@ -5,7 +5,7 @@ Until Cursor's real headless command surface and billing behaviour are verified
 records/represents the tool. It never fakes start/resume, so dispatch and resume
 stay disabled and no unattended execution is possible.
 """
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from keji.adapters.base import ToolAdapter
 from keji.quota import merge_capabilities
@@ -22,7 +22,7 @@ class CursorAdapter(ToolAdapter):
     name = "cursor"
     adapter_version = "cursor/unverified"
 
-    def __init__(self, cfg: Dict[str, Any] | None = None):
+    def __init__(self, cfg: Optional[Dict[str, Any]] = None):
         self.cfg = cfg or {}
 
     def capabilities(self) -> Dict[str, bool]:

@@ -11,7 +11,7 @@ import hashlib
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass(frozen=True)
@@ -34,6 +34,18 @@ def deny_reason(gate: DispatchGate) -> Optional[str]:
         (not gate.zero_spend_verified, "billing_unverified"),
     ]
     return next((reason for blocked, reason in checks if blocked), None)
+
+
+def adapter_zero_spend_verified(adapter: Any) -> bool:
+    """Return true only when an adapter explicitly verifies zero-spend mode."""
+    capabilities = getattr(adapter, "capabilities", None)
+    if not callable(capabilities):
+        return False
+    try:
+        caps = capabilities()
+    except Exception:
+        return False
+    return isinstance(caps, dict) and bool(caps.get("can_enforce_zero_spend", False))
 
 
 class LockBusy(RuntimeError):

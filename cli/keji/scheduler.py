@@ -7,7 +7,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 from keji import hooks, limits, worktree
 from keji.db import Database
-from keji.dispatch import LockBusy, coding_slot_lock
+from keji.dispatch import (DispatchGate, LockBusy, adapter_zero_spend_verified,
+                           coding_slot_lock, deny_reason)
 from keji.models import (BLOCKED, CLAUDE, DONE, EV_CIRCUIT_OPEN, EV_SAMPLE_FAILURE,
                          EV_TASK_BLOCKED, EV_TASK_DONE, EV_TASK_FAILED, EV_TASK_RESUMED,
                          EV_TOOL_SWITCHED, EV_WINDOW_RESET, FAILED, PENDING, RUNNABLE,
@@ -148,6 +149,16 @@ def _dispatch_locked(db: Database, adapter: Any, tool: str, task: Dict[str, Any]
                      home: Path, now: int, log: Callable[[str], None], ensure_worktree: Callable,
                      hook_runner: Callable, rng: Callable[[], float], clock: Callable[[], int]) -> str:
     task_id = task["id"]
+    reason = deny_reason(DispatchGate(
+        cancelled=False,
+        lease_valid=True,
+        runner_online=True,
+        dependencies_ready=True,
+        zero_spend_verified=adapter_zero_spend_verified(adapter),
+    ))
+    if reason is not None:
+        db.update_task(task_id, last_error=reason, now=now)
+        return "task %d → blocked (%s)" % (task_id, reason)
     resuming = bool(task.get("session_id"))
     session_id = task.get("session_id") or str(uuid.uuid4())
     try:

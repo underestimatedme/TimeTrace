@@ -3,7 +3,7 @@
 Delivers record/represent capability now; dispatch/resume/zero-spend stay off
 until the real command surface and billing safety are verified.
 """
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from keji.adapters.base import ToolAdapter
 from keji.adapters.cursor import safe_capabilities
@@ -14,7 +14,7 @@ class GeminiAdapter(ToolAdapter):
     name = "gemini"
     adapter_version = "gemini/unverified"
 
-    def __init__(self, cfg: Dict[str, Any] | None = None):
+    def __init__(self, cfg: Optional[Dict[str, Any]] = None):
         self.cfg = cfg or {}
 
     def capabilities(self) -> Dict[str, bool]:

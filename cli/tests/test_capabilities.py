@@ -22,12 +22,15 @@ class CapabilitiesTest(unittest.TestCase):
             self.assertFalse(caps["can_enforce_zero_spend"])
             self.assertTrue(adapter.adapter_version)
 
-    def test_no_faked_start_or_resume(self):
-        # An unverified tool must not pretend to dispatch or resume.
-        with self.assertRaises(NotImplementedError):
-            CursorAdapter({}).start("prompt", "/tmp", "sess", "log")
-        with self.assertRaises(NotImplementedError):
-            GeminiAdapter({}).resume("prompt", "/tmp", "sess", "log")
+    def test_management_only_adapters_do_not_execute(self):
+        # Unverified tools must not provide either execution path.
+        for adapter in (CursorAdapter({}), GeminiAdapter({})):
+            with self.subTest(adapter=adapter.name, operation="start"):
+                with self.assertRaises(NotImplementedError):
+                    adapter.start("prompt", "/tmp", "sess", "log")
+            with self.subTest(adapter=adapter.name, operation="resume"):
+                with self.assertRaises(NotImplementedError):
+                    adapter.resume("prompt", "/tmp", "sess", "log")
 
 
 if __name__ == "__main__":

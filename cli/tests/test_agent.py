@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 from keji.agent import Agent
+from keji.checkpoints import Checkpoint
 from keji.db import Database
 from keji.models import RunResult, Sample
 
@@ -167,6 +168,38 @@ class AgentTest(unittest.TestCase):
             self.assertEqual(agent.run_once(), "job j1 → blocked (billing_unverified)")
             # The adapter must never have been started.
             self.assertFalse(hasattr(adapter, "args"))
+            self.assertEqual(cloud.events[-1]["type"], "waiting_input")
+
+    def test_unverified_billing_blocks_resume_before_running(self):
+        class UnverifiedResumingAdapter(Adapter):
+            def __init__(self):
+                self.calls = []
+
+            def capabilities(self):
+                caps = super().capabilities()
+                caps["can_enforce_zero_spend"] = False
+                return caps
+
+            def resume(self, prompt, cwd, session_id, log_file, cancel_event=None):
+                self.calls.append((prompt, cwd, session_id))
+                return RunResult(exit_code=0, ok=True, session_id=session_id)
+
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "keji.db")
+            repo = Path(d) / "repo"; init_repo(repo)
+            db.upsert_workspace("ws1", "repo", str(repo), "main")
+            db.save_checkpoint(Checkpoint(
+                plan_id="j1", job_id="j1", attempt_id="a1", tool_profile_id="codex-default",
+                provider_session_id="provider-session", canonical_workspace=str(repo), git_head="",
+                dirty_paths_digest="", last_output_offset=0, completed_criteria=[],
+                side_effect_summary="", reason="waiting_quota",
+            ))
+            cloud, adapter = FakeCloud(), UnverifiedResumingAdapter()
+            agent = Agent(db, cloud, {"codex": adapter}, Path(d), lambda: "token",
+                          prepare_workspace=lambda repo, task_id, home, base: (repo, "keji/test"))
+            self.assertEqual(agent.run_once(), "job j1 → blocked (billing_unverified)")
+            self.assertEqual(adapter.calls, [])
+            self.assertEqual(db.get_remote_claim("j1")["state"], "reported")
             self.assertEqual(cloud.events[-1]["type"], "waiting_input")
 
     def test_quota_block_checkpoints_then_resumes_same_session(self):

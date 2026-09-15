@@ -11,7 +11,8 @@ from typing import Any, Callable, Dict
 from keji.db import Database
 from keji import quota, worktree
 from keji.checkpoints import Checkpoint, resume_allowed
-from keji.dispatch import DispatchGate, LockBusy, coding_slot_lock, deny_reason, workspace_lock
+from keji.dispatch import (DispatchGate, LockBusy, adapter_zero_spend_verified,
+                           coding_slot_lock, deny_reason, workspace_lock)
 
 
 def _default_pool_binding(provider: str):
@@ -23,8 +24,7 @@ def _default_pool_binding(provider: str):
 def _capability_zero_spend(adapter: Any, job: Dict[str, Any]) -> bool:
     """Safe default: only a verified adapter capability authorises spend-free
     execution. A manual/source claim can never grant it."""
-    caps = getattr(adapter, "capabilities", lambda: {})()
-    return bool(caps.get("can_enforce_zero_spend", False))
+    return adapter_zero_spend_verified(adapter)
 
 
 class Agent:

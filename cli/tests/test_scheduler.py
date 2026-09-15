@@ -17,6 +17,9 @@ class FakeAdapter:
     def read_limits(self):
         return self.live
 
+    def capabilities(self):
+        return {"can_enforce_zero_spend": True}
+
     def start(self, prompt, cwd, session_id, log_file):
         self.calls.append(("start", prompt, cwd, session_id))
         return self._next(session_id)
@@ -75,6 +78,29 @@ class SchedulerTest(unittest.TestCase):
             held.release()
         self.assertEqual(out, "task 1 → deferred (runner busy)")
         self.assertEqual(ad.calls, [])  # adapter never invoked
+
+    def test_missing_or_false_zero_spend_capability_blocks_start_and_resume(self):
+        """The scheduler must never bypass the shared billing gate."""
+        for capabilities in ({}, {"can_enforce_zero_spend": False}):
+            for session_id in (None, "prior-session"):
+                with self.subTest(capabilities=capabilities, session_id=session_id):
+                    task_id = self.db.add_task("do", "/repo", tool="claude")
+                    if session_id is not None:
+                        self.db.update_task(task_id, session_id=session_id, now=100)
+
+                    class CountingAdapter(FakeAdapter):
+                        def capabilities(self):
+                            return capabilities
+
+                    adapter = CountingAdapter("claude", [RunResult(ok=True)])
+                    out = self.run_once({"claude": adapter}, now=100)
+
+                    self.assertEqual(out, "task %d → blocked (billing_unverified)" % task_id)
+                    self.assertEqual(adapter.calls, [])
+                    task = self.db.get_task(task_id)
+                    self.assertEqual(task["state"], RUNNABLE)
+                    self.assertEqual(task["last_error"], "billing_unverified")
+                    self.db.update_task(task_id, state=DONE, now=100)
 
     def test_success_path_records_run_and_event(self):
         t = self.db.add_task("do", "/repo", tool="claude")

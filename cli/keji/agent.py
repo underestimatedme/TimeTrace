@@ -9,9 +9,15 @@ from pathlib import Path
 from typing import Any, Callable, Dict
 
 from keji.db import Database
-from keji import worktree
+from keji import quota, worktree
 from keji.checkpoints import Checkpoint, resume_allowed
 from keji.dispatch import DispatchGate, LockBusy, coding_slot_lock, deny_reason, workspace_lock
+
+
+def _default_pool_binding(provider: str):
+    """Opaque per-provider account pool + local profile reference. R4 replaces
+    this with an explicit user-chosen profile↔pool binding."""
+    return "pool-" + provider, provider + "-personal"
 
 
 def _capability_zero_spend(adapter: Any, job: Dict[str, Any]) -> bool:
@@ -25,12 +31,14 @@ class Agent:
     def __init__(self, db: Database, cloud: Any, adapters: Dict[str, Any], home: Path,
                  access_token: Callable[[], str], prepare_workspace: Callable = worktree.ensure,
                  heartbeat_interval: float = 30,
-                 zero_spend_verified: Callable[[Any, Dict[str, Any]], bool] = _capability_zero_spend):
+                 zero_spend_verified: Callable[[Any, Dict[str, Any]], bool] = _capability_zero_spend,
+                 pool_binding: Callable[[str], Any] = _default_pool_binding):
         self.db, self.cloud, self.adapters = db, cloud, adapters
         self.home, self.access_token = Path(home), access_token
         self.prepare_workspace = prepare_workspace
         self.heartbeat_interval = heartbeat_interval
         self._zero_spend = zero_spend_verified
+        self._pool_binding = pool_binding
 
     def run_once(self) -> str:
         self.flush_outbox()
@@ -160,6 +168,10 @@ class Agent:
             event = {"seq": 2, "type": event_type, "message": message[:1000]}
             outcome = event_type
             if event_type == "waiting_quota":
+                # Report the exhaustion reading so Valley's gate parks siblings
+                # and knows when the pool recovers.
+                if result is not None and result.samples:
+                    self._post_samples(provider, adapter, result.samples)
                 # Durable checkpoint so natural quota recovery can resume the same
                 # provider session in the same workspace.
                 self.db.save_checkpoint(Checkpoint(
@@ -184,6 +196,11 @@ class Agent:
                 outcome = self.run_once()
                 backoff = interval
                 if outcome == "idle":
+                    # No work: refresh quota so parked plans recover promptly.
+                    try:
+                        self.report_quota()
+                    except Exception:
+                        pass
                     time.sleep(interval)
             except Exception:
                 time.sleep(backoff)
@@ -196,6 +213,47 @@ class Agent:
             self.flush_outbox()
         except Exception:
             pass
+
+    def _post_samples(self, provider: str, adapter: Any, samples: list, now: float = None) -> int:
+        """Map local vendor readings to de-identified Valley samples and post
+        them so the server's quota gate reflects real availability."""
+        if not samples:
+            return 0
+        now = now if now is not None else time.time()
+        pool_id, profile_id = self._pool_binding(provider)
+        payloads = []
+        for s in samples:
+            try:
+                payloads.append(quota.payload_from_reading(
+                    s.bucket_key, s.tool, s.used_pct, s.reset_at, s.window_mins,
+                    pool_id, profile_id, now, source=getattr(s, "source", "runner"),
+                ))
+            except ValueError:
+                continue
+        if not payloads:
+            return 0
+        try:
+            self.cloud.post_quota_samples(self.access_token(), payloads)
+        except Exception:
+            return 0
+        return len(payloads)
+
+    def report_quota(self, now: float = None) -> int:
+        """Read on-demand quota from adapters that support it and report it to
+        Valley. This is what lets a parked (waiting_quota) Plan be re-queued when
+        its pool recovers, without needing a run to discover it."""
+        now = now if now is not None else time.time()
+        total = 0
+        for provider, adapter in self.adapters.items():
+            caps = getattr(adapter, "capabilities", lambda: {})()
+            if not caps.get("can_read_quota"):
+                continue
+            try:
+                samples = adapter.read_limits()
+            except Exception:
+                continue
+            total += self._post_samples(provider, adapter, samples or [], now)
+        return total
 
     def flush_outbox(self) -> None:
         for row in self.db.pending_remote_events():

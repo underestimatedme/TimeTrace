@@ -1,3 +1,4 @@
+import json
 import tempfile
 import threading
 import time
@@ -7,7 +8,7 @@ from pathlib import Path
 
 from keji.agent import Agent
 from keji.db import Database
-from keji.models import RunResult
+from keji.models import RunResult, Sample
 
 
 def init_repo(path: Path) -> None:
@@ -18,6 +19,11 @@ def init_repo(path: Path) -> None:
 class FakeCloud:
     def __init__(self):
         self.events = []
+        self.quota_posts = []
+
+    def post_quota_samples(self, token, samples):
+        self.quota_posts.append((token, samples))
+        return {"accepted": len(samples)}
 
     def claim(self, token):
         return {"job": {"id": "j1", "workspace_id": "ws1", "tool_profile_id": "codex-default", "prompt": "do it"},
@@ -203,6 +209,53 @@ class AgentTest(unittest.TestCase):
             self.assertEqual(adapter.calls[0][0], "start")
             self.assertEqual(adapter.calls[1], ("resume", "prov-sess"))
             self.assertIsNone(db.get_checkpoint("j1"))  # cleared on completion
+
+    def test_reports_quota_from_readable_adapters(self):
+        class ReadingAdapter(Adapter):
+            def read_limits(self):
+                return [Sample(bucket_key="codex:weekly", tool="codex", used_pct=42.0,
+                               reset_at=None, window_mins=10080, source="app-server")]
+
+        class BlindAdapter(Adapter):
+            def capabilities(self):
+                caps = super().capabilities()
+                caps["can_read_quota"] = False
+                return caps
+
+            def read_limits(self):
+                raise AssertionError("must not read quota when incapable")
+
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "keji.db")
+            cloud = FakeCloud()
+            agent = Agent(db, cloud, {"codex": ReadingAdapter(), "claude": BlindAdapter()},
+                          Path(d), lambda: "secrettoken")
+            n = agent.report_quota(now=1000.0)
+            self.assertEqual(n, 1)  # only the readable adapter reports
+            token, samples = cloud.quota_posts[0]
+            p = samples[0]
+            self.assertEqual((p["kind"], p["scope"], p["used_percent"], p["pool_id"]),
+                             ("codex", "weekly", 42.0, "pool-codex"))
+            self.assertNotIn("secrettoken", json.dumps(p))
+            self.assertNotIn("@", json.dumps(p))
+
+    def test_quota_block_reports_exhaustion_sample(self):
+        class BlockingAdapter(Adapter):
+            def start(self, prompt, cwd, session_id, log_file, cancel_event=None):
+                return RunResult(exit_code=1, blocked=True, error="usage limit", session_id="s",
+                                 samples=[Sample(bucket_key="codex:weekly", tool="codex",
+                                                 used_pct=100.0, reset_at=None, window_mins=10080)])
+
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "keji.db")
+            repo = Path(d) / "repo"; init_repo(repo)
+            db.upsert_workspace("ws1", "repo", str(repo), "main")
+            cloud = FakeCloud()
+            agent = Agent(db, cloud, {"codex": BlockingAdapter()}, Path(d), lambda: "token",
+                          prepare_workspace=lambda repo, task_id, home, base: (repo, "keji/test"))
+            self.assertEqual(agent.run_once(), "job j1 → waiting_quota")
+            self.assertEqual(len(cloud.quota_posts), 1)
+            self.assertEqual(cloud.quota_posts[0][1][0]["used_percent"], 100.0)
 
     def test_workspace_busy_defers_without_second_run(self):
         from keji.dispatch import workspace_lock

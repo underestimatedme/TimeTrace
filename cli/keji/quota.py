@@ -88,6 +88,23 @@ def _iso(epoch: Optional[float]) -> Optional[str]:
     return datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def payload_from_reading(bucket_key: str, tool: str, used_percent: Any, reset_at: Optional[float],
+                         window_mins: Optional[int], pool_id: str, profile_id: str, now: float,
+                         source: str = "runner", confidence: str = "exact",
+                         default_ttl: float = 3600.0) -> Dict[str, Any]:
+    """Wrap one vendor rate-limit reading as a Valley sample. A reset time is
+    only trusted when it is still in the future; otherwise the reading is fresh
+    for a bounded horizon and carries no reset boundary."""
+    scope = bucket_key.rsplit(":", 1)[-1] if ":" in bucket_key else (bucket_key or "primary")
+    trusted_reset = reset_at if (reset_at is not None and reset_at > now) else None
+    expires = trusted_reset if trusted_reset is not None else now + (window_mins * 60 if window_mins else default_ttl)
+    window = make_window(used_percent, trusted_reset, now, expires)
+    return sample_payload(
+        sample_id="%s:%s:%d" % (tool, bucket_key, int(now)), pool_id=pool_id, profile_id=profile_id,
+        scope=scope, kind=tool, window=window, source=source, confidence=confidence,
+    )
+
+
 def sample_payload(sample_id: str, pool_id: str, profile_id: str, scope: str, kind: str,
                    window: Window, source: str, confidence: str) -> Dict[str, Any]:
     """Wire shape for POST /runner/quota/samples. Carries only opaque ids and

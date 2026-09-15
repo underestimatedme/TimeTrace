@@ -25,6 +25,35 @@ struct AIToolsView: View {
             Text("通过 Valley 将 iPhone 上的任务安全派发到已授权的 Mac；Claude/Codex 账号始终留在电脑本地。")
                 .font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary).padding(.bottom, 24)
 
+            if let quota = store.accountQuota, !quota.pools.isEmpty {
+                SectionTitle("账号额度")
+                VStack(spacing: 8) {
+                    ForEach(quota.pools) { pool in
+                        Card {
+                            HStack {
+                                Text(pool.poolId).font(Typo.sans(Typo.sm, weight: .medium)).foregroundStyle(theme.text)
+                                Spacer()
+                                Text(availabilityLabel(pool.availability))
+                                    .font(Typo.sans(Typo.xs))
+                                    .foregroundStyle(pool.availability == "available" ? theme.accent : theme.warning)
+                            }
+                            .padding(.bottom, 8)
+                            ForEach(pool.windows) { w in
+                                HStack {
+                                    Text(w.scopeLabel).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
+                                    Spacer()
+                                    Text(w.displayLabel).font(Typo.mono(Typo.sm)).foregroundStyle(theme.text)
+                                }
+                                .accessibilityIdentifier("quota.\(w.poolId).\(w.scope)")
+                            }
+                        }
+                    }
+                }
+                .padding(.bottom, 8)
+                Text("倒计时归零显示为待核验，而非满额；未知不等于可用。")
+                    .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted).padding(.bottom, 24)
+            }
+
             if !sync.isLoggedIn {
                 Card(borderColor: theme.accent.opacity(0.2)) {
                     Text("请先在账号页登录，再绑定电脑。游客账号不能批准 Runner。")

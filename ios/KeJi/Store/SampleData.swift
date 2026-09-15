@@ -14,6 +14,25 @@ enum SampleData {
         return Bundle(state: state, dailyStats: [])
     }
 
+    /// A representative account-quota snapshot for offline/sample builds: one
+    /// pool available (short + weekly fresh) and one weekly window that has gone
+    /// stale (shows 待核验, never 100%).
+    static func sampleAccountQuota(now: Date = Date()) -> AccountQuota {
+        func win(_ pool: String, _ scope: String, used: Double?, fresh: Bool) -> QuotaWindow {
+            QuotaWindow(poolId: pool, scope: scope, kind: "codex", usedPercent: used, resetAt: nil,
+                        observedAt: fresh ? now.addingTimeInterval(-300) : now.addingTimeInterval(-7200),
+                        expiresAt: fresh ? now.addingTimeInterval(3600) : now.addingTimeInterval(-3600),
+                        source: "runner", confidence: "exact")
+        }
+        return AccountQuota(pools: [
+            AccountQuotaPool(poolId: "pool-codex", availability: "available",
+                             windows: [win("pool-codex", "short", used: 20, fresh: true),
+                                       win("pool-codex", "weekly", used: 45, fresh: true)]),
+            AccountQuotaPool(poolId: "pool-claude", availability: "unknown",
+                             windows: [win("pool-claude", "weekly", used: 100, fresh: false)]),
+        ], observedAt: now)
+    }
+
     /// Deterministic workspace for the I2 UI flow test: project `keji`, task
     /// `quota`, and plans `plan.01/02/03` where plan.03 depends on 01 and 02.
     static func createWorkspaceFixture(now: Date = Date()) -> Bundle {

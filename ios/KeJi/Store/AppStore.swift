@@ -19,6 +19,9 @@ final class AppStore {
     /// Plans (项目 → 任务 → Plan). Server-authoritative via PlanClient; not part
     /// of the legacy sync snapshot. Persisted locally and migrated on load.
     var plans: [PlanItem] = []
+    /// Transient account quota from the server (WorkspaceClient); not persisted.
+    /// Offline/sample builds seed it so the AI tab can render quota windows.
+    var accountQuota: AccountQuota?
     var settings: UserSettings = .defaults()
     var aiTools: [AIToolConnection] = AIToolConnection.defaults
     var activeFocus: ActiveFocus?
@@ -153,6 +156,7 @@ final class AppStore {
     func resetToSample() {
         hasOnboarded = true
         replaceAll(with: SampleData.createSampleData(), useSample: true)
+        accountQuota = SampleData.sampleAccountQuota()
         commit()
     }
 

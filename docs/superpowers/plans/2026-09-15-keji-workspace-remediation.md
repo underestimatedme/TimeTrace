@@ -48,7 +48,7 @@
 
 F01 的 Python 兼容先修；F02 与 F03 的 profile/provider/额度维度契约先固定。F08 依赖 F02/F05/F06；F09 依赖 F05/F06；F10 依赖 F02/F03；F12 在全部修复包完成后执行。
 
-### F01：统一本地启动门禁与 Python 兼容（T-01、T-02）
+### Task 1: F01：统一本地启动门禁与 Python 兼容（T-01、T-02）
 
 **Files:** T cli/keji/dispatch.py、scheduler.py、agent.py、adapters/cursor.py、adapters/gemini.py；tests/test_dispatch.py、test_scheduler.py、test_capabilities.py。
 
@@ -60,7 +60,7 @@ F01 的 Python 兼容先修；F02 与 F03 的 profile/provider/额度维度契�
 - [ ] 在 3.9、3.12 跑完整 suite，补管理模式 Cursor/Gemini 不执行测试。
 - [ ] 独立提交：fix(cli): enforce dispatch gate across execution entrypoints。
 
-### F02：服务端取消终态、依赖与幂等门禁（V-01、V-02、V-06）
+### Task 2: F02：服务端取消终态、依赖与幂等门禁（V-01、V-02、V-06）
 
 **Files:** V remote.go、plans.go、remote_integration_test.go、plan_integration_test.go；新建 workspace_regression_test.go。
 
@@ -81,7 +81,7 @@ assert second claim returns no job
 assert attempt count == 1
 ```
 
-### F03：额度身份、provider 映射与单次探针（V-03、V-07、T-03）
+### Task 3: F03：额度身份、provider 映射与单次探针（V-03、V-07、T-03）
 
 **Files:** V quota.go、quota_model.go、remote.go、quota_integration_test.go；T cli/keji/quota.py、agent.py、tests/test_quota.py、test_agent.py、fixtures/codex_ratelimits.json。
 
@@ -95,7 +95,7 @@ assert attempt count == 1
 - [ ] 测周额度耗尽+短窗恢复、陈旧样本、倒计时归零、auto-resume-off；公共 link_only 信号不改变 claim。
 - [ ] 双仓库独立提交并记录兼容部署次序（仅记录，不部署）。
 
-### F04：租约与 checkpoint 安全恢复（T-04、T-05）
+### Task 4: F04：租约与 checkpoint 安全恢复（T-04、T-05）
 
 **Files:** T cli/keji/agent.py、dispatch.py、checkpoints.py、worktree.py、tests/test_agent.py、test_checkpoints.py、test_dispatch.py。
 
@@ -108,7 +108,7 @@ assert attempt count == 1
 - [ ] 用两个独立进程测试 agent/scheduler 同时进入、路径别名、进程崩溃和子进程仍存活；旧进程尚在写时不得释放为新执行资格。
 - [ ] 独立提交：fix(cli): fence leases and validate resume checkpoints。
 
-### F05：统一人工验收与目标推进（V-04）
+### Task 5: F05：统一人工验收与目标推进（V-04）
 
 **Files:** V plans.go、remote.go、plan_integration_test.go、remote_integration_test.go。
 
@@ -121,7 +121,7 @@ assert attempt count == 1
 - [ ] 测两 Plan 一成功一未验收、重复 accept、revision 冲突、跨用户证据、accept/cancel 并发。
 - [ ] 独立提交：fix(timetrace): unify human acceptance lifecycle。
 
-### F06：保护旧同步与运行时 Plan 数据（V-05，支撑 T-07）
+### Task 6: F06：保护旧同步与运行时 Plan 数据（V-05，支撑 T-07）
 
 **Files:** V model.go、sync.go、plan_migration_test.go、app_integration_test.go；T ios/KeJi/Store/AppStore.swift、AppStore+Tasks.swift。
 
@@ -133,7 +133,7 @@ assert attempt count == 1
 - [ ] 测失败不能改成完成、重复同步不双计、离线重连不回退新 revision。
 - [ ] 独立提交：fix(timetrace): protect execution facts from legacy sync。
 
-### F07：迁移语义与访客合并（V-08、V-12）
+### Task 7: F07：迁移语义与访客合并（V-08、V-12）
 
 **Files:** V plan_migration.go、sync.go、repository.go、plan_migration_test.go、merge_test.go。
 
@@ -146,7 +146,7 @@ assert attempt count == 1
 - [ ] 在隔离数据库演练备份恢复、行数/归属/权重校验；不连接生产数据库。
 - [ ] 独立提交：fix(timetrace): preserve plans across migration and account merge。
 
-### F08：iOS 真正的 Plan 闭环（T-06、T-07）
+### Task 8: F08：iOS 真正的 Plan 闭环（T-06、T-07）
 
 **Files:** T ios/KeJi/Networking/WorkspaceClient.swift、Endpoints.swift、Store/AppStore.swift、AppStore+Plans.swift、AppStore+Tasks.swift、Features/Plans/PlanDetailView.swift；KeJiTests/PlanSyncTests.swift、WorkspaceContractTests.swift；KeJiUITests/WorkspaceFlowTests.swift。
 
@@ -159,7 +159,7 @@ assert attempt count == 1
 - [ ] UI 测试执行创建任务→即时出现 Plan→派发→等待→待验收→确认；断网/取消/冲突必须可解释。
 - [ ] 独立提交：fix(ios): connect authoritative plan workflow。
 
-### F09：报告事实、跨日去重与版本（V-09、V-10 日报、T-09）
+### Task 9: F09：报告事实、跨日去重与版本（V-09、V-10 日报、T-09）
 
 **Files:** V reports.go、remote.go、reports_test.go；T ios/KeJi/Stats/Stats.swift、Features/Timeline/TimelineProjection.swift、Features/Reports/ReportsView.swift、KeJiTests/StatsTests.swift、ReportsScopeTests.swift。
 
@@ -172,7 +172,7 @@ assert attempt count == 1
 - [ ] 真实覆盖率由证据产生，79% 不给总分；无记录/未知/零分别显示。日报仍为私有草稿。
 - [ ] 分仓库提交，保存跨端相同 fixture 的预期数值。
 
-### F10：推荐与真正门禁共用规则（V-11）
+### Task 10: F10：推荐与真正门禁共用规则（V-11）
 
 **Files:** V plans.go、scoring.go、plan_test.go、scoring_test.go、plan_integration_test.go。
 
@@ -184,7 +184,7 @@ assert attempt count == 1
 - [ ] 验证推荐产生后状态变化，实际 claim 拒绝；推荐调用不会改变数据库执行状态。
 - [ ] 独立提交：fix(timetrace): base recommendations on facts and gates。
 
-### F11：偏好并发、反馈持久化和账号隔离（V-10 偏好、T-08）
+### Task 11: F11：偏好并发、反馈持久化和账号隔离（V-10 偏好、T-08）
 
 **Files:** V account.go、account_test.go；T ios/KeJi/Features/Settings/FeedbackView.swift、Persistence/PreferencesStore.swift；新建 Persistence/FeedbackDraftStore.swift、KeJiTests/FeedbackDraftStoreTests.swift；修改 KeJiTests/UserPreferencesTests.swift。
 
@@ -197,7 +197,7 @@ assert attempt count == 1
 - [ ] 补两个设备重复反馈、相同 key 不同内容的契约测试；核验限流并发，不用 count→create 竞争当可靠限流。
 - [ ] 双仓库独立提交：fix(account): persist drafts and resolve preference conflicts。
 
-### F12：常驻端到端回归与二轮审查
+### Task 12: F12：常驻端到端回归与二轮审查
 
 **Files:** V 全部 *_test.go；T cli/tests/、ios/KeJiTests/、ios/KeJiUITests/WorkspaceFlowTests.swift；新建 tests/integration/test_workspace_flow.py 及对应测试运行说明。
 

@@ -41,16 +41,29 @@ final class FunctionalUITests: XCTestCase {
         add(attachment)
     }
 
+    /// Tasks are reached the way a user reaches them: projects tab → project → task.
+    /// The bottom tabs are 今日 · 项目 · 时间线 · AI · 我的; there is no tasks tab.
+    private func openTask(_ title: String, file: StaticString = #filePath, line: UInt = #line) {
+        tap("workspace.tab.projects", file: file, line: line)
+        // Onboarding auto-creates a single project; sample data leads with 刻迹 App.
+        let project = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "project.")).firstMatch
+        reveal(project, file: file, line: line)
+        project.tap()
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+        reveal(row, file: file, line: line)
+        row.tap()
+    }
+
     func testOnboardingCreatePauseResumeCompleteAndPersist() {
         launch("onboarding")
         tap("继续")
         tap("继续")
         tap("开始使用")
-        tap("任务")
-        if !app.buttons["新建任务"].waitForExistence(timeout: 2) {
-            tap("任务") // onboarding transition can briefly swallow the first tab tap
+        tap("workspace.tab.projects")
+        if !app.buttons["task.create"].waitForExistence(timeout: 2) {
+            tap("workspace.tab.projects") // onboarding transition can briefly swallow the first tab tap
         }
-        tap("新建任务")
+        tap("task.create")
         let title = app.textFields["输入任务名称"]
         XCTAssertTrue(title.waitForExistence(timeout: 5))
         title.tap()
@@ -60,19 +73,16 @@ final class FunctionalUITests: XCTestCase {
         capture("focus-running")
         tap("暂停")
         tap("临时休息")
-        tap("任务")
-        app.staticTexts["QA Focus Lifecycle"].tap()
+        openTask("QA Focus Lifecycle")
         tap("开始执行")
         XCTAssertTrue(app.staticTexts["专注计时"].waitForExistence(timeout: 5))
         tap("完成")
-        tap("任务")
-        app.staticTexts["QA Focus Lifecycle"].tap()
+        openTask("QA Focus Lifecycle")
         XCTAssertTrue(app.staticTexts["已完成"].waitForExistence(timeout: 5))
         capture("focus-completed")
         XCUIDevice.shared.press(.home) // exercise background save before cold launch
         launch("tasks", sample: false)
-        XCTAssertTrue(app.staticTexts["QA Focus Lifecycle"].waitForExistence(timeout: 5))
-        app.staticTexts["QA Focus Lifecycle"].tap()
+        openTask("QA Focus Lifecycle")
         XCTAssertTrue(app.staticTexts["已完成"].waitForExistence(timeout: 5))
     }
 
@@ -85,10 +95,8 @@ final class FunctionalUITests: XCTestCase {
         tap("AI 来做")
         XCTAssertTrue(app.staticTexts["AI 提供商"].waitForExistence(timeout: 5))
         tap("保存任务")
-        XCTAssertTrue(app.buttons["今日"].waitForExistence(timeout: 5))
-        let created = app.staticTexts["QA AI Lifecycle"]
-        reveal(created)
-        created.tap()
+        XCTAssertTrue(app.buttons["workspace.tab.today"].waitForExistence(timeout: 5))
+        openTask("QA AI Lifecycle")
         tap("开始执行")
         XCTAssertTrue(app.staticTexts["AI 执行"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["专注计时"].exists)
@@ -99,8 +107,7 @@ final class FunctionalUITests: XCTestCase {
         XCTAssertTrue(app.buttons["暂停"].waitForExistence(timeout: 5))
         capture("ai-resumed")
         tap("取消")
-        reveal(created)
-        created.tap()
+        openTask("QA AI Lifecycle")
         XCTAssertTrue(app.staticTexts["已取消"].waitForExistence(timeout: 5))
     }
 
@@ -130,9 +137,12 @@ final class FunctionalUITests: XCTestCase {
 
     func testMainTabsAndSecondaryRoutesRender() {
         launch("today")
-        for tab in ["任务", "时间流", "洞察", "我的", "今日"] {
-            tap(tab)
-            XCTAssertTrue(app.buttons["今日"].exists)
+        for (tab, label) in [("projects", "项目"), ("timeline", "时间线"),
+                             ("ai", "AI"), ("mine", "我的"), ("today", "今日")] {
+            tap("workspace.tab.\(tab)")
+            let button = app.buttons["workspace.tab.\(tab)"].firstMatch
+            XCTAssertTrue(button.label.contains(label), "tab \(tab) is labelled \(button.label)")
+            XCTAssertTrue(app.buttons["workspace.tab.today"].exists)
             XCTAssertEqual(app.state, .runningForeground)
             capture("tab-\(tab)")
         }

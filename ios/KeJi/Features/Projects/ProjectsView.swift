@@ -7,12 +7,23 @@ struct ProjectsView: View {
     @Environment(AppRouter.self) private var router
 
     var body: some View {
-        SubPageScaffold(title: "项目与目标") {
+        SubPageScaffold(title: "项目与目标", action: { createButton }) {
             if store.projects.isEmpty {
                 MissingPlaceholder(text: "暂无项目")
             }
             VStack(spacing: 12) { ForEach(store.projects) { projectCard($0) } }
         }
+    }
+
+    /// The only entry point into task creation: the bottom tabs have no "新建" of
+    /// their own, so the projects tab carries it (GlassWorkspace's `+` action).
+    private var createButton: some View {
+        Button { router.push(.taskCreate) } label: {
+            Image(systemName: "plus").font(.system(size: 18, weight: .regular)).foregroundStyle(theme.accent)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("新建任务")
+        .accessibilityIdentifier("task.create")
     }
 
     private func projectCard(_ project: Project) -> some View {

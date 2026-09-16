@@ -57,11 +57,21 @@ struct ProjectDetailView: View {
         }
         .padding(.bottom, 24)
 
-        SectionTitle("待完成任务 (\(pending.count))")
+        // Every task in the project, pending first. A completed or cancelled task
+        // is still reachable — this list is the only way into a task's detail.
+        let ordered = pending + tasks.filter { TaskStatus.terminal.contains($0.status) }
+        SectionTitle("任务 (\(ordered.count))")
+        if ordered.isEmpty { MissingPlaceholder(text: "暂无任务") }
         VStack(spacing: 8) {
-            ForEach(pending.prefix(5)) { task in
+            ForEach(ordered) { task in
                 Button { router.push(.taskDetail(task.id)) } label: {
-                    Card { Text(task.title).font(Typo.sans(Typo.sm)).foregroundStyle(theme.text) }
+                    Card {
+                        HStack(spacing: 8) {
+                            Text(task.title).font(Typo.sans(Typo.sm)).foregroundStyle(theme.text)
+                            Spacer(minLength: 8)
+                            StatusBadge(status: task.status)
+                        }
+                    }
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("task.\(task.id)")

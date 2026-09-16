@@ -16,16 +16,27 @@
 
 ---
 
-## ⚠️ 工作路径（读错地方会白干）
+## ⚠️ 工作路径与分支（搞错分支会白干）
 
 ```
-仓库    /opt/coding/planb/github/.worktrees/valley-workspace-review
+仓库    /opt/coding/planb/github/Valley
 分支    codex/keji-ai-workspace-fixes
 ```
 
-`/opt/coding/planb/github/Valley` 主检出停在 `codex/monimoni-followup`，
-**上面没有刻迹的最新代码**。在那里 grep 会让你以为 plans / reports / quota
-这些接口根本不存在（实际上都有）。务必在上面那个 worktree 里工作。
+开工前先确认分支对：
+
+```bash
+cd /opt/coding/planb/github/Valley
+git rev-parse --abbrev-ref HEAD       # 应为 codex/keji-ai-workspace-fixes
+ls internal/apps/timetrace/ | wc -l   # 应为 36
+```
+
+**如果文件数只有十来个、没有 `plans.go` / `quota.go` / `reports.go`，
+说明你在错误的分支上**（`main` 或 `codex/monimoni-followup` 上只有旧版 timetrace）。
+在那里 grep 会让你以为 plans / reports / quota 这些接口根本不存在 —— 实际上都有。
+先 `git checkout codex/keji-ai-workspace-fixes` 再开始。
+
+该分支已合入 `origin/main`（合并提交 `4eac13d`），既有刻迹全部改动也跟得上主线。
 
 ---
 
@@ -168,7 +179,7 @@ GET /admin/feedback     PATCH /admin/feedback/:id      （处理状态流转）
 ## 必须跑的验证命令
 
 ```bash
-cd /opt/coding/planb/github/.worktrees/valley-workspace-review
+cd /opt/coding/planb/github/Valley
 
 make tidy
 go build ./...

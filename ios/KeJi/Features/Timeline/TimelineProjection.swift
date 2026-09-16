@@ -2,7 +2,21 @@ import Foundation
 
 /// The three timeline tracks. Human and AI time are shown and summed
 /// independently — never added together into a single number.
-enum TimelineTrack: String { case human, ai, waiting }
+enum TimelineTrack: String, Codable { case human, ai, waiting }
+
+/// Calendar day boundaries, including the 23/25-hour IANA DST days.
+func reportDayInterval(_ day: String, timeZone: TimeZone) -> DateInterval? {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.calendar = Calendar(identifier: .gregorian)
+    formatter.timeZone = timeZone
+    formatter.dateFormat = "yyyy-MM-dd"
+    formatter.isLenient = false
+    guard let date = formatter.date(from: day), formatter.string(from: date) == day else { return nil }
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = timeZone
+    return calendar.dateInterval(of: .day, for: date)
+}
 
 struct TrackInterval: Equatable, Identifiable {
     let id: String

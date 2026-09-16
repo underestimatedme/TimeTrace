@@ -29,6 +29,23 @@ final class WorkspaceFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["AI 活跃（累计）"].exists)
     }
 
+    func testReportsUseServerFactsRevisionAndCoverageGate() {
+        app.terminate()
+        app.launchArguments = ["--workspace-fixture", "--online-ui-testing", "--api-base-url",
+                               "http://127.0.0.1:18768/reports-\(UUID().uuidString)", "--screen", "today"]
+        app.launchEnvironment["KEJI_OFFLINE"] = "0"
+        app.launch()
+        tap("reports.open")
+        XCTAssertTrue(app.staticTexts["时区 Asia/Dubai · 修订 7 · 私有草稿"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["10 分钟"].exists)
+        XCTAssertTrue(app.staticTexts["20 分钟"].exists)
+        XCTAssertTrue(app.staticTexts["无记录"].exists)
+        XCTAssertFalse(app.staticTexts["95"].exists)
+        tap("reports.generate")
+        XCTAssertTrue(app.staticTexts["时区 Asia/Dubai · 修订 8 · 私有草稿"].waitForExistence(timeout: 5))
+        capture("report-server-facts")
+    }
+
     func testOfflineCannotAcceptDependenciesOrUnlockDispatch() {
         // Drill down to plan.03.
         tap("project.keji")

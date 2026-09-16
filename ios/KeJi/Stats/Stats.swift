@@ -11,11 +11,23 @@ enum Stats {
         return Format.dayKey(session.startedAt) == day
     }
 
+    static func sessionIntervals(_ sessions: [TimeSession], types: [TimeSessionType], day: String? = nil,
+                                 timeZone: TimeZone = .current) -> [TrackInterval] {
+        let bounds = day.flatMap { reportDayInterval($0, timeZone: timeZone) }
+        if day != nil && bounds == nil { return [] }
+        return dedupedByID(sessions.compactMap { s in
+            guard types.contains(s.type), let end = s.endedAt, end >= s.startedAt else { return nil }
+            let start = max(s.startedAt, bounds?.start ?? s.startedAt)
+            let clippedEnd = min(end, bounds?.end ?? end)
+            guard clippedEnd > start else { return nil }
+            let track: TimelineTrack = humanTypes.contains(s.type) ? .human : (aiTypes.contains(s.type) ? .ai : .waiting)
+            return TrackInterval(id: s.id, start: start, end: clippedEnd, track: track)
+        })
+    }
+
     static func sumSessionSeconds(_ sessions: [TimeSession], types: [TimeSessionType], day: String? = nil) -> Int {
-        sessions.reduce(0) { sum, s in
-            guard types.contains(s.type), matches(s, day: day) else { return sum }
-            return sum + s.durationSeconds
-        }
+        let intervals = sessionIntervals(sessions, types: types, day: day)
+        return Int(unionSeconds(intervals, track: .human) + activeSeconds(intervals, track: .ai) + activeSeconds(intervals, track: .waiting))
     }
 
     static func humanSeconds(_ sessions: [TimeSession], day: String? = nil) -> Int {

@@ -2,6 +2,17 @@ import XCTest
 @testable import KeJi
 
 final class StatsTests: XCTestCase {
+    func testReportMidnightClippingHumanUnionAndDistinctParallelAI() {
+        let start = Calendar.current.date(from: DateComponents(year: 2026, month: 9, day: 14, hour: 23, minute: 50))!
+        let human = session("human", type: .humanFocus, start: start, minutes: 20)
+        let review = session("review", type: .humanReview, start: start.addingTimeInterval(300), minutes: 15)
+        let a = session("attempt-a", type: .aiActive, start: start, minutes: 20)
+        let b = session("attempt-b", type: .aiActive, start: start, minutes: 20)
+        for day in ["2026-09-14", "2026-09-15"] {
+            XCTAssertEqual(Stats.humanSeconds([human, review, human], day: day), 600)
+            XCTAssertEqual(Stats.aiActiveSeconds([a, b, a], day: day), 1200)
+        }
+    }
     private func session(_ id: String, type: TimeSessionType, start: Date, minutes: Int, taskId: String = "t") -> TimeSession {
         TimeSession(id: id, taskId: taskId, type: type, executor: type == .aiActive ? "claude" : "human",
                     startedAt: start, endedAt: start.addingTimeInterval(Double(minutes * 60)),

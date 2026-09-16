@@ -146,10 +146,13 @@ final class StoreReducerTests: XCTestCase {
         store.completeFocus()
         store.cancelAIExecution("t3")
         store.startAIExecution("t7")
-        for _ in 0..<180 { store.tick() }
+        // Advance a real clock: AI time is measured from the session's timestamps,
+        // not from how many times the foreground tick happened to run.
+        let clock = Date()
+        for second in 1...180 { store.tickAIExecutions(at: clock.addingTimeInterval(Double(second))) }
         XCTAssertTrue(store.timeSessions.filter { $0.taskId == "t7" && $0.type == .aiActive }.allSatisfy { $0.endedAt != nil })
         let before = store.timeSessions.first { $0.taskId == "t7" && $0.type == .waitingHuman }!.durationSeconds
-        store.tick()
+        store.tickAIExecutions(at: clock.addingTimeInterval(181))
         XCTAssertEqual(store.timeSessions.first { $0.taskId == "t7" && $0.type == .waitingHuman }?.durationSeconds, before + 1)
         XCTAssertEqual(Stats.taskTimeBreakdown(store.timeSessions, taskId: "t7").ai, 180)
     }

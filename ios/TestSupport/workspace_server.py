@@ -25,6 +25,17 @@ class Handler(BaseHTTPRequestHandler):
         data, status, code = {}, 200, 0
         if path == "/auth/guest" or path == "/auth/refresh":
             data = {"access_token": "local-test", "refresh_token": "local-refresh", "expires_in": 900}
+        elif path.startswith("/reports"):
+            facts = [
+                {"id": "h1", "task_id": "t", "track": "human", "state": "known", "start": "2026-09-14T20:00:00Z", "end": "2026-09-14T20:10:00Z"},
+                {"id": "h2", "task_id": "t", "track": "human", "state": "known", "start": "2026-09-14T20:05:00Z", "end": "2026-09-14T20:10:00Z"},
+                {"id": "a1", "task_id": "t", "track": "ai", "state": "known", "start": "2026-09-14T20:00:00Z", "end": "2026-09-14T20:10:00Z"},
+                {"id": "a2", "task_id": "t", "track": "ai", "state": "known", "start": "2026-09-14T20:00:00Z", "end": "2026-09-14T20:10:00Z"}]
+            data = {"local_date": path.split("date=")[-1] if self.command == "GET" else body["date"],
+                    "revision": 8 if self.command == "POST" else 7, "status": "draft", "coverage": 0.79,
+                    "total_score": 95, "human_seconds": 600, "ai_seconds": 1200, "waiting_seconds": None,
+                    "evidence_ids": ["a1", "a2"], "baseline_version": "phase-facts-v2",
+                    "breakdown": {"zone": "Asia/Dubai", "evidence_coverage": 1, "facts": facts}}
         elif path == "/runners":
             data = [{"runner": {"id": "runner-ui", "name": "Test Mac", "platform": "darwin", "client_version": "1",
                                 "status": "online", "created_at": NOW, "updated_at": NOW},

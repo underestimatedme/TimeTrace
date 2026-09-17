@@ -56,4 +56,47 @@ final class ThemeTests: XCTestCase {
     func testDarkThemesUseOpaquePanels() {
         XCTAssertEqual(Theme.claude.panelOpacity, 1, accuracy: 0.002)
     }
+    /// 深海蓝：design/src/review/glass.css 的 [data-theme=dark] 一组 --g-*。
+    func testDarkThemeUsesDeepSeaTokens() {
+        let dark = Theme.dark
+        XCTAssertEqual(dark.bg, Color(hex: "#101c2c"))
+        XCTAssertEqual(dark.bgCard, Color(hex: "#1b2d43"))
+        XCTAssertEqual(dark.bgElevated, Color(hex: "#17273c"))
+        XCTAssertEqual(dark.bgHover, Color(hex: "#273e59"))
+        XCTAssertEqual(dark.border, Color(hex: "#30465f"))
+        XCTAssertEqual(dark.text, Color(hex: "#e5effd"))
+        XCTAssertEqual(dark.textSecondary, Color(hex: "#b0c3dd"))
+        XCTAssertEqual(dark.textMuted, Color(hex: "#9db2cf"))
+        XCTAssertEqual(dark.accent, Color(hex: "#78bbff"))
+        XCTAssertEqual(dark.ai, Color(hex: "#6ed8f0"))
+        XCTAssertEqual(dark.success, Color(hex: "#85d9bd"))
+        XCTAssertEqual(dark.danger, Color(hex: "#ffa9b9"))
+        XCTAssertTrue(dark.isDark)
+        XCTAssertEqual(ThemeMeta.meta(for: .dark).name, "深海蓝")
+    }
+
+    /// 跟随系统时由系统的深浅色决定；显式选择时忽略系统。
+    func testThemeModeResolution() {
+        XCTAssertEqual(resolveTheme(mode: .system, systemIsDark: true, accent: .blue).name, .dark)
+        XCTAssertEqual(resolveTheme(mode: .system, systemIsDark: false, accent: .blue).name, .light)
+        XCTAssertEqual(resolveTheme(mode: .light, systemIsDark: true, accent: .blue).name, .light)
+        XCTAssertEqual(resolveTheme(mode: .dark, systemIsDark: false, accent: .blue).name, .dark)
+    }
+
+    /// 强调色只换 accent/ai，底色与文字不动。
+    func testVioletAccentOnlyReplacesAccentColors() {
+        let blue = resolveTheme(mode: .light, systemIsDark: false, accent: .blue)
+        let violet = resolveTheme(mode: .light, systemIsDark: false, accent: .violet)
+        XCTAssertEqual(violet.accent, Color(hex: "#7962e5"))
+        XCTAssertEqual(violet.ai, Color(hex: "#b29bf4"))
+        XCTAssertEqual(violet.bg, blue.bg)
+        XCTAssertEqual(violet.text, blue.text)
+        XCTAssertEqual(resolveTheme(mode: .dark, systemIsDark: false, accent: .violet).accent, Color(hex: "#b7a2ff"))
+    }
+
+    /// 三个选项就是设计稿的全部：冰晶白 / 深海蓝 / 跟随系统。
+    func testThemeModeLabels() {
+        XCTAssertEqual(ThemeMode.allCases.map(\.label), ["冰晶白", "深海蓝", "跟随系统"])
+        XCTAssertEqual(AccentPalette.allCases.map(\.label), ["冰蓝", "鸢紫"])
+    }
 }

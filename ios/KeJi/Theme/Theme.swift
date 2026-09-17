@@ -12,10 +12,10 @@ struct Theme: Equatable {
     let text: Color
     let textSecondary: Color
     let textMuted: Color
-    let accent: Color
-    let accentDim: Color
-    let ai: Color
-    let aiDim: Color
+    var accent: Color
+    var accentDim: Color
+    var ai: Color
+    var aiDim: Color
     let success: Color
     let warning: Color
     let danger: Color
@@ -43,6 +43,7 @@ struct Theme: Equatable {
         case .codex: return .codex
         case .cursor: return .cursor
         case .light: return .light
+        case .dark: return .dark
         }
     }
 
@@ -82,6 +83,54 @@ struct Theme: Equatable {
         accent: Color(hex: "#1680ff"), accentDim: Color(hex: "#0f66d0"),
         ai: Color(hex: "#48b8ef"), aiDim: Color(hex: "#2e94c6"),
         success: Color(hex: "#288873"), warning: Color(hex: "#88692b"), danger: Color(hex: "#b5435d"))
+
+    /// 深海蓝 —— glass.css 的 `.gl-app[data-theme=dark]`。
+    static let dark = Theme(
+        name: .dark,
+        appBg: Color(hex: "#0b1522"), bg: Color(hex: "#101c2c"), bgElevated: Color(hex: "#17273c"),
+        bgCard: Color(hex: "#1b2d43"), bgHover: Color(hex: "#273e59"), border: Color(hex: "#30465f"),
+        text: Color(hex: "#e5effd"), textSecondary: Color(hex: "#b0c3dd"), textMuted: Color(hex: "#9db2cf"),
+        accent: Color(hex: "#78bbff"), accentDim: Color(hex: "#4f9be8"),
+        ai: Color(hex: "#6ed8f0"), aiDim: Color(hex: "#49b3cc"),
+        success: Color(hex: "#85d9bd"), warning: Color(hex: "#e7c993"), danger: Color(hex: "#ffa9b9"))
+}
+
+
+/// 主题模式：设计稿只提供这三项。
+enum ThemeMode: String, Codable, CaseIterable, Identifiable {
+    case light, dark, system
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .light: return "冰晶白"
+        case .dark: return "深海蓝"
+        case .system: return "跟随系统"
+        }
+    }
+}
+
+/// 强调色：冰蓝（--g-blue）与鸢紫（data-accent=violet）。
+enum AccentPalette: String, Codable, CaseIterable, Identifiable {
+    case blue, violet
+    var id: String { rawValue }
+    var label: String { self == .blue ? "冰蓝" : "鸢紫" }
+}
+
+/// 把「模式 + 系统深浅色 + 强调色」解析成一套实际生效的 Theme。
+func resolveTheme(mode: ThemeMode, systemIsDark: Bool, accent: AccentPalette) -> Theme {
+    var theme: Theme
+    switch mode {
+    case .light: theme = .light
+    case .dark: theme = .dark
+    case .system: theme = systemIsDark ? .dark : .light
+    }
+    guard accent == .violet else { return theme }
+    // 鸢紫只替换强调色，底色与文字保持不变。
+    theme.accent = theme.isDark ? Color(hex: "#b7a2ff") : Color(hex: "#7962e5")
+    theme.accentDim = theme.isDark ? Color(hex: "#9a86e8") : Color(hex: "#5f49c4")
+    theme.ai = Color(hex: "#b29bf4")
+    theme.aiDim = Color(hex: "#8a72d8")
+    return theme
 }
 
 /// Port of design/src/lib/themes.ts.
@@ -104,6 +153,9 @@ struct ThemeMeta: Identifiable {
         ThemeMeta(id: .cursor, name: "靛蓝 · Cursor", tagline: "冷峻蓝紫，理性的科技质感",
                   swatchBg: Color(hex: "#0a0c11"), swatchCard: Color(hex: "#181d29"),
                   swatchAccent: Color(hex: "#5b8dff"), swatchAI: Color(hex: "#b08cff")),
+        ThemeMeta(id: .dark, name: "深海蓝", tagline: "深海蓝底、冰蓝强调的深色玻璃",
+                  swatchBg: Color(hex: "#101c2c"), swatchCard: Color(hex: "#1b2d43"),
+                  swatchAccent: Color(hex: "#78bbff"), swatchAI: Color(hex: "#6ed8f0")),
         ThemeMeta(id: .light, name: "冰晶白", tagline: "冰晶白底、冰蓝强调的浅色玻璃",
                   swatchBg: Color(hex: "#f5f9ff"), swatchCard: Color(hex: "#ffffff"),
                   swatchAccent: Color(hex: "#1680ff"), swatchAI: Color(hex: "#48b8ef")),

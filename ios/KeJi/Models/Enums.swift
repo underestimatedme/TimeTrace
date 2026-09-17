@@ -169,5 +169,5 @@ enum ExperimentStatus: String, Codable, CaseIterable {
 }
 
 enum ThemeName: String, Codable, CaseIterable {
-    case claude, codex, cursor, light
+    case claude, codex, cursor, light, dark
 }

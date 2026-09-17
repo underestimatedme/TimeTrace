@@ -7,9 +7,14 @@ struct RootView: View {
     @Environment(SyncEngine.self) private var sync
     @Environment(AppEnvironment.self) private var appEnv
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var systemColorScheme
 
     var body: some View {
-        let theme = Theme.named(store.settings.theme)
+        // `--theme` 调试开关优先；否则按「主题与动效」里的模式 + 强调色解析。
+        let theme = LaunchOptions.current.theme.map(Theme.named)
+            ?? resolveTheme(mode: store.preferences.themeMode,
+                            systemIsDark: systemColorScheme == .dark,
+                            accent: store.preferences.accent)
         Group {
             switch router.phase {
             case .splash: SplashView()
@@ -72,6 +77,7 @@ struct MainShellView: View {
         case .goal(let id): GoalDetailView(goalId: id)
         case .aiTools: AIToolsView()
         case .appearance: AppearanceView()
+        case .devices: DevicesView()
         case .account: AccountView()
         case .privacy: PrivacyView()
         case .homeCustomization: HomeCustomizationView()

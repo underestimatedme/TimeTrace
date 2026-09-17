@@ -35,6 +35,8 @@ struct UserPreferences: Codable, Equatable {
     var schemaVersion = 1
     var hiddenModules: Set<HomeModule> = []
     var reduceMotion = false
+    var themeMode: ThemeMode = .light
+    var accent: AccentPalette = .blue
     var diagnosticsEnabled = false
     var notifications = NotificationPreferences()
 
@@ -47,6 +49,8 @@ struct UserPreferences: Codable, Equatable {
         schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
         hiddenModules = try c.decodeIfPresent(Set<HomeModule>.self, forKey: .hiddenModules) ?? []
         reduceMotion = try c.decodeIfPresent(Bool.self, forKey: .reduceMotion) ?? false
+        themeMode = try c.decodeIfPresent(ThemeMode.self, forKey: .themeMode) ?? .light
+        accent = try c.decodeIfPresent(AccentPalette.self, forKey: .accent) ?? .blue
         diagnosticsEnabled = try c.decodeIfPresent(Bool.self, forKey: .diagnosticsEnabled) ?? false
         notifications = try c.decodeIfPresent(NotificationPreferences.self, forKey: .notifications) ?? NotificationPreferences()
     }

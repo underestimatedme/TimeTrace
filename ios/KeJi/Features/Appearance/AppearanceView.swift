@@ -1,89 +1,83 @@
 import SwiftUI
 
-/// Appearance.tsx: 4 theme rows with swatches + preview block.
+/// 主题与动效（design/src/review/AccountCenter.tsx 的 theme 页）：
+/// 冰晶白 / 深海蓝 / 跟随系统，外加强调色与减少动态效果。
 struct AppearanceView: View {
     @Environment(\.theme) private var theme
     @Environment(AppStore.self) private var store
 
     var body: some View {
-        SubPageScaffold(title: "外观设置") {
-            Text("刻迹始终保持深色优先。选择一套与你的 AI 工具气质相符的配色。")
-                .font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary).padding(.bottom, 24)
+        SubPageScaffold(title: "主题与动效") {
+            Text("清晨或深夜，都有舒适的工作界面。")
+                .font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary).padding(.bottom, 20)
 
-            VStack(spacing: 12) {
-                ForEach(ThemeMeta.all) { meta in themeRow(meta) }
+            HStack(spacing: 10) {
+                ForEach(ThemeMode.allCases) { mode in modeCard(mode) }
+            }
+            .padding(.bottom, 24)
+
+            SectionTitle("强调色")
+            Picker("强调色", selection: Binding(
+                get: { store.preferences.accent },
+                set: { next in store.updatePreferences { $0.accent = next } })) {
+                ForEach(AccentPalette.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .padding(.bottom, 24)
+            .accessibilityIdentifier("appearance.accent")
+
+            Card {
+                Toggle(isOn: Binding(
+                    get: { store.preferences.reduceMotion },
+                    set: { on in store.updatePreferences { $0.reduceMotion = on } })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("减少动态效果").font(Typo.sans(Typo.sm)).foregroundStyle(theme.text)
+                        Text("关闭进场、浮动与脉冲，保留状态反馈")
+                            .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
+                    }
+                }
+                .tint(theme.accent)
+                .accessibilityIdentifier("appearance.reduceMotion")
             }
 
-            SectionTitle("预览").padding(.top, 32)
-            preview
+            Text("也会尊重系统的「减少动态效果」偏好。主题与显示设置保存在本机。")
+                .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted).padding(.top, 12)
         }
     }
 
-    private func themeRow(_ meta: ThemeMeta) -> some View {
-        let active = store.settings.theme == meta.id
+    private func modeCard(_ mode: ThemeMode) -> some View {
+        let active = store.preferences.themeMode == mode
+        let preview = resolveTheme(mode: mode, systemIsDark: mode == .dark, accent: store.preferences.accent)
         return Button {
-            store.updateSettings { $0.theme = meta.id }
+            store.updatePreferences { $0.themeMode = mode }
         } label: {
-            HStack(spacing: 12) {
-                HStack(spacing: 4) {
-                    swatch(meta.swatchCard)
-                    swatch(meta.swatchAccent)
-                    swatch(meta.swatchAI)
+            VStack(spacing: 12) {
+                Image(systemName: mode == .light ? "sun.max" : mode == .dark ? "moon" : "iphone")
+                    .font(.system(size: 24, weight: .light))
+                    .foregroundStyle(active ? theme.accent : theme.textSecondary)
+                Text(mode.label)
+                    .font(Typo.sans(Typo.xs, weight: .medium))
+                    .foregroundStyle(active ? theme.accent : theme.textSecondary)
+                HStack(spacing: 3) {
+                    swatch(preview.bg); swatch(preview.accent); swatch(preview.ai)
                 }
-                .padding(8)
-                .background(meta.swatchBg)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
-                        Text(meta.name).font(Typo.sans(Typo.sm, weight: .medium)).foregroundStyle(theme.text)
-                        if active {
-                            Image(systemName: "checkmark").font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(theme.bg).frame(width: 16, height: 16)
-                                .background(theme.accent).clipShape(Circle())
-                        }
-                    }
-                    Text(meta.tagline).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
-                }
-                Spacer(minLength: 0)
             }
-            .padding(16)
-            .background(active ? theme.accent.opacity(0.05) : .clear)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(active ? theme.accent : theme.border, lineWidth: 1))
-            .contentShape(Rectangle())
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 20)
+            .background(active ? theme.bgHover : theme.panel)
+            .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .stroke(active ? theme.accent : theme.border, lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
-        .accessibilityIdentifier("theme-\(meta.id.rawValue)")
-        .accessibilityValue(active ? "已选中" : "未选中")
+        .accessibilityIdentifier("theme.\(mode.rawValue)")
+        .accessibilityValue(active ? "已选择" : "未选择")
     }
 
     private func swatch(_ color: Color) -> some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous).fill(color).frame(width: 20, height: 32)
-    }
-
-    private var preview: some View {
-        Card {
-            VStack(spacing: 12) {
-                HStack {
-                    Text("设计刻迹首页").font(Typo.sans(Typo.sm)).foregroundStyle(theme.text)
-                    Spacer()
-                    TintPill(text: "进行中", color: theme.accent, radius: 6)
-                }
-                HStack {
-                    Text("Codex 补充单元测试").font(Typo.sans(Typo.sm)).foregroundStyle(theme.text)
-                    Spacer()
-                    TintPill(text: "AI 执行中", color: theme.ai, radius: 6)
-                }
-                HStack(spacing: 8) {
-                    TintPill(text: "已完成", color: theme.success, radius: 6, vertical: 4)
-                    TintPill(text: "等待我", color: theme.warning, radius: 6, vertical: 4)
-                    TintPill(text: "失败", color: theme.danger, radius: 6, vertical: 4)
-                    Spacer()
-                }
-                .padding(.top, 4)
-                ProgressBar(value: 66)
-            }
-        }
+        Circle().fill(color).frame(width: 10, height: 10)
+            .overlay(Circle().stroke(theme.border, lineWidth: 0.5))
     }
 }

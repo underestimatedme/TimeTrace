@@ -24,8 +24,12 @@ final class WorkspaceFlowTests: XCTestCase {
         app.launch()
         tap("reports.open")
         XCTAssertTrue(app.staticTexts["报告"].waitForExistence(timeout: 5))
+        // The report leads with delivery (accepted Plans), then the time breakdown below the ChangeLog.
+        XCTAssertTrue(app.staticTexts["个 Plan 已验收"].waitForExistence(timeout: 3))
         // Human and AI time are shown as separate sections (never summed).
-        XCTAssertTrue(app.staticTexts["人工投入"].waitForExistence(timeout: 3))
+        let human = app.staticTexts["人工投入"]
+        for _ in 0..<8 where !human.isHittable { app.swipeUp() }
+        XCTAssertTrue(human.waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["AI 活跃（累计）"].exists)
     }
 

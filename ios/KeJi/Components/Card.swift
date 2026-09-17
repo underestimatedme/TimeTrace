@@ -17,15 +17,16 @@ struct Card<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) { content() }
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        return VStack(alignment: .leading, spacing: 0) { content() }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(padding)
-            .background(theme.bgCard)
-            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .stroke(borderColor ?? theme.border, lineWidth: 1)
-            )
+            // --g-panel 的半透明面板压在模糊背景上，再落一层低饱和冷色投影。
+            .background(theme.panel, in: shape)
+            .background(.ultraThinMaterial, in: shape)
+            .clipShape(shape)
+            .overlay(shape.stroke(borderColor ?? theme.border, lineWidth: 1))
+            .shadow(color: theme.shadowColor, radius: Theme.shadowBlur, y: Theme.shadowOffsetY)
     }
 }
 

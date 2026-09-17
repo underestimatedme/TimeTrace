@@ -230,7 +230,7 @@ enum SampleData {
         ]
 
         let settings = UserSettings(name: "刻迹用户", weeklyTimeGoalHours: 40, workStartHour: 9, workEndHour: 18,
-                                    defaultFocusMinutes: 45, streakDays: 12, theme: .claude, updatedAt: upd)
+                                    defaultFocusMinutes: 45, streakDays: 12, theme: .light, updatedAt: upd)
         let aiTools = [
             AIToolConnection(provider: .claude, name: "Claude Code", connected: true, lastSync: hoursAgo(0, 1)),
             AIToolConnection(provider: .codex, name: "Codex CLI", connected: true, lastSync: hoursAgo(0, 2)),

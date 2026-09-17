@@ -56,7 +56,8 @@ struct MetricCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(theme.bgCard)
+        .background(theme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(theme.border, lineWidth: 1))
     }
@@ -116,7 +117,7 @@ struct PillChip: View {
                 .foregroundStyle(selected ? theme.accent : theme.textSecondary)
                 .padding(.horizontal, horizontalPadding)
                 .padding(.vertical, 6)
-                .background(selected ? theme.accent.opacity(0.2) : theme.bgCard)
+                .background(selected ? theme.accent.opacity(0.2) : theme.panel)
                 .clipShape(Capsule())
         }
         .buttonStyle(.plain)

@@ -38,7 +38,7 @@ struct AppButton: View {
 
     private var background: Color {
         switch variant {
-        case .standard: return theme.bgCard
+        case .standard: return theme.panel
         case .secondary: return theme.bgElevated
         case .ghost: return .clear
         case .danger: return theme.danger.opacity(0.2)

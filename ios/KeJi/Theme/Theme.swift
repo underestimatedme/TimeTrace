@@ -22,6 +22,21 @@ struct Theme: Equatable {
 
     var isDark: Bool { name != .light }
 
+    /// --g-panel 的透明度：浅色玻璃面板是 #ffffffa8，深色稿的 #1b2d43 是实色。
+    var panelOpacity: Double { isDark ? 1 : 168.0 / 255 }
+
+    /// --g-shadow：浅色 #91b4e322，深色 #0003。低饱和、偏冷的投影。
+    var shadowColor: Color {
+        isDark ? Color.black.opacity(0.2) : Color(hex: "#91b4e3").opacity(34.0 / 255)
+    }
+
+    /// --g-panel 本身：半透明面板，要叠在模糊背景之上才有玻璃感。
+    var panel: Color { bgCard.opacity(panelOpacity) }
+
+    /// glass.css 的投影几何：box-shadow 0 8px 28px → SwiftUI 的 radius 14 / y 8。
+    static let shadowBlur: CGFloat = 14
+    static let shadowOffsetY: CGFloat = 8
+
     static func named(_ name: ThemeName) -> Theme {
         switch name {
         case .claude: return .claude

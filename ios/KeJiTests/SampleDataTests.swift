@@ -14,7 +14,7 @@ final class SampleDataTests: XCTestCase {
         XCTAssertEqual(bundle.state.aiTools.count, 4)
         XCTAssertEqual(bundle.state.activeFocus?.taskId, "t2")
         XCTAssertEqual(bundle.state.settings.streakDays, 12)
-        XCTAssertEqual(bundle.state.settings.theme, .claude)
+        XCTAssertEqual(bundle.state.settings.theme, .light)
     }
 
     func testRelativeDates() {

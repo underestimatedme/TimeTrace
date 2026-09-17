@@ -42,4 +42,18 @@ final class ThemeTests: XCTestCase {
     func testLightThemeIsNotDark() {
         XCTAssertFalse(Theme.light.isDark)
     }
+
+    /// 玻璃面板叠在模糊背景之上：--g-panel 是 #ffffffa8，--g-shadow 是 #91b4e322。
+    /// 这两个值放在 Theme 里，避免散落到各个 View。
+    func testLightThemeCarriesGlassSurfaceTokens() {
+        XCTAssertEqual(Theme.light.panelOpacity, 168.0 / 255, accuracy: 0.002,
+                       "panelOpacity should be the a8 alpha of --g-panel")
+        XCTAssertEqual(Theme.light.shadowColor, Color(hex: "#91b4e3").opacity(34.0 / 255),
+                       "shadowColor should be --g-shadow")
+    }
+
+    /// 深色稿的 --g-panel(#1b2d43) 是实色，没有透明度。
+    func testDarkThemesUseOpaquePanels() {
+        XCTAssertEqual(Theme.claude.panelOpacity, 1, accuracy: 0.002)
+    }
 }

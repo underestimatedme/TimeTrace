@@ -57,6 +57,52 @@ struct ReportPhaseFacts: Codable, Equatable {
     var evidenceCoverage: Double
 }
 
+/// Plans belonging to a report scope; a project report never leaks another project's plans.
+func plansInScope(_ scope: ReportScope, tasks: [TaskItem], plans: [PlanItem]) -> [PlanItem] {
+    switch scope {
+    case .all:
+        return plans
+    case .project(let projectId):
+        let taskIds = Set(tasks.filter { $0.projectId == projectId }.map(\.id))
+        return plans.filter { taskIds.contains($0.taskId) }
+    }
+}
+
+/// 报告的「交付」视角：按验收事实记录的 ChangeLog（design/src/review 的报告页）。
+/// 只统计真实存在的 Plan —— 本地草稿（`draft-` 前缀）不是交付，不计入。
+struct ReportChangeLog: Equatable {
+    struct Row: Equatable, Identifiable {
+        var id: String
+        var title: String
+        var status: PlanState
+        var isAccepted: Bool { status == .accepted }
+    }
+
+    var rows: [Row]
+
+    var acceptedCount: Int { rows.filter(\.isAccepted).count }
+    var totalCount: Int { rows.count }
+    var isEmpty: Bool { rows.isEmpty }
+
+    /// 「N 个 Plan 已验收」——没有 Plan 时显示 0，不编造交付量。
+    var deliveryText: String { "\(acceptedCount) 个 Plan 已验收" }
+
+    /// 设计稿的「下一步建议」，按当前 Plan 状态给出，不编造进展。
+    var nextStepAdvice: String {
+        if rows.contains(where: { $0.status == .awaitingReview }) { return "先确认待验收的结果，再安排后续工作。" }
+        if rows.contains(where: { $0.status == .waitingQuota }) { return "等待工具额度核验，同时安排可并行的人工工作。" }
+        if rows.isEmpty { return "先为项目创建任务与 Plan。" }
+        return "检查剩余计划与已验收成果，安排下一步。"
+    }
+
+    init(plans: [PlanItem], tasks: [TaskItem], scope: ReportScope) {
+        rows = plansInScope(scope, tasks: tasks, plans: plans)
+            .filter { !$0.id.hasPrefix("draft-") }
+            .sorted { ($0.updatedAt, $0.id) > ($1.updatedAt, $1.id) }
+            .map { Row(id: $0.id, title: $0.title, status: $0.status) }
+    }
+}
+
 enum ReportMeasurement: Equatable {
     case empty, unknown, seconds(Int)
     var text: String {

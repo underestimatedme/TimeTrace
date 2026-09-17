@@ -71,6 +71,37 @@ final class ReportsScopeTests: XCTestCase {
                     endedAt: nil, durationSeconds: 60, source: .timer, confidence: .exact, note: nil, updatedAt: Date())
     }
 
+    private func plan(_ id: String, task: String, status: PlanState) -> PlanItem {
+        PlanItem(id: id, taskId: task, revision: 1, title: id, priority: 2, status: status,
+                 criteria: [], dependsOn: [], estimatedHumanMinutes: 0, estimatedAiMinutes: 0,
+                 workWeight: 1, risk: 2, executionPolicy: .balanced, createdAt: Date(), updatedAt: Date())
+    }
+
+    /// 报告按「已验收的 Plan」记交付：本地草稿不是交付，项目报告不串项目。
+    func testChangeLogCountsOnlyRealPlansAndStaysInScope() {
+        let tasks = [task("t1", project: "A"), task("t2", project: "B")]
+        let plans = [plan("p1", task: "t1", status: .accepted),
+                     plan("p2", task: "t1", status: .awaitingReview),
+                     plan("p3", task: "t2", status: .accepted),
+                     plan("draft-x", task: "t1", status: .draft)]
+
+        let all = ReportChangeLog(plans: plans, tasks: tasks, scope: .all)
+        XCTAssertEqual(all.totalCount, 3, "the local draft is not a delivery")
+        XCTAssertEqual(all.acceptedCount, 2)
+
+        let projectA = ReportChangeLog(plans: plans, tasks: tasks, scope: .project("A"))
+        XCTAssertEqual(projectA.totalCount, 2)
+        XCTAssertEqual(projectA.acceptedCount, 1)
+        XCTAssertEqual(projectA.deliveryText, "1 个 Plan 已验收")
+        XCTAssertFalse(projectA.rows.contains { $0.id == "p3" }, "project report must not leak project B")
+        XCTAssertEqual(projectA.nextStepAdvice, "先确认待验收的结果，再安排后续工作。")
+
+        let none = ReportChangeLog(plans: [], tasks: tasks, scope: .all)
+        XCTAssertTrue(none.isEmpty)
+        XCTAssertEqual(none.deliveryText, "0 个 Plan 已验收")
+        XCTAssertEqual(none.nextStepAdvice, "先为项目创建任务与 Plan。")
+    }
+
     func testProjectScopeStaysWithinProject() {
         let tasks = [task("t1", project: "A"), task("t2", project: "B")]
         let sessions = [session("s1", task: "t1"), session("s2", task: "t2"), session("s3", task: "t1")]

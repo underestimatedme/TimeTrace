@@ -74,6 +74,24 @@ struct PlanDetailView: View {
             Text("服务端策略「\(plan.executionPolicy.mode)」暂不支持在此修改。")
                 .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
         }
+        Toggle(isOn: Binding(
+            get: { plan.executionPolicy.allowAutoResume },
+            set: { allow in Task { await store.setPlanAutoResume(plan.id, allow: allow) } })) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("自然恢复后自动续跑").font(Typo.sans(Typo.sm)).foregroundStyle(theme.text)
+                Text("原会话 · 已有订阅 · 不额外付费")
+                    .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
+            }
+        }
+        .tint(theme.accent)
+        .disabled(!canEditAutoResume(plan) || store.workspaceClient == nil || busy)
+        .padding(.top, 12)
+        .accessibilityIdentifier("plan.autoresume")
+        if !plan.executionPolicy.allowAutoResume {
+            Text("额度恢复后只补额度、不自动运行，需要在此手动继续。")
+                .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted).padding(.top, 6)
+        }
+
         Text(policyNote(plan))
             .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
             .padding(.top, 6).padding(.bottom, 20)

@@ -86,4 +86,19 @@ final class WorkspaceContractTests: XCTestCase {
         XCTAssertEqual(sent?["mode"] as? String, "speed")
         XCTAssertEqual(sent?["max_additional_spend_minor"] as? Int, 0)
     }
+    /// 自动续跑可以在等待额度时修改（设计稿：关闭后只补额度、需手动继续）；已结束的 Plan 不可改。
+    func testAutoResumeStaysEditableWhileWaitingButNotAfterTheEnd() {
+        func plan(_ id: String, _ status: PlanState) -> PlanItem {
+            PlanItem(id: id, taskId: "t", revision: 1, title: id, priority: 2, status: status, criteria: [],
+                     dependsOn: [], estimatedHumanMinutes: 0, estimatedAiMinutes: 0, workWeight: 1, risk: 2,
+                     executionPolicy: .balanced, createdAt: Date(), updatedAt: Date())
+        }
+        for open: PlanState in [.draft, .ready, .queued, .running, .waitingQuota, .waitingLocalAuth, .awaitingReview] {
+            XCTAssertTrue(canEditAutoResume(plan("p", open)), "\(open) should allow changing auto-resume")
+        }
+        for closed: PlanState in [.accepted, .cancelled, .failed, .unknown] {
+            XCTAssertFalse(canEditAutoResume(plan("p", closed)), "\(closed) is final")
+        }
+        XCTAssertFalse(canEditAutoResume(plan("draft-t", .ready)))
+    }
 }

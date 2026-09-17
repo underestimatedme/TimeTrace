@@ -86,6 +86,12 @@ func canEditExecutionPolicy(_ plan: PlanItem) -> Bool {
     (plan.status == .draft || plan.status == .ready) && !plan.id.hasPrefix("draft-")
 }
 
+/// 自动续跑与分派策略不同：等待额度时仍要能关掉它（关掉后只补额度、需手动继续），
+/// 只有已经结束的 Plan 不能再改。
+func canEditAutoResume(_ plan: PlanItem) -> Bool {
+    ![.accepted, .cancelled, .failed, .unknown].contains(plan.status) && !plan.id.hasPrefix("draft-")
+}
+
 /// The unit of AI/human execution beneath a Task (项目 → 任务 → Plan).
 struct PlanItem: Codable, Identifiable, Equatable {
     var id: String

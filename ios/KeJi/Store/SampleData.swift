@@ -25,10 +25,10 @@ enum SampleData {
                         source: "runner", confidence: "exact")
         }
         return AccountQuota(pools: [
-            AccountQuotaPool(poolId: "pool-codex", availability: "available",
+            AccountQuotaPool(poolId: "pool-codex", provider: "codex", availability: "available",
                              windows: [win("pool-codex", "short", used: 20, fresh: true),
                                        win("pool-codex", "weekly", used: 45, fresh: true)]),
-            AccountQuotaPool(poolId: "pool-claude", availability: "unknown",
+            AccountQuotaPool(poolId: "pool-claude", provider: "claude", availability: "unknown",
                              windows: [win("pool-claude", "weekly", used: 100, fresh: false)]),
         ], observedAt: now)
     }

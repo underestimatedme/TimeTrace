@@ -38,3 +38,63 @@ extension QuotaWindow {
         }
     }
 }
+
+/// 一个额度池在 AI 页上的呈现：短时窗口做主数值，周窗口做副行。
+/// 读数过期只说「待核验」，没有读数只说「未知」——都不画进度条。
+struct ToolQuotaCard: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let capability: String
+    let headline: String
+    let meterPercent: Double?
+    let detail: String
+    let availability: String
+    let footnote: String
+
+    init(pool: AccountQuotaPool, now: Date = Date()) {
+        id = pool.poolId
+        name = ToolQuotaCard.toolName(provider: pool.provider, poolId: pool.poolId)
+        capability = ToolQuotaCard.capability(provider: pool.provider)
+        availability = availabilityLabel(pool.availability)
+
+        let short = pool.windows.first { ["short", "five_hour", "primary"].contains($0.scope) }
+        let weekly = pool.windows.first { ["weekly", "week"].contains($0.scope) }
+        let headlineWindow = short ?? pool.windows.first
+        headline = headlineWindow?.displayLabel ?? "未知"
+        meterPercent = headlineWindow.flatMap { $0.isFresh(now: now) ? $0.remainingPercent : nil }
+
+        if let weekly, weekly.id != headlineWindow?.id {
+            if !weekly.isFresh(now: now) { detail = "周额度待核验" }
+            else if let remaining = weekly.remainingPercent { detail = "周额度剩余 \(Int(remaining.rounded()))%" }
+            else { detail = "周额度未知" }
+        } else {
+            detail = "账号额度：\(availabilityLabel(pool.availability))"
+        }
+
+        if let observed = headlineWindow?.observedAt {
+            footnote = "\(headlineWindow?.scopeLabel ?? "")窗口 · \(Format.time(observed)) 更新"
+        } else {
+            footnote = "尚无采样"
+        }
+    }
+
+    /// 只在认识的 provider 上给工具名，不认识就显示池 id，不瞎猜。
+    private static func toolName(provider: String, poolId: String) -> String {
+        switch provider {
+        case "claude": return "Claude Code"
+        case "codex": return "Codex"
+        case "gemini": return "Gemini CLI"
+        case "cursor": return "Cursor"
+        default: return poolId
+        }
+    }
+
+    /// 能力分层来自 Runner 的实际适配情况，不因为「已连接」就声称可派发。
+    private static func capability(provider: String) -> String {
+        switch provider {
+        case "claude", "codex": return "可派发 · 可恢复"
+        case "cursor": return "记录 · 提醒"
+        default: return "记录 · 待适配"
+        }
+    }
+}

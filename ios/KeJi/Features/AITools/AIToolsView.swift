@@ -9,48 +9,24 @@ struct AIToolsView: View {
     @State private var pairingCode = ""
     @State private var pairingMessage: String?
     @State private var pendingInspection: DeviceAuthorizationInspection?
-
-    private func description(_ provider: AIProvider) -> String {
-        switch provider {
-        case .claude: return "Claude Code 桌面 Agent"
-        case .codex: return "Codex CLI 命令行工具"
-        case .chatgpt: return "ChatGPT API 集成"
-        case .gemini: return "Google Gemini API"
-        case .other: return "其他 AI 工具"
-        }
-    }
+    @State private var selectedPool: AccountQuotaPool?
 
     var body: some View {
-        SubPageScaffold(title: "AI 工具管理") {
-            Text("通过 Valley 将 iPhone 上的任务安全派发到已授权的 Mac；Claude/Codex 账号始终留在电脑本地。")
+        SubPageScaffold(title: "你的 AI") {
+            Text("每个工具，都有清晰的工作边界。任务经 Valley 派发到已授权的 Mac，Claude/Codex 账号始终留在电脑本地。")
                 .font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary).padding(.bottom, 24)
 
             if let quota = store.accountQuota, !quota.pools.isEmpty {
-                SectionTitle("账号额度")
-                VStack(spacing: 8) {
+                SectionTitle("工具与额度")
+                VStack(spacing: 12) {
                     ForEach(quota.pools) { pool in
-                        Card {
-                            HStack {
-                                Text(pool.poolId).font(Typo.sans(Typo.sm, weight: .medium)).foregroundStyle(theme.text)
-                                Spacer()
-                                Text(availabilityLabel(pool.availability))
-                                    .font(Typo.sans(Typo.xs))
-                                    .foregroundStyle(pool.availability == "available" ? theme.accent : theme.warning)
-                            }
-                            .padding(.bottom, 8)
-                            ForEach(pool.windows) { w in
-                                HStack {
-                                    Text(w.scopeLabel).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
-                                    Spacer()
-                                    Text(w.displayLabel).font(Typo.mono(Typo.sm)).foregroundStyle(theme.text)
-                                }
-                                .accessibilityIdentifier("quota.\(w.poolId).\(w.scope)")
-                            }
-                        }
+                        Button { selectedPool = pool } label: { toolCard(pool) }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("tool.\(pool.poolId)")
                     }
                 }
                 .padding(.bottom, 8)
-                Text("倒计时归零显示为待核验，而非满额；未知不等于可用。")
+                Text("倒计时归零显示为待核验，而非满额；未知不等于可用。点开工具可以看到每个额度窗口的明细。")
                     .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted).padding(.bottom, 24)
             }
 
@@ -98,32 +74,13 @@ struct AIToolsView: View {
                 }
             }
 
-            VStack(spacing: 12) {
-                ForEach(store.aiTools) { tool in
-                    Card {
-                        HStack(alignment: .center) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(tool.name).font(Typo.sans(Typo.sm, weight: .medium)).foregroundStyle(theme.text)
-                                Text(description(tool.provider)).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
-                                if let last = tool.lastSync {
-                                    Text("上次同步 \(Format.relative(last, now: store.now))")
-                                        .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted).padding(.top, 2)
-                                }
-                            }
-                            Spacer()
-                            TintPill(text: tool.connected ? "已连接" : "未连接",
-                                     color: tool.connected ? theme.success : theme.textMuted, horizontal: 10, vertical: 4)
-                        }
-                    }
-                }
-            }
-
             Card(borderColor: theme.accent.opacity(0.1)) {
                 Text("任务 Prompt 会经 HTTPS 发送并加密存储于 Valley；代码、CLI 登录凭据和完整输出不会离开电脑。")
                     .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted).lineSpacing(4)
             }
             .padding(.top, 24)
         }
+        .sheet(item: $selectedPool) { pool in poolDetail(pool) }
         .task { if sync.isLoggedIn { await remote.loadRunners() } }
         .confirmationDialog("确认绑定这台电脑？", isPresented: Binding(
             get: { pendingInspection != nil }, set: { if !$0 { pendingInspection = nil } }
@@ -134,6 +91,71 @@ struct AIToolsView: View {
             if let info = pendingInspection {
                 Text("\(info.deviceName) · \(info.platform) · v\(info.clientVersion)\n请求时间：\(Format.relative(info.requestedAt, now: Date()))\n权限：仅接收任务、运行本机已登记仓库、回报状态及取消进程")
             }
+        }
+    }
+
+    /// 一个工具一张卡：主数值 + 进度条 + 周额度副行，读数不新鲜就不画进度条。
+    private func toolCard(_ pool: AccountQuotaPool) -> some View {
+        let card = ToolQuotaCard(pool: pool, now: store.now)
+        return Card {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(card.name).font(Typo.sans(Typo.base, weight: .medium)).foregroundStyle(theme.text)
+                    Text(card.capability).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right").font(.system(size: 13)).foregroundStyle(theme.textMuted)
+            }
+            .padding(.bottom, 14)
+
+            HStack(alignment: .firstTextBaseline) {
+                Text(card.headline).font(Typo.sans(Typo.xl2, weight: .medium)).foregroundStyle(theme.text)
+                Spacer(minLength: 8)
+                Text(card.availability).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
+            }
+            if let percent = card.meterPercent {
+                ProgressBar(value: percent).padding(.top, 8)
+            }
+            Text(card.detail).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary).padding(.top, 10)
+            Text(card.footnote).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted).padding(.top, 2)
+        }
+    }
+
+    /// 额度池明细：每个窗口一行，写明来源与采样时间。
+    private func poolDetail(_ pool: AccountQuotaPool) -> some View {
+        let card = ToolQuotaCard(pool: pool, now: store.now)
+        return NavigationStack {
+            Form {
+                Section("账号额度") {
+                    LabeledContent("工具", value: card.name)
+                    LabeledContent("能力", value: card.capability)
+                    LabeledContent("可用性", value: card.availability)
+                    LabeledContent("额度池", value: pool.poolId)
+                }
+                Section("额度窗口") {
+                    if pool.windows.isEmpty {
+                        Text("还没有采到这个池的额度样本。")
+                    }
+                    ForEach(pool.windows) { window in
+                        VStack(alignment: .leading, spacing: 4) {
+                            LabeledContent(window.scopeLabel, value: window.displayLabel)
+                            Text("采样 \(Format.time(window.observedAt)) · 来源 \(window.source) · 置信度 \(window.confidence)")
+                                .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
+                            if let reset = window.resetAt {
+                                Text("预计 \(Format.time(reset)) 后可核验")
+                                    .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
+                            }
+                        }
+                        .accessibilityIdentifier("quota.\(window.poolId).\(window.scope)")
+                    }
+                }
+                Section {
+                    Text("额度耗尽时 Plan 进入等待，不会转为付费执行。是否自然恢复后自动续跑，在每个 Plan 的详情里单独设置。")
+                        .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
+                }
+            }
+            .navigationTitle(card.name)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { selectedPool = nil } } }
         }
     }
 

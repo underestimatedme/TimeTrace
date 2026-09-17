@@ -148,7 +148,7 @@ final class FunctionalUITests: XCTestCase {
         }
         for (route, expected) in [
             ("projects", "项目与目标"), ("projects/p1", "刻迹 App"),
-            ("goals/g1", "目标详情"), ("ai-tools", "AI 工具管理"),
+            ("goals/g1", "目标详情"), ("ai-tools", "你的 AI"),
             ("account", "账号"), ("tasks/missing", "任务不存在")
         ] {
             launch(route)

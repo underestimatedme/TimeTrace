@@ -58,14 +58,15 @@ struct Theme: Equatable {
         ai: Color(hex: "#b08cff"), aiDim: Color(hex: "#8a64d8"),
         success: Color(hex: "#4f9d7a"), warning: Color(hex: "#c2a24a"), danger: Color(hex: "#d06464"))
 
+    /// 冰晶白 —— design/src/review/glass.css 的 `--g-*`，色彩的唯一真相源。
     static let light = Theme(
         name: .light,
-        appBg: Color(hex: "#e6e2da"), bg: Color(hex: "#f5f2ec"), bgElevated: Color(hex: "#fbf9f4"),
-        bgCard: Color(hex: "#ffffff"), bgHover: Color(hex: "#efece4"), border: Color(hex: "#e0dcd2"),
-        text: Color(hex: "#2a2622"), textSecondary: Color(hex: "#6b655d"), textMuted: Color(hex: "#9a948b"),
-        accent: Color(hex: "#c2643a"), accentDim: Color(hex: "#a8512c"),
-        ai: Color(hex: "#4a6fa0"), aiDim: Color(hex: "#385780"),
-        success: Color(hex: "#3f7a54"), warning: Color(hex: "#9a7a30"), danger: Color(hex: "#b04a4a"))
+        appBg: Color(hex: "#eaf1f9"), bg: Color(hex: "#f5f9ff"), bgElevated: Color(hex: "#f8fbff"),
+        bgCard: Color(hex: "#ffffff"), bgHover: Color(hex: "#e8f1ff"), border: Color(hex: "#dde8f7"),
+        text: Color(hex: "#14213b"), textSecondary: Color(hex: "#61738f"), textMuted: Color(hex: "#697e9c"),
+        accent: Color(hex: "#1680ff"), accentDim: Color(hex: "#0f66d0"),
+        ai: Color(hex: "#48b8ef"), aiDim: Color(hex: "#2e94c6"),
+        success: Color(hex: "#288873"), warning: Color(hex: "#88692b"), danger: Color(hex: "#b5435d"))
 }
 
 /// Port of design/src/lib/themes.ts.
@@ -88,9 +89,9 @@ struct ThemeMeta: Identifiable {
         ThemeMeta(id: .cursor, name: "靛蓝 · Cursor", tagline: "冷峻蓝紫，理性的科技质感",
                   swatchBg: Color(hex: "#0a0c11"), swatchCard: Color(hex: "#181d29"),
                   swatchAccent: Color(hex: "#5b8dff"), swatchAI: Color(hex: "#b08cff")),
-        ThemeMeta(id: .light, name: "晨光 · Light", tagline: "纸张般的暖白，日间清晰可读",
-                  swatchBg: Color(hex: "#f5f2ec"), swatchCard: Color(hex: "#ffffff"),
-                  swatchAccent: Color(hex: "#c2643a"), swatchAI: Color(hex: "#4a6fa0")),
+        ThemeMeta(id: .light, name: "冰晶白", tagline: "冰晶白底、冰蓝强调的浅色玻璃",
+                  swatchBg: Color(hex: "#f5f9ff"), swatchCard: Color(hex: "#ffffff"),
+                  swatchAccent: Color(hex: "#1680ff"), swatchAI: Color(hex: "#48b8ef")),
     ]
 
     static func meta(for id: ThemeName) -> ThemeMeta { all.first { $0.id == id } ?? all[0] }

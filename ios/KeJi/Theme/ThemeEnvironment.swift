@@ -1,7 +1,7 @@
 import SwiftUI
 
 private struct ThemeKey: EnvironmentKey {
-    static let defaultValue: Theme = .claude
+    static let defaultValue: Theme = .light
 }
 
 extension EnvironmentValues {

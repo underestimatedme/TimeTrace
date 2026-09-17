@@ -179,7 +179,7 @@ struct UserSettings: Codable, Equatable {
 
     static func defaults(now: Date = Date()) -> UserSettings {
         UserSettings(name: "刻迹用户", weeklyTimeGoalHours: 40, workStartHour: 9, workEndHour: 18,
-                     defaultFocusMinutes: 45, streakDays: 0, theme: .claude, updatedAt: now)
+                     defaultFocusMinutes: 45, streakDays: 0, theme: .light, updatedAt: now)
     }
 
     init(name: String, weeklyTimeGoalHours: Int, workStartHour: Int, workEndHour: Int,

@@ -60,12 +60,15 @@ struct ReportPhaseFacts: Codable, Equatable {
 enum ReportMeasurement: Equatable {
     case empty, unknown, seconds(Int)
     var text: String {
-        switch self { case .empty: return "无记录"; case .unknown: return "未知"; case .seconds(let seconds): return Format.duration(seconds) }
+        switch self { case .empty: return "无记录"; case .unknown: return "未测量"; case .seconds(let seconds): return Format.duration(seconds) }
     }
 }
 
 /// The screen and export share this projection, including project filtering.
 struct ReportPresentation {
+    /// 设计稿：样本不足不显示假总分。
+    static let insufficientSampleText = "样本不足，暂不计算"
+
     var human: ReportMeasurement
     var ai: ReportMeasurement
     var waiting: ReportMeasurement

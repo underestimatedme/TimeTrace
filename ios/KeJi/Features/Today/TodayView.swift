@@ -146,16 +146,19 @@ struct TodayView: View {
         return Card(borderColor: theme.ai.opacity(0.2)) {
             Text("\(task.aiProvider?.rawValue ?? "AI") 正在进行").font(Typo.sans(Typo.xs)).foregroundStyle(theme.ai).padding(.bottom, 4)
             Text(task.title).font(Typo.sans(Typo.sm, weight: .medium)).foregroundStyle(theme.text)
-            clockLine("已运行 \(Format.duration(session?.durationSeconds ?? 0))")
+            clockLine("已运行 \(Format.durationOrUnmeasured(session?.durationSeconds))")
             HStack { AppButton("查看执行", variant: .ghost, size: .sm) { router.push(.ai(task.id)) } }.padding(.top, 12)
         }
     }
 
     private func waitingCard(_ task: TaskItem) -> some View {
         let session = store.timeSessions.first { $0.taskId == task.id && $0.type == .waitingHuman && $0.endedAt == nil }
-        let waited = session.map { store.secondsSince($0.startedAt, at: store.now) } ?? 0
+        // 没有等待会话＝没测到等待时长，按契约显示「未测量」，不能算成 0 秒。
+        let waited: Int? = session.map { store.secondsSince($0.startedAt, at: store.now) }
+        let provider = task.aiProvider?.rawValue ?? "AI"
         return Card(borderColor: theme.warning.opacity(0.2)) {
-            Text("\(task.aiProvider?.rawValue ?? "AI") 已完成，等待审核 \(Format.duration(waited))")
+            Text(waited.map { "\(provider) 结果待确认 · 已等待 \(Format.duration($0))" }
+                 ?? "\(provider) 结果待确认 · 等待时长未测量")
                 .font(Typo.sans(Typo.xs)).foregroundStyle(theme.warning).monospacedDigit().padding(.bottom, 4)
             Text(task.title).font(Typo.sans(Typo.sm, weight: .medium)).foregroundStyle(theme.text)
             HStack(spacing: 8) {

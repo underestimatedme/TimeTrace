@@ -16,7 +16,7 @@ enum RemoteJobStatus: String, Codable {
         case .waitingQuota: return "等待额度"
         case .waitingLocalAuth: return "等待电脑登录"
         case .waitingInput: return "等待输入"
-        case .awaitingReview: return "等待审核"
+        case .awaitingReview: return "结果待确认"
         case .completed: return "已完成"
         case .failed: return "执行失败"
         case .cancelled: return "已取消"

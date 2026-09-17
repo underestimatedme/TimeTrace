@@ -69,10 +69,11 @@ struct AIExecutionView: View {
         .padding(.bottom, 24)
 
         TwoColumnGrid {
-            StatCard(label: "已运行", value: Format.duration(execution?.activeSeconds ?? 0), valueColor: theme.ai, valueSize: Typo.lg)
-            StatCard(label: "估算费用", value: Format.cost(execution?.estimatedCost ?? 0), valueSize: Typo.lg)
-            StatCard(label: "Token 使用", value: "\(Format.number(execution?.tokenInput ?? 0)) / \(Format.number(execution?.tokenOutput ?? 0))")
-            StatCard(label: "工具调用", value: "\(execution?.toolCallCount ?? 0)", valueSize: Typo.lg)
+            // 没有执行记录＝没测到，显示「未测量」而不是 0 / $0.00。
+            StatCard(label: "已运行", value: Format.durationOrUnmeasured(execution?.activeSeconds), valueColor: theme.ai, valueSize: Typo.lg)
+            StatCard(label: "估算费用", value: execution.map { Format.cost($0.estimatedCost) } ?? "未测量", valueSize: Typo.lg)
+            StatCard(label: "Token 使用", value: execution.map { "\(Format.number($0.tokenInput)) / \(Format.number($0.tokenOutput))" } ?? "未测量")
+            StatCard(label: "工具调用", value: execution.map { "\($0.toolCallCount)" } ?? "未测量", valueSize: Typo.lg)
         }
         .padding(.bottom, 24)
 

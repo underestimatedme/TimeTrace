@@ -29,9 +29,17 @@ final class ReportsScopeTests: XCTestCase {
         let unknown = ReportPhaseFact(id: "unknown", taskId: "A", track: .ai, state: "unknown", start: start, end: end)
         XCTAssertEqual(ReportPresentation(facts: [a,unknown]).ai, .unknown)
         XCTAssertEqual(ReportPresentation(facts: []).ai, .empty)
-        XCTAssertEqual(ReportMeasurement.unknown.text, "未知")
+        XCTAssertEqual(ReportMeasurement.unknown.text, "未测量")
         XCTAssertEqual(ReportMeasurement.empty.text, "无记录")
         XCTAssertEqual(ReportMeasurement.seconds(0).text, "0 秒")
+    }
+
+    /// 未知不等于零：没有测量到的时长必须显示「未测量」，样本不足时不显示总分。
+    func testUnmeasuredNeverRendersAsZero() {
+        XCTAssertEqual(Format.durationOrUnmeasured(nil), "未测量")
+        XCTAssertEqual(Format.durationOrUnmeasured(0), "0 秒")
+        XCTAssertEqual(Format.durationOrUnmeasured(90), "1 分 30 秒")
+        XCTAssertEqual(ReportPresentation.insufficientSampleText, "样本不足，暂不计算")
     }
 
     func testLocalProjectionUsesIANAClippingIncludingDSTAndOpenUnknown() {

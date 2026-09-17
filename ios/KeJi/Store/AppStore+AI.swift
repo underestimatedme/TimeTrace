@@ -204,7 +204,7 @@ extension AppStore {
                                           startedAt: reference, source: .inferred, confidence: .estimated))
                 ae.status = .completed
                 ae.endedAt = reference
-                ae.resultSummary = "执行完成，等待审核"
+                ae.resultSummary = "结果待确认"
                 ae.logs.append(AIExecutionLog(time: timeLabel(reference), message: AppStore.aiSteps[stepIdx]))
                 ae.updatedAt = reference
                 markDirty(.aiExecutions, ae.id)

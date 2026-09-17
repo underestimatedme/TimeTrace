@@ -93,7 +93,7 @@ struct ReportsView: View {
         if case .all = scope, let report, report.hasTotal, let total = report.totalScore {
             return "生产力总分 \(Int(total.rounded()))"
         }
-        return "样本覆盖不足，暂不显示总分。"
+        return ReportPresentation.insufficientSampleText
     }
 
     private func presentation(sessions: [TimeSession], day: String) -> ReportPresentation {

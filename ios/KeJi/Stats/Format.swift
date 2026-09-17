@@ -36,6 +36,12 @@ enum Format {
 
     static func duration(_ seconds: Double) -> String { duration(Int(seconds.rounded(.down))) }
 
+    /// `nil` 表示没有测量到，按数据契约必须显示「未测量」——不能 `?? 0` 渲染成「0 秒」。
+    static func durationOrUnmeasured(_ seconds: Int?) -> String {
+        guard let seconds else { return "未测量" }
+        return duration(seconds)
+    }
+
     static func durationShort(_ seconds: Int) -> String {
         let h = seconds / 3600
         let m = (seconds % 3600) / 60

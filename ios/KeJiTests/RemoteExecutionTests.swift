@@ -18,6 +18,11 @@ final class RemoteExecutionTests: XCTestCase {
         XCTAssertNil(job.prompt)
     }
 
+    /// 设计稿把这个状态的措辞从「等待审核」改成「结果待确认」，因为它要对应「可验收」这个动作。
+    func testAwaitingReviewReadsAsPendingConfirmation() {
+        XCTAssertEqual(RemoteJobStatus.awaitingReview.label, "结果待确认")
+    }
+
     func testDispatchIncludesExpectedTaskRevision() throws {
         let request = RemoteJobRequest(taskId: "t1", runnerId: "r1", workspaceId: "w1",
                                        toolProfileId: "codex-default", prompt: "work",

@@ -63,7 +63,7 @@ final class StoreReducerTests: XCTestCase {
         let exec = store.aiExecutions.first { $0.id == execId }
         XCTAssertEqual(exec?.status, .completed)
         XCTAssertEqual(exec?.activeSeconds, 180)
-        XCTAssertEqual(exec?.resultSummary, "执行完成，等待审核")
+        XCTAssertEqual(exec?.resultSummary, "结果待确认")
         XCTAssertEqual(store.task("t7")?.status, .waitingHuman)
         XCTAssertEqual(store.timeSessions.filter { $0.taskId == "t7" && $0.type == .waitingHuman && $0.endedAt == nil }.count, 1)
         // the ai_active session accrued one second per tick

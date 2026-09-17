@@ -6,7 +6,14 @@ struct TimeFlowView: View {
     @Environment(AppStore.self) private var store
 
     enum Range: String, CaseIterable { case today, week }
+    /// 设计稿的轨道筛选：全部 / 我 / AI。
+    enum Lane: String, CaseIterable {
+        case all, human, ai
+        var label: String { switch self { case .all: return "全部"; case .human: return "我"; case .ai: return "AI" } }
+    }
     @State private var range: Range = .today
+    @State private var lane: Lane = .all
+    @State private var projectId: String?
 
     static func color(for type: TimeSessionType, theme: Theme) -> Color {
         switch type {
@@ -29,15 +36,39 @@ struct TimeFlowView: View {
             .filter { range == .today ? Format.dayKey($0.startedAt) == today : Format.dayKey($0.startedAt) >= weekStart }
             .sorted { $0.startedAt < $1.startedAt }
         let parallel = Stats.parallelStats(store.timeSessions, day: range == .today ? today : nil)
+        let lanes = TimelineLanes(sessions: filtered, tasks: store.tasks,
+                                  scope: projectId.map { ReportScope.project($0) } ?? .all)
 
         TabPage {
-            PageTitle(title: "时间流").padding(.bottom, 16)
+            PageTitle(title: "时间线").padding(.bottom, 16)
 
             HStack(spacing: 8) {
                 PillChip(label: "今天", selected: range == .today, horizontalPadding: 16) { range = .today }
                 PillChip(label: "本周", selected: range == .week, horizontalPadding: 16) { range = .week }
+                Spacer(minLength: 8)
+                Menu {
+                    Button("全部项目") { projectId = nil }
+                    ForEach(store.projects) { project in
+                        Button(project.name) { projectId = project.id }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(projectId.flatMap { id in store.projects.first { $0.id == id }?.name } ?? "全部项目")
+                            .font(Typo.sans(Typo.xs)).lineLimit(1)
+                        Image(systemName: "chevron.down").font(.system(size: 10))
+                    }
+                    .foregroundStyle(theme.accent)
+                }
+                .accessibilityIdentifier("timeline.project")
             }
+            .padding(.bottom, 12)
+
+            Picker("轨道", selection: $lane) {
+                ForEach(Lane.allCases, id: \.self) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
             .padding(.bottom, 16)
+            .accessibilityIdentifier("timeline.lane")
 
             TwoColumnGrid {
                 MetricCard(label: "实际经过", value: Format.duration(parallel.wallClockSeconds))
@@ -48,18 +79,53 @@ struct TimeFlowView: View {
             .padding(.bottom, 24)
 
             SectionTitle("时间线")
-            if filtered.isEmpty {
+            if lanes.isEmpty {
                 Card {
-                    Text("暂无时间记录").font(Typo.sans(Typo.sm)).foregroundStyle(theme.textMuted)
+                    Text("这个范围还没有时间记录").font(Typo.sans(Typo.sm)).foregroundStyle(theme.textMuted)
                         .frame(maxWidth: .infinity).padding(.vertical, 32)
                 }
             } else {
-                VStack(spacing: 4) { ForEach(filtered) { sessionRow($0) } }
+                HStack(alignment: .top, spacing: 12) {
+                    if lane != .ai {
+                        laneColumn(title: "我", sessions: lanes.human, color: theme.accent, empty: "无人工记录")
+                    }
+                    if lane != .human {
+                        laneColumn(title: "AI 工作", sessions: lanes.ai + lanes.waiting, color: theme.ai, empty: "无 AI 记录")
+                    }
+                }
+                Text(lanes.summaryText)
+                    .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
+                    .padding(.top, 16)
+                    .accessibilityIdentifier("timeline.summary")
             }
 
             SectionTitle("图例").padding(.top, 24)
             legend
         }
+    }
+
+    /// 一条轨一列：块里写任务名、类型和时长；等待用独立配色，且有文字标注。
+    private func laneColumn(title: String, sessions: [TimeSession], color: Color, empty: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(Typo.sans(Typo.xs, weight: .medium)).foregroundStyle(theme.textSecondary)
+            if sessions.isEmpty {
+                Text(empty).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
+            }
+            ForEach(sessions) { session in
+                let waiting = Stats.waitingTypes.contains(session.type)
+                Card(borderColor: (waiting ? theme.warning : color).opacity(0.25), padding: 12, radius: 12) {
+                    Text(session.type.label)
+                        .font(Typo.sans(Typo.xs))
+                        .foregroundStyle(waiting ? theme.warning : color)
+                    Text(store.task(session.taskId)?.title ?? "未知任务")
+                        .font(Typo.sans(Typo.sm, weight: .medium)).foregroundStyle(theme.text)
+                        .lineLimit(2).padding(.top, 4)
+                    Text("\(Format.time(session.startedAt)) · \(Format.duration(session.durationSeconds))")
+                        .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted).padding(.top, 4)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func sessionRow(_ session: TimeSession) -> some View {

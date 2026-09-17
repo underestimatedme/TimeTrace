@@ -78,3 +78,38 @@ func dedupedByID(_ intervals: [TrackInterval]) -> [TrackInterval] {
     }
     return result
 }
+
+/// 时间线的三条轨：我 / AI / 等待。等待是独立的第三类，不属于任何一方的工作时间。
+/// 项目筛选复用报告的范围规则，项目视图不会串进别的项目。
+struct TimelineLanes: Equatable {
+    var human: [TimeSession]
+    var ai: [TimeSession]
+    var waiting: [TimeSession]
+
+    var isEmpty: Bool { human.isEmpty && ai.isEmpty && waiting.isEmpty }
+
+    /// 人工重叠取并集，AI 并行累计 —— 和报告口径一致。
+    var humanSeconds: Int { Int(unionSeconds(intervals(human, track: .human), track: .human)) }
+    var aiSeconds: Int { Int(activeSeconds(intervals(ai, track: .ai), track: .ai)) }
+    var waitingSeconds: Int { Int(activeSeconds(intervals(waiting, track: .waiting), track: .waiting)) }
+
+    var summaryText: String {
+        "人工投入 \(Format.duration(humanSeconds)) · AI 活跃 \(Format.duration(aiSeconds))"
+            + " · 等待 \(Format.duration(waitingSeconds))（三者不相加）"
+    }
+
+    init(sessions: [TimeSession], tasks: [TaskItem], scope: ReportScope) {
+        let scoped = sessionsInScope(scope, tasks: tasks, sessions: sessions).sorted { $0.startedAt < $1.startedAt }
+        human = scoped.filter { Stats.humanTypes.contains($0.type) }
+        ai = scoped.filter { Stats.aiTypes.contains($0.type) }
+        waiting = scoped.filter { Stats.waitingTypes.contains($0.type) }
+    }
+
+    private func intervals(_ sessions: [TimeSession], track: TimelineTrack) -> [TrackInterval] {
+        dedupedByID(sessions.map {
+            TrackInterval(id: $0.id, start: $0.startedAt,
+                          end: $0.endedAt ?? $0.startedAt.addingTimeInterval(TimeInterval($0.durationSeconds)),
+                          track: track)
+        })
+    }
+}

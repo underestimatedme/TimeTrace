@@ -9,7 +9,11 @@ final class PreferencesStore {
 
     init() {
         if LaunchOptions.current.uiTesting {
-            defaults = nil // isolated: don't read or write real UserDefaults
+            // Isolated from the real defaults, but still persistent across launches so
+            // UI tests can verify that a preference survives a relaunch. `--sample-data`
+            // resets it, mirroring how the sample state file is reset.
+            defaults = UserDefaults(suiteName: "keji-ui-testing")
+            if LaunchOptions.current.sampleData { defaults?.removeObject(forKey: key) }
         } else {
             defaults = .standard
         }

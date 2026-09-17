@@ -121,18 +121,21 @@ final class FunctionalUITests: XCTestCase {
         capture("ai-review-completed")
     }
 
-    func testAllThemesAndSelectionPersists() {
+    /// 主题与动效：设计稿只有冰晶白 / 深海蓝 / 跟随系统三项，选择保存在本机。
+    func testThemeModesAndSelectionPersists() {
         launch("appearance")
-        for theme in ["claude", "codex", "cursor", "light"] {
-            let row = app.buttons["theme-\(theme)"]
-            reveal(row)
-            row.tap()
-            XCTAssertEqual(row.value as? String, "已选中")
-            capture("theme-\(theme)")
+        for mode in ["light", "dark", "system"] {
+            let card = app.buttons["theme.\(mode)"]
+            reveal(card)
+            card.tap()
+            XCTAssertEqual(card.value as? String, "已选择")
+            capture("theme-\(mode)")
         }
         XCUIDevice.shared.press(.home)
         launch("appearance", sample: false)
-        XCTAssertEqual(app.buttons["theme-light"].value as? String, "已选中")
+        XCTAssertEqual(app.buttons["theme.system"].value as? String, "已选择")
+        // 回到冰晶白，避免影响后续用例的截图。
+        app.buttons["theme.light"].tap()
     }
 
     func testMainTabsAndSecondaryRoutesRender() {

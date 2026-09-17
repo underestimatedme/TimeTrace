@@ -34,9 +34,22 @@ struct ProjectDetailView: View {
         }
         .padding(.bottom, 12)
 
-        AppButton("本项目报告", variant: .secondary, fullWidth: true) { router.push(.reports(.project(project.id))) }
+        AppButton("项目报告", variant: .secondary, fullWidth: true) { router.push(.reports(.project(project.id))) }
             .accessibilityIdentifier("reports.open.project")
             .padding(.bottom, 24)
+
+        // 版本目标：项目当前进行中的目标及其预计交付日期（真实数据，不用设计稿的演示值）。
+        if let milestone = goals.first(where: { $0.status == .active }) ?? goals.first {
+            Card {
+                Text("版本目标").font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
+                Text(milestone.title).font(Typo.sans(Typo.lg, weight: .medium)).foregroundStyle(theme.text)
+                    .padding(.vertical, 4)
+                Text("预计交付 \(Format.dateShort(milestone.targetDate))")
+                    .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
+            }
+            .accessibilityIdentifier("project.milestone")
+            .padding(.bottom, 24)
+        }
 
         SectionTitle("目标")
         VStack(spacing: 8) {
@@ -60,14 +73,18 @@ struct ProjectDetailView: View {
         // Every task in the project, pending first. A completed or cancelled task
         // is still reachable — this list is the only way into a task's detail.
         let ordered = pending + tasks.filter { TaskStatus.terminal.contains($0.status) }
-        SectionTitle("任务 (\(ordered.count))")
+        SectionTitle("目标范围 (\(ordered.count))")
         if ordered.isEmpty { MissingPlaceholder(text: "暂无任务") }
         VStack(spacing: 8) {
             ForEach(ordered) { task in
                 Button { router.push(.taskDetail(task.id)) } label: {
                     Card {
                         HStack(spacing: 8) {
-                            Text(task.title).font(Typo.sans(Typo.sm)).foregroundStyle(theme.text)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(task.title).font(Typo.sans(Typo.sm)).foregroundStyle(theme.text)
+                                Text("\(task.priority.label)优先级 · \(store.plans(forTask: task.id).filter { !$0.id.hasPrefix("draft-") }.count) 个 Plan")
+                                    .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
+                            }
                             Spacer(minLength: 8)
                             StatusBadge(status: task.status)
                         }

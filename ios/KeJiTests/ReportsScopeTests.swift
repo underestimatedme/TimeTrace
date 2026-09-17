@@ -96,9 +96,12 @@ final class ReportsScopeTests: XCTestCase {
         XCTAssertFalse(projectA.rows.contains { $0.id == "p3" }, "project report must not leak project B")
         XCTAssertEqual(projectA.nextStepAdvice, "先确认待验收的结果，再安排后续工作。")
 
+        XCTAssertEqual(projectA.acceptanceRatioText, "1 / 2 Plan 已验收")
+
         let none = ReportChangeLog(plans: [], tasks: tasks, scope: .all)
         XCTAssertTrue(none.isEmpty)
         XCTAssertEqual(none.deliveryText, "0 个 Plan 已验收")
+        XCTAssertEqual(none.acceptanceRatioText, "0 / 0 Plan 已验收")
         XCTAssertEqual(none.nextStepAdvice, "先为项目创建任务与 Plan。")
     }
 

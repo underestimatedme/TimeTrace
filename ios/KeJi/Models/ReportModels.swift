@@ -87,6 +87,9 @@ struct ReportChangeLog: Equatable {
     /// 「N 个 Plan 已验收」——没有 Plan 时显示 0，不编造交付量。
     var deliveryText: String { "\(acceptedCount) 个 Plan 已验收" }
 
+    /// 项目卡片上的进度：「N / M Plan 已验收」。
+    var acceptanceRatioText: String { "\(acceptedCount) / \(totalCount) Plan 已验收" }
+
     /// 设计稿的「下一步建议」，按当前 Plan 状态给出，不编造进展。
     var nextStepAdvice: String {
         if rows.contains(where: { $0.status == .awaitingReview }) { return "先确认待验收的结果，再安排后续工作。" }

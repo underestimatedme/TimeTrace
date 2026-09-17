@@ -42,7 +42,8 @@ struct ProjectsView: View {
                         Text(project.icon).font(.system(size: 20))
                         VStack(alignment: .leading, spacing: 2) {
                             Text(project.name).font(Typo.sans(Typo.sm, weight: .medium)).foregroundStyle(theme.text)
-                            Text("\(tasks.count) 个任务").font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
+                            Text(ReportChangeLog(plans: store.plans, tasks: store.tasks, scope: .project(project.id)).acceptanceRatioText)
+                                .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
                         }
                     }
                     Spacer()

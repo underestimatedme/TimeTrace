@@ -129,6 +129,25 @@ extension AppStore {
         return await mutatePlan(id, expectedRevision: expectedRevision, retry: true)
     }
 
+    /// 分派策略由服务端确认后才生效；运行中锁定，额外付费恒为 0。
+    @discardableResult
+    func setPlanExecutionMode(_ id: String, mode: PlanExecutionMode) async -> Bool {
+        guard let current = plan(id), canEditExecutionPolicy(current), current.executionPolicy.mode != mode.rawValue else { return false }
+        guard !planBusy.contains(id), let workspaceClient else {
+            planErrors[id] = "离线或请求进行中，请稍后重试。"; return false
+        }
+        planBusy.insert(id)
+        defer { planBusy.remove(id) }
+        var policy = current.executionPolicy
+        policy.mode = mode.rawValue
+        policy.maxAdditionalSpendMinor = 0
+        do {
+            applyPlan(try await workspaceClient.updatePlanPolicy(id: id, expectedRevision: current.revision, policy: policy))
+            planErrors[id] = nil
+            return true
+        } catch { recordPlanError(error, id: id); return false }
+    }
+
     private func mutatePlan(_ id: String, expectedRevision: Int, retry: Bool) async -> Bool {
         guard !planBusy.contains(id), let workspaceClient else {
             planErrors[id] = "离线或请求进行中，请稍后重试。"; return false

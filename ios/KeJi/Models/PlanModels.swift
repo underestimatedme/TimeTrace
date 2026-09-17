@@ -62,6 +62,28 @@ struct PlanExecutionPolicy: Codable, Equatable {
 
     static let balanced = PlanExecutionPolicy(mode: "balanced", preferredProfileId: nil,
                                               allowAutoResume: true, maxAdditionalSpendMinor: 0)
+
+    /// nil when the server sends a mode this client does not know yet.
+    var executionMode: PlanExecutionMode? { PlanExecutionMode(rawValue: mode) }
+}
+
+/// 分派策略。raw values are exactly what Valley's normalizeExecutionPolicy accepts.
+enum PlanExecutionMode: String, CaseIterable, Identifiable {
+    case balanced, speed, saver, manual
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .balanced: return "均衡"
+        case .speed: return "速度优先"
+        case .saver: return "节省额度"
+        case .manual: return "手动"
+        }
+    }
+}
+
+/// 运行中锁定：策略只能在执行开始前修改；本地草稿尚未同步，也不能修改。
+func canEditExecutionPolicy(_ plan: PlanItem) -> Bool {
+    (plan.status == .draft || plan.status == .ready) && !plan.id.hasPrefix("draft-")
 }
 
 /// The unit of AI/human execution beneath a Task (项目 → 任务 → Plan).

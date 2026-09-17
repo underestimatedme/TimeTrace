@@ -40,6 +40,10 @@ final class WorkspaceClient {
                                           evidenceIDs: evidenceIDs, criteria: criteria), as: PlanItem.self)
     }
 
+    func updatePlanPolicy(id: String, expectedRevision: Int, policy: PlanExecutionPolicy) async throws -> PlanItem {
+        try await client.send(.updatePlanPolicy(id: id, expectedRevision: expectedRevision, policy: policy), as: PlanItem.self)
+    }
+
     func cancelPlan(id: String, expectedRevision: Int) async throws -> PlanItem {
         try await client.send(.cancelPlan(id: id, expectedRevision: expectedRevision), as: PlanItem.self)
     }

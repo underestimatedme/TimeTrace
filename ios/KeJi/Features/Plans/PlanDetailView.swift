@@ -60,6 +60,25 @@ struct PlanDetailView: View {
                 }
             }.padding(.bottom, 20)
         }
+        SectionTitle("分派策略")
+        if let mode = plan.executionPolicy.executionMode {
+            Picker("分派策略", selection: Binding(
+                get: { mode },
+                set: { next in Task { await store.setPlanExecutionMode(plan.id, mode: next) } })) {
+                ForEach(PlanExecutionMode.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .disabled(!canEditExecutionPolicy(plan) || store.workspaceClient == nil || busy)
+            .accessibilityIdentifier("plan.policy")
+        } else {
+            Text("服务端策略「\(plan.executionPolicy.mode)」暂不支持在此修改。")
+                .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
+        }
+        Text(policyNote(plan))
+            .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
+            .padding(.top, 6).padding(.bottom, 20)
+            .accessibilityIdentifier("plan.policy.note")
+
         if let job = store.planJobs[plan.id] {
             Text("执行记录：\(job.status.label)").font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary)
             if let summary = job.resultSummary {
@@ -76,7 +95,7 @@ struct PlanDetailView: View {
                 Text(error).font(Typo.sans(Typo.xs)).foregroundStyle(theme.danger).accessibilityIdentifier("plan.error")
             }
             if plan.status == .awaitingReview {
-                AppButton("标记验收", variant: .secondary, fullWidth: true, disabled: busy || store.workspaceClient == nil) {
+                AppButton("确认验收通过", variant: .secondary, fullWidth: true, disabled: busy || store.workspaceClient == nil) {
                     review = PlanReviewDraft(plan: plan, job: store.planJobs[plan.id])
                 }.accessibilityIdentifier("plan.accept")
             }
@@ -106,6 +125,16 @@ struct PlanDetailView: View {
                     .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
             }
         }
+    }
+}
+
+/// 分派策略下方的说明：解释为什么可改或为什么被锁定，而不是只把控件灰掉。
+private func policyNote(_ plan: PlanItem) -> String {
+    if plan.id.hasPrefix("draft-") { return "本地草稿同步后才能设置分派策略。" }
+    switch plan.status {
+    case .draft, .ready: return "启动前仍会校验额度与依赖；额度不足时等待，不转付费执行。"
+    case .accepted, .cancelled, .failed, .unknown: return "Plan 已结束，分派策略不再修改。"
+    default: return "已有执行上下文，保持原工具与会话；运行中锁定分派策略。"
     }
 }
 
@@ -148,7 +177,7 @@ private struct PlanAcceptanceSheet: View {
                 }
                 if stale { Text("版本已变化，请关闭并重新审核当前版本。").accessibilityIdentifier("plan.review.stale") }
                 if let error = store.planErrors[draft.plan.id] { Text(error).accessibilityIdentifier("plan.review.error") }
-                Button("确认验收") {
+                Button("确认验收通过") {
                     Task {
                         let results = draft.criteria.map { CriterionResultBody(index: $0.index, accepted: checked.contains($0.id)) }
                         if await store.acceptPlan(draft.plan.id, expectedRevision: draft.plan.revision,
@@ -185,7 +214,7 @@ private struct PlanDispatchSheet: View {
                 Picker("本地工作区", selection: $workspaceID) {
                     ForEach(workspaces) { Text($0.name).tag($0.id) }
                 }
-                Picker("本机工具", selection: $toolID) {
+                Picker("执行工具", selection: $toolID) {
                     ForEach(tools) { Text($0.provider.label + " · " + $0.version).tag($0.id) }
                 }
                 if !loading && runners.isEmpty { Text("没有可用电脑，请先连接执行器后重试。") }

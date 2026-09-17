@@ -96,6 +96,7 @@ final class AppRouter {
         case ("projects", nil): go(.projects)
         case ("projects", let id?): go(.projects); push(.project(id))
         case ("goals", let id?): go(.projects); push(.goal(id))
+        case ("plans", let id?): go(.projects); push(.plan(id))
         case ("ai-tools", _): go(.ai)
         // 报告从今日页右上角进入；项目报告限定当前项目，返回时回到项目详情。
         case ("reports", nil): go(.today); push(.reports(.all))

@@ -51,4 +51,39 @@ final class WorkspaceContractTests: XCTestCase {
         XCTAssertEqual(Endpoint.report(date: "2026-09-15").path, "/reports?date=2026-09-15")
         XCTAssertEqual(Endpoint.generateReport(date: "2026-09-15", zone: "UTC").method, .post)
     }
+    /// 分派策略的四个选项与 Valley normalizeExecutionPolicy 接受的 mode 一一对应。
+    func testExecutionModesMatchValleyContract() {
+        XCTAssertEqual(PlanExecutionMode.allCases.map(\.rawValue), ["balanced", "speed", "saver", "manual"])
+        XCTAssertEqual(PlanExecutionMode.allCases.map(\.label), ["均衡", "速度优先", "节省额度", "手动"])
+        XCTAssertEqual(PlanExecutionPolicy(mode: "saver", preferredProfileId: nil, allowAutoResume: true,
+                                           maxAdditionalSpendMinor: 0).executionMode, .saver)
+    }
+
+    /// 运行中锁定：只有尚未执行的真实 Plan 才能改分派策略。
+    func testExecutionPolicyIsLockedOnceExecutionStarts() {
+        func plan(_ id: String, _ status: PlanState) -> PlanItem {
+            PlanItem(id: id, taskId: "t", revision: 1, title: id, priority: 2, status: status, criteria: [],
+                     dependsOn: [], estimatedHumanMinutes: 0, estimatedAiMinutes: 0, workWeight: 1, risk: 2,
+                     executionPolicy: .balanced, createdAt: Date(), updatedAt: Date())
+        }
+        XCTAssertTrue(canEditExecutionPolicy(plan("p", .ready)))
+        XCTAssertTrue(canEditExecutionPolicy(plan("p", .draft)))
+        for locked: PlanState in [.queued, .running, .waitingQuota, .awaitingReview, .accepted, .cancelled, .failed] {
+            XCTAssertFalse(canEditExecutionPolicy(plan("p", locked)), "\(locked) must lock the policy")
+        }
+        XCTAssertFalse(canEditExecutionPolicy(plan("draft-t", .ready)), "local drafts are not on the server yet")
+    }
+
+    func testUpdatePolicyPatchesPlanWithRevisionAndZeroSpend() throws {
+        let policy = PlanExecutionPolicy(mode: "speed", preferredProfileId: nil, allowAutoResume: false, maxAdditionalSpendMinor: 0)
+        let endpoint = Endpoint.updatePlanPolicy(id: "p1", expectedRevision: 3, policy: policy)
+        XCTAssertEqual(endpoint.path, "/plans/p1")
+        XCTAssertEqual(endpoint.method, .patch)
+        let body = try JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(
+            UpdatePlanPolicyBody(expectedRevision: 3, executionPolicy: policy))) as? [String: Any]
+        XCTAssertEqual(body?["expected_revision"] as? Int, 3)
+        let sent = body?["execution_policy"] as? [String: Any]
+        XCTAssertEqual(sent?["mode"] as? String, "speed")
+        XCTAssertEqual(sent?["max_additional_spend_minor"] as? Int, 0)
+    }
 }

@@ -1,6 +1,6 @@
 import Foundation
 
-enum HTTPMethod: String { case get = "GET", post = "POST", put = "PUT", delete = "DELETE" }
+enum HTTPMethod: String { case get = "GET", post = "POST", put = "PUT", patch = "PATCH", delete = "DELETE" }
 
 struct Endpoint {
     var method: HTTPMethod
@@ -64,6 +64,10 @@ struct Endpoint {
         Endpoint(method: .post, path: "/plans/\(id)/accept", requiresAuth: true,
                  body: AcceptPlanBody(expectedRevision: expectedRevision, evidenceIds: evidenceIDs, criteria: criteria))
     }
+    static func updatePlanPolicy(id: String, expectedRevision: Int, policy: PlanExecutionPolicy) -> Endpoint {
+        Endpoint(method: .patch, path: "/plans/\(id)", requiresAuth: true,
+                 body: UpdatePlanPolicyBody(expectedRevision: expectedRevision, executionPolicy: policy))
+    }
     static func cancelPlan(id: String, expectedRevision: Int) -> Endpoint {
         Endpoint(method: .post, path: "/plans/\(id)/cancel", requiresAuth: true,
                  body: RevisionBody(expectedRevision: expectedRevision))
@@ -104,6 +108,11 @@ struct AcceptPlanBody: Encodable {
     var expectedRevision: Int
     var evidenceIds: [String]
     var criteria: [CriterionResultBody]
+}
+
+struct UpdatePlanPolicyBody: Encodable {
+    var expectedRevision: Int
+    var executionPolicy: PlanExecutionPolicy
 }
 
 struct RevisionBody: Encodable {

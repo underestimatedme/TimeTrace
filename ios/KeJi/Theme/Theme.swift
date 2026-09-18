@@ -210,4 +210,6 @@ enum Glass {
     static let profileName: CGFloat = 20        // .gl-profile-card h2
     static let menuRowHeight: CGFloat = 57      // .gl-menu-row
     static let meterHeight: CGFloat = 6         // .gl-meter
+    static let orbSize: CGFloat = 42            // .gl-orb
+    static let orbSoftSize: CGFloat = 34        // .gl-orb.soft
 }

@@ -23,7 +23,10 @@ struct TodayView: View {
             .sorted { ($0.scheduledStart ?? .distantPast) < ($1.scheduledStart ?? .distantPast) }
 
         TabPage {
-            header.padding(.bottom, 24)
+            header.padding(.bottom, 14)
+
+            collaborationFlow(waiting: waitingTasks.first, ai: aiTasks.first)
+                .padding(.bottom, 19)
 
             SectionTitle("现在")
             if humanTask != nil || !aiTasks.isEmpty {
@@ -113,6 +116,47 @@ struct TodayView: View {
 
             hero(goal: goal, completed: completedToday, total: totalToday)
         }
+    }
+
+    /// .gl-collaboration —— 「我 · 验收」与「AI · 执行」两端，中间是设计稿的光带。
+    /// 两端都按真实数据显示：没有待验收就说已确认，没有 AI 执行就说当前空闲。
+    @ViewBuilder
+    private func collaborationFlow(waiting: TaskItem?, ai: TaskItem?) -> some View {
+        HStack(alignment: .center, spacing: 4) {
+            Button {
+                if let waiting { router.push(.taskDetail(waiting.id)) } else { router.push(.reports(.all)) }
+            } label: {
+                HStack(spacing: 10) {
+                    GlassOrb(symbol: "checkmark")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("我 · 验收").font(Typo.sans(Glass.small, weight: .semibold)).foregroundStyle(theme.text)
+                        Text(waiting == nil ? "暂无待确认" : "确认数据与结果")
+                            .font(Typo.sans(Glass.tiny)).foregroundStyle(theme.textSecondary)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+
+            Image("collaboration-ribbon")
+                .resizable().scaledToFit()
+                .frame(height: 26)
+                .layoutPriority(-1)
+                .accessibilityHidden(true)
+
+            Button { router.go(.ai) } label: {
+                HStack(spacing: 10) {
+                    GlassOrb(symbol: "arrow.triangle.2.circlepath", soft: true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(ai.flatMap { $0.aiProvider?.label } ?? "AI")
+                            .font(Typo.sans(Glass.small, weight: .semibold)).foregroundStyle(theme.text)
+                        Text(ai == nil ? "当前空闲" : "正在执行")
+                            .font(Typo.sans(Glass.tiny)).foregroundStyle(theme.textSecondary)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, minHeight: 53, alignment: .leading)
     }
 
     /// .gl-avatar —— 白边 + 冰蓝光圈。

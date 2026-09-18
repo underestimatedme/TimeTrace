@@ -81,7 +81,16 @@ struct ProfileView: View {
             }
             .padding(.bottom, 16)
 
-            VStack(spacing: 4) { ForEach(menu) { menuRow($0) } }.padding(.bottom, 24)
+            Card(padding: 0, radius: Glass.groupRadius) {
+                VStack(spacing: 0) {
+                    ForEach(menu) { item in
+                        menuRow(item)
+                        if item.id != menu.last?.id { Divider1() }
+                    }
+                }
+                .padding(.horizontal, 15)
+            }
+            .padding(.bottom, 24)
 
             VStack(spacing: 8) {
                 AppButton("恢复示例数据", icon: "arrow.counterclockwise", variant: .secondary, fullWidth: true) { store.resetToSample() }
@@ -119,13 +128,21 @@ struct ProfileView: View {
             if let route = item.route { router.push(route) }
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: item.icon).font(.system(size: 16, weight: .light)).foregroundStyle(theme.textMuted).frame(width: 20)
-                Text(item.label).font(Typo.sans(Typo.sm)).foregroundStyle(theme.text)
+                Image(systemName: item.icon)
+                    .font(.system(size: 19, weight: .light))
+                    .foregroundStyle(theme.textSecondary).frame(width: 21)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.label).font(Typo.sans(13, weight: .medium)).foregroundStyle(theme.text)
+                    if let value = item.value {
+                        Text(value).font(Typo.sans(Glass.tiny)).foregroundStyle(theme.textSecondary).lineLimit(1)
+                    }
+                }
                 Spacer(minLength: 8)
-                if let value = item.value { Text(value).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted) }
-                if item.route != nil { Image(systemName: "chevron.right").font(.system(size: 13)).foregroundStyle(theme.textMuted) }
+                if item.route != nil {
+                    Image(systemName: "chevron.right").font(.system(size: 13)).foregroundStyle(theme.textMuted)
+                }
             }
-            .padding(.horizontal, 16).padding(.vertical, 14)
+            .frame(minHeight: Glass.menuRowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

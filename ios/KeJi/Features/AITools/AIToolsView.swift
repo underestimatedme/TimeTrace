@@ -13,8 +13,13 @@ struct AIToolsView: View {
 
     var body: some View {
         SubPageScaffold(title: "你的 AI") {
-            Text("每个工具，都有清晰的工作边界。任务经 Valley 派发到已授权的 Mac，Claude/Codex 账号始终留在电脑本地。")
-                .font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary).padding(.bottom, 24)
+            Text("每个工具，都有清晰的工作边界。")
+                .font(Typo.sans(Glass.body)).foregroundStyle(theme.textSecondary)
+                .padding(.bottom, 6)
+            Text("任务经 Valley 派发到已授权的 Mac，Claude/Codex 账号始终留在电脑本地。")
+                .font(Typo.sans(Glass.small)).foregroundStyle(theme.textMuted)
+                .lineSpacing(4)
+                .padding(.bottom, 24)
 
             if let quota = store.accountQuota, !quota.pools.isEmpty {
                 SectionTitle("工具与额度")

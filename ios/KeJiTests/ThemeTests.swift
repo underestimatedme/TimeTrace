@@ -130,5 +130,7 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(Glass.profileName, 20)
         XCTAssertEqual(Glass.menuRowHeight, 57)
         XCTAssertEqual(Glass.meterHeight, 6)
+        XCTAssertEqual(Glass.orbSize, 42)
+        XCTAssertEqual(Glass.orbSoftSize, 34)
     }
 }

@@ -11,10 +11,16 @@ struct SplashView: View {
         ZStack {
             theme.bg.ignoresSafeArea()
             VStack(spacing: 0) {
-                LinearGradient(colors: [.clear, theme.accent, .clear], startPoint: .leading, endPoint: .trailing)
-                    .frame(width: 96, height: 1)
-                    .opacity(0.3)
-                    .padding(.bottom, 48)
+                // 设计稿的玻璃主图；深色下压暗，保证文字可读。
+                Image("glass-hero")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 132, height: 132)
+                    .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+                    .opacity(theme.isDark ? 0.5 : 1)
+                    .shadow(color: theme.shadowColor, radius: 18, y: 10)
+                    .padding(.bottom, 36)
+                    .accessibilityHidden(true)
                 Text("刻迹")
                     .font(Typo.sans(Typo.xl4, weight: .light))
                     .kerning(6)

@@ -4,15 +4,22 @@ import SwiftUI
 struct SectionTitle: View {
     @Environment(\.theme) private var theme
     let text: String
+    var trailing: String?
 
-    init(_ text: String) { self.text = text }
+    init(_ text: String, trailing: String? = nil) { self.text = text; self.trailing = trailing }
 
+    /// .gl-section-heading h2 —— 正常大小写的 14px/600，右侧可带一条小字说明。
     var body: some View {
-        Text(text.uppercased())
-            .font(Typo.sans(Typo.xs, weight: .medium))
-            .kerning(0.8)
-            .foregroundStyle(theme.textSecondary)
-            .padding(.bottom, 12)
+        HStack(alignment: .firstTextBaseline) {
+            Text(text)
+                .font(Typo.sans(Glass.sectionTitle, weight: .semibold))
+                .foregroundStyle(theme.text)
+            if let trailing {
+                Spacer(minLength: 8)
+                Text(trailing).font(Typo.sans(Glass.tiny)).foregroundStyle(theme.textMuted)
+            }
+        }
+        .padding(.bottom, 10)
     }
 }
 
@@ -96,9 +103,21 @@ struct EmptyState<Action: View>: View {
 struct PageTitle: View {
     @Environment(\.theme) private var theme
     let title: String
+    var subtitle: String?
+
+    init(title: String, subtitle: String? = nil) { self.title = title; self.subtitle = subtitle }
 
     var body: some View {
-        Text(title).font(Typo.sans(Typo.xl, weight: .medium)).foregroundStyle(theme.text)
+        VStack(alignment: .leading, spacing: 9) {
+            Text(title)
+                .font(Typo.sans(Glass.pageTitle, weight: .semibold))
+                .kerning(Glass.pageTitleTracking)
+                .foregroundStyle(theme.text)
+            if let subtitle {
+                Text(subtitle).font(Typo.sans(Glass.small)).foregroundStyle(theme.textSecondary)
+                    .lineSpacing(4)
+            }
+        }
     }
 }
 

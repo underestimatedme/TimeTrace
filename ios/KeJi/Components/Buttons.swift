@@ -25,7 +25,8 @@ struct AppButton: View {
     }
     private var paddingH: CGFloat { switch size { case .sm: return 12; case .md: return 16; case .lg: return 24 } }
     private var paddingV: CGFloat { switch size { case .sm: return 6; case .md: return 10; case .lg: return 12 } }
-    private var radius: CGFloat { size == .sm ? 8 : 12 }
+    private var radius: CGFloat { size == .sm ? 10 : Glass.buttonRadius }
+    private var minHeight: CGFloat { size == .sm ? 39 : Glass.buttonMinHeight }
 
     private var foreground: Color {
         switch variant {
@@ -64,7 +65,7 @@ struct AppButton: View {
             .foregroundStyle(foreground)
             .padding(.horizontal, paddingH)
             .padding(.vertical, paddingV)
-            .frame(maxWidth: fullWidth ? .infinity : nil)
+            .frame(maxWidth: fullWidth ? .infinity : nil, minHeight: minHeight)
             .background(background)
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay {
@@ -72,7 +73,18 @@ struct AppButton: View {
                     RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(border, lineWidth: 1)
                 }
             }
-            .opacity(disabled ? 0.5 : 1)
+            // .gl-primary: 描边 #4fb5ff + inset 0 1px 2px #8de3ff 的内高光
+            .overlay {
+                if variant == .accent {
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(colors: [Color.white.opacity(0.55), Color.white.opacity(0.12)],
+                                           startPoint: .top, endPoint: .bottom),
+                            lineWidth: 1)
+                }
+            }
+            .shadow(color: variant == .accent ? theme.accent.opacity(0.28) : .clear, radius: 9, y: 7)
+            .opacity(disabled ? 0.44 : 1)
         }
         .buttonStyle(.plain)
         .disabled(disabled)

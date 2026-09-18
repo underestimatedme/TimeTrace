@@ -30,24 +30,31 @@ struct MainTabView: View {
                 Button {
                     router.go(tab)
                 } label: {
-                    VStack(spacing: 3) {
+                    VStack(spacing: 4) {
                         Image(systemName: tab.symbol)
-                            .font(.system(size: 19, weight: .light))
+                            .font(.system(size: 19, weight: active ? .regular : .light))
                             .frame(height: 22)
                         Text(tab.label)
-                            .font(.system(size: 10))
+                            .font(.system(size: Glass.tiny))
                             .lineLimit(1)
+                        // .gl-bottom-nav button.active:after —— 选中项下方的 3px 圆点
+                        Circle()
+                            .fill(active ? theme.accent : .clear)
+                            .frame(width: Glass.navDotSize, height: Glass.navDotSize)
                     }
-                    .foregroundStyle(active ? theme.accent : theme.textMuted)
+                    .foregroundStyle(active ? theme.accent : theme.textSecondary)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
+                    .padding(.top, 7)
+                    .padding(.bottom, 4)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("workspace.tab.\(tab.rawValue)")
             }
         }
-        .background(theme.bgElevated.opacity(0.95).background(.ultraThinMaterial))
+        // backdrop-filter: blur(18px) + #fbfdfff2
+        .background(theme.bgElevated.opacity(0.95), in: Rectangle())
+        .background(.ultraThinMaterial)
         .overlay(alignment: .top) { Divider1() }
     }
 }

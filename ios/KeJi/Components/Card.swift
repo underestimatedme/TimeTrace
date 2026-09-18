@@ -4,11 +4,11 @@ import SwiftUI
 struct Card<Content: View>: View {
     @Environment(\.theme) private var theme
     var borderColor: Color?
-    var padding: CGFloat = 16
-    var radius: CGFloat = 16
+    var padding: CGFloat = Glass.cardPadding
+    var radius: CGFloat = Glass.cardRadius
     @ViewBuilder var content: () -> Content
 
-    init(borderColor: Color? = nil, padding: CGFloat = 16, radius: CGFloat = 16,
+    init(borderColor: Color? = nil, padding: CGFloat = Glass.cardPadding, radius: CGFloat = Glass.cardRadius,
          @ViewBuilder content: @escaping () -> Content) {
         self.borderColor = borderColor
         self.padding = padding
@@ -26,6 +26,13 @@ struct Card<Content: View>: View {
             .background(.ultraThinMaterial, in: shape)
             .clipShape(shape)
             .overlay(shape.stroke(borderColor ?? theme.border, lineWidth: 1))
+            // inset 0 1px 2px #fff —— 顶部的一道白色内高光，玻璃面板的关键细节。
+            .overlay(
+                shape.strokeBorder(
+                    LinearGradient(colors: [Color.white.opacity(theme.isDark ? 0.10 : 0.9), .clear],
+                                   startPoint: .top, endPoint: .center),
+                    lineWidth: 1)
+            )
             .shadow(color: theme.shadowColor, radius: Theme.shadowBlur, y: Theme.shadowOffsetY)
     }
 }

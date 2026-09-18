@@ -99,4 +99,28 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(ThemeMode.allCases.map(\.label), ["冰晶白", "深海蓝", "跟随系统"])
         XCTAssertEqual(AccentPalette.allCases.map(\.label), ["冰蓝", "鸢紫"])
     }
+    /// 排版与几何来自 glass.css，集中在 Glass 里，不散落到各个 View。
+    func testGlassTypeScaleAndGeometryMatchTheDesign() {
+        // .gl-home-header h1 / .gl-page-title h1 / .gl-project-card h2 / body
+        XCTAssertEqual(Glass.display, 30)
+        XCTAssertEqual(Glass.displayTracking, -1.1, accuracy: 0.01)
+        XCTAssertEqual(Glass.pageTitle, 28)
+        XCTAssertEqual(Glass.pageTitleTracking, -0.6, accuracy: 0.01)
+        XCTAssertEqual(Glass.cardTitle, 23)
+        XCTAssertEqual(Glass.body, 14)
+        // .gl-section-heading h2 是正常大小写的 14px/600，不是大写字距标题
+        XCTAssertEqual(Glass.sectionTitle, 14)
+        // .gl-primary-task / .gl-group / .gl-primary / .gl-badge
+        XCTAssertEqual(Glass.cardRadius, 21)
+        XCTAssertEqual(Glass.cardPadding, 22)
+        XCTAssertEqual(Glass.groupRadius, 18)
+        XCTAssertEqual(Glass.buttonRadius, 14)
+        XCTAssertEqual(Glass.buttonMinHeight, 44)
+        XCTAssertEqual(Glass.badgeRadius, 6)
+        // .gl-segments 容器 13 / 选中项 10；.gl-bottom-nav backdrop blur 18
+        XCTAssertEqual(Glass.segmentsRadius, 13)
+        XCTAssertEqual(Glass.segmentItemRadius, 10)
+        XCTAssertEqual(Glass.navBlur, 18)
+        XCTAssertEqual(Glass.navDotSize, 3)
+    }
 }

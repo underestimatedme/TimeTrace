@@ -176,3 +176,31 @@ extension Color {
         self.init(.sRGB, red: r, green: g, blue: b, opacity: 1)
     }
 }
+
+/// design/src/review/glass.css 的排版与几何。数值集中在这里，View 里不再写魔数。
+enum Glass {
+    // 字号（px → pt）与字距
+    static let display: CGFloat = 30            // .gl-home-header h1
+    static let displayTracking: CGFloat = -1.1
+    static let pageTitle: CGFloat = 28          // .gl-page-title h1
+    static let pageTitleTracking: CGFloat = -0.6
+    static let cardTitle: CGFloat = 23          // .gl-project-card h2 / .gl-sheet-title
+    static let sectionTitle: CGFloat = 14       // .gl-section-heading h2（正常大小写）
+    static let body: CGFloat = 14               // .gl-app font: 14px/1.5
+    static let rowTitle: CGFloat = 15           // .gl-task-row h3
+    static let small: CGFloat = 12
+    static let tiny: CGFloat = 10
+
+    // 圆角 / 间距 / 尺寸
+    static let cardRadius: CGFloat = 21         // .gl-primary-task
+    static let cardPadding: CGFloat = 22        // .gl-project-card
+    static let groupRadius: CGFloat = 18        // .gl-group / .gl-report-list
+    static let buttonRadius: CGFloat = 14       // .gl-primary
+    static let buttonMinHeight: CGFloat = 44
+    static let badgeRadius: CGFloat = 6         // .gl-badge
+    static let segmentsRadius: CGFloat = 13     // .gl-segments
+    static let segmentItemRadius: CGFloat = 10
+    static let navBlur: CGFloat = 18            // .gl-bottom-nav backdrop-filter
+    static let navDotSize: CGFloat = 3          // 选中项下方的圆点
+    static let rowSpacing: CGFloat = 20         // .gl-task-row padding
+}

@@ -74,44 +74,100 @@ struct TodayView: View {
 
     // MARK: - Pieces
 
+    /// .gl-home-header + .gl-hero —— 30px 问候语、42px 头像、183px 雪山 banner 与目标进度格。
     private var header: some View {
         let completedToday = store.tasks.filter { $0.status == .completed && isToday($0.completedAt) }.count
         let totalToday = store.tasks.filter { $0.dueDate == today || isToday($0.scheduledStart) }.count
-        let progress = totalToday > 0 ? Double(completedToday) / Double(totalToday) * 100 : 0
+        let goal = store.goals.first { $0.status == .active } ?? store.goals.first
         return VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(Format.date(store.now)).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
-                Spacer()
-                Button { router.push(.reports(.all)) } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "chart.bar.doc.horizontal").font(.system(size: 12))
-                        Text("报告").font(Typo.sans(Typo.xs))
-                    }
-                    .foregroundStyle(theme.accent)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(Format.date(store.now))
+                        .font(Typo.sans(Glass.small)).foregroundStyle(theme.textMuted)
+                        .padding(.bottom, 3)
+                    Text("\(Format.greeting(now: store.now))，\(store.settings.name)")
+                        .font(Typo.sans(Glass.display, weight: .bold))
+                        .kerning(Glass.displayTracking)
+                        .foregroundStyle(theme.text)
+                        .lineLimit(2).minimumScaleFactor(0.7)
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("reports.open")
-            }
-            .padding(.bottom, 4)
-            Text("\(Format.greeting(now: store.now))，\(store.settings.name)")
-                .font(Typo.sans(Typo.xl2, weight: .light)).foregroundStyle(theme.text)
-            HStack(alignment: .center, spacing: 16) {
-                VStack(spacing: 4) {
-                    HStack {
-                        Text("今日进度")
-                        Spacer()
-                        Text("\(completedToday)/\(totalToday > 0 ? "\(totalToday)" : "—")").monospacedDigit()
+                Spacer(minLength: 12)
+                HStack(spacing: 14) {
+                    Button { router.push(.reports(.all)) } label: {
+                        VStack(spacing: 2) {
+                            Image(systemName: "chart.bar.doc.horizontal").font(.system(size: 20, weight: .light))
+                            Text("报告").font(Typo.sans(Glass.tiny))
+                        }
+                        .foregroundStyle(theme.accent)
+                        .frame(width: 44, height: 44)
+                        .background(theme.panel, in: RoundedRectangle(cornerRadius: Glass.buttonRadius, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: Glass.buttonRadius, style: .continuous)
+                            .stroke(theme.border, lineWidth: 1))
                     }
-                    .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
-                    ProgressBar(value: progress)
-                }
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("连续专注").font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
-                    Text("\(store.settings.streakDays) 天").font(Typo.mono(Typo.sm)).foregroundStyle(theme.accent)
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("reports.open")
+                    avatar
                 }
             }
-            .padding(.top, 12)
+            .padding(.bottom, 14)
+
+            hero(goal: goal, completed: completedToday, total: totalToday)
         }
+    }
+
+    /// .gl-avatar —— 白边 + 冰蓝光圈。
+    private var avatar: some View {
+        Button { router.go(.mine) } label: {
+            Image("avatar")
+                .resizable().scaledToFill()
+                .frame(width: 42, height: 42)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(Color.white, lineWidth: 2))
+                .overlay(Circle().stroke(theme.accent.opacity(0.35), lineWidth: 1).padding(-2))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("我的")
+    }
+
+    /// .gl-hero —— 雪山 banner 上叠版本目标与进度格。
+    /// banner 放在 background 里：它不参与布局尺寸，否则 scaledToFill 会把整页撑宽。
+    private func hero(goal: Goal?, completed: Int, total: Int) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(goal == nil ? "今天" : "版本目标")
+                .font(Typo.sans(Glass.small)).foregroundStyle(theme.textSecondary)
+            Text(goal?.title ?? "先定一个目标")
+                .font(Typo.sans(Glass.cardTitle, weight: .semibold))
+                .kerning(-0.7)
+                .foregroundStyle(theme.text)
+                .lineLimit(2)
+                .padding(.top, 6)
+            Text(total > 0 ? "今日进度 \(completed)/\(total)" : "今天还没有安排任务")
+                .font(Typo.sans(Glass.body)).foregroundStyle(theme.textSecondary)
+                .padding(.top, 2)
+            // .gl-goal-progress —— 用格子而不是一条进度条
+            HStack(spacing: 3) {
+                ForEach(0..<8, id: \.self) { index in
+                    let filled = total > 0 && Double(index) < (Double(completed) / Double(total) * 8)
+                    Capsule().fill(filled ? theme.accent : theme.border).frame(height: 6)
+                }
+            }
+            .frame(width: 156)
+            .padding(.top, 9)
+            Spacer(minLength: 0)
+            Text("连续专注 \(store.settings.streakDays) 天")
+                .font(Typo.sans(Glass.tiny)).foregroundStyle(theme.textMuted)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 183)
+        .background(alignment: .trailing) {
+            Image("mountain-banner")
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .allowsHitTesting(false)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: Glass.cardRadius, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 
     private func centered(_ text: String) -> some View {

@@ -39,6 +39,7 @@ struct SubPageScaffold<Content: View, Action: View>: View {
                 Button { router.pop() } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.left").font(.system(size: 17, weight: .regular))
+                            .accessibilityHidden(true)
                         Text("返回").font(Typo.sans(Typo.sm))
                     }
                     .foregroundStyle(theme.textSecondary)

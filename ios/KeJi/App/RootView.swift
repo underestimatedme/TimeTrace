@@ -8,6 +8,8 @@ struct RootView: View {
     @Environment(AppEnvironment.self) private var appEnv
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var systemColorScheme
+    /// 订阅动态字体：系统字号变化时整棵树重新求值，Typo 才会拿到新的缩放值。
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         // `--theme` 调试开关优先；否则按「主题与动效」里的模式 + 强调色解析。
@@ -23,6 +25,7 @@ struct RootView: View {
             }
         }
         .environment(\.theme, theme)
+        .id(dynamicTypeSize)
         .preferredColorScheme(theme.isDark ? .dark : .light)
         .tint(theme.accent)
         .animation(.easeInOut(duration: 0.3), value: router.phase)

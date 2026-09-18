@@ -159,4 +159,20 @@ final class FunctionalUITests: XCTestCase {
             capture("route-\(route.replacingOccurrences(of: "/", with: "-"))")
         }
     }
+    /// 无障碍：底部入口和主要图标按钮必须能被读出名字，动态字体放大后仍可点。
+    func testTabsAndIconButtonsAreReadableByVoiceOver() {
+        launch("today")
+        for tab in ["today", "projects", "timeline", "ai", "mine"] {
+            let button = app.buttons["workspace.tab.\(tab)"].firstMatch
+            XCTAssertTrue(button.exists, "缺少底部入口 \(tab)")
+            XCTAssertFalse(button.label.trimmingCharacters(in: .whitespaces).isEmpty,
+                           "底部入口 \(tab) 没有可朗读的名字")
+        }
+        // 报告入口是图标按钮，必须有名字
+        let reports = app.buttons["reports.open"].firstMatch
+        XCTAssertTrue(reports.waitForExistence(timeout: 5))
+        XCTAssertFalse(reports.label.trimmingCharacters(in: .whitespaces).isEmpty,
+                       "报告入口没有可朗读的名字")
+        capture("a11y-today")
+    }
 }

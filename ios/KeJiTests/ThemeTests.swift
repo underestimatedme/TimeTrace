@@ -133,4 +133,18 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(Glass.orbSize, 42)
         XCTAssertEqual(Glass.orbSoftSize, 34)
     }
+    /// 设计稿字号是基准值：跟随系统「更大字体」缩放，但有上限，避免撑破卡片。
+    func testTypeScaleFollowsDynamicTypeWithinACap() {
+        let base: CGFloat = 14
+        XCTAssertEqual(Typo.scaled(base, category: .large), base, accuracy: 0.5,
+                       "默认档位应当就是设计稿的字号")
+        XCTAssertGreaterThan(Typo.scaled(base, category: .extraExtraLarge), base,
+                             "调大系统字体时必须跟着变大")
+        XCTAssertLessThan(Typo.scaled(base, category: .small), base,
+                          "调小时也要跟随")
+        let hugest = Typo.scaled(Glass.display, category: .accessibilityExtraExtraExtraLarge)
+        XCTAssertLessThanOrEqual(hugest, Glass.display * Typo.maxScale + 0.5,
+                                 "最大档位也不能超过基准的 1.6 倍")
+        XCTAssertGreaterThan(hugest, Glass.display, "但仍然要比基准大")
+    }
 }

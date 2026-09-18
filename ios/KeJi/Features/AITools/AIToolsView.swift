@@ -109,7 +109,7 @@ struct AIToolsView: View {
                     Text(card.capability).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
                 }
                 Spacer(minLength: 8)
-                Image(systemName: "chevron.right").font(.system(size: 13)).foregroundStyle(theme.textMuted)
+                Image(systemName: "chevron.right").font(.system(size: 13)).foregroundStyle(theme.textMuted).accessibilityHidden(true)
             }
             .padding(.bottom, 14)
 

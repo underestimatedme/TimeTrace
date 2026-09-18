@@ -50,7 +50,7 @@ struct ProjectsView: View {
                         }
                     }
                     Spacer()
-                    Image(systemName: "chevron.right").font(.system(size: 13)).foregroundStyle(theme.textMuted)
+                    Image(systemName: "chevron.right").font(.system(size: 13)).foregroundStyle(theme.textMuted).accessibilityHidden(true)
                 }
                 .padding(.bottom, 12)
                 ProgressBar(value: progress).padding(.bottom, 8)

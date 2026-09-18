@@ -51,6 +51,7 @@ struct AppearanceView: View {
         } label: {
             VStack(spacing: 12) {
                 Image(systemName: mode == .light ? "sun.max" : mode == .dark ? "moon" : "iphone")
+                    .accessibilityHidden(true)
                     .font(.system(size: 24, weight: .light))
                     .foregroundStyle(active ? theme.accent : theme.textSecondary)
                 Text(mode.label)

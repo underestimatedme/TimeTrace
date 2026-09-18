@@ -68,6 +68,7 @@ struct TodayView: View {
                     }
                     Spacer()
                     Image(systemName: "bolt").font(.system(size: 20)).foregroundStyle(theme.accent.opacity(0.4))
+                        .accessibilityHidden(true)
                 }
                 Text("AI 活跃时间 ÷ 人工投入时间").font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted).padding(.top, 8)
             }
@@ -223,7 +224,7 @@ struct TodayView: View {
 
     private func clockLine(_ text: String) -> some View {
         HStack(spacing: 4) {
-            Image(systemName: "clock").font(.system(size: 11))
+            Image(systemName: "clock").font(.system(size: 11)).accessibilityHidden(true)
             Text(text).monospacedDigit()
         }
         .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted).padding(.top, 4)
@@ -251,6 +252,8 @@ struct TodayView: View {
             clockLine("已运行 \(Format.durationOrUnmeasured(session?.durationSeconds))")
             HStack { AppButton("查看执行", variant: .ghost, size: .sm) { router.push(.ai(task.id)) } }.padding(.top, 12)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(task.aiProvider?.label ?? "AI") 正在进行：\(task.title)")
     }
 
     private func waitingCard(_ task: TaskItem) -> some View {
@@ -288,7 +291,7 @@ struct TodayView: View {
                     if let project { Text(project.name).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted) }
                 }
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.system(size: 13)).foregroundStyle(theme.textMuted)
+                Image(systemName: "chevron.right").font(.system(size: 13)).foregroundStyle(theme.textMuted).accessibilityHidden(true)
             }
             .padding(.vertical, 10).padding(.horizontal, 12)
             .contentShape(Rectangle())

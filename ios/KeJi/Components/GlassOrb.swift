@@ -26,5 +26,6 @@ struct GlassOrb: View {
                     .padding(3)
             )
             .shadow(color: theme.accent.opacity(0.25), radius: 7, y: 3)
+            .accessibilityHidden(true)
     }
 }

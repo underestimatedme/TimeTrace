@@ -88,7 +88,7 @@ struct ProjectDetailView: View {
                         }
                         Spacer(minLength: 8)
                         StatusBadge(status: task.status)
-                        Image(systemName: "chevron.right").font(.system(size: 12)).foregroundStyle(theme.textMuted)
+                        Image(systemName: "chevron.right").font(.system(size: 12)).foregroundStyle(theme.textMuted).accessibilityHidden(true)
                     }
                     .padding(.vertical, Glass.rowSpacing)
                     .contentShape(Rectangle())

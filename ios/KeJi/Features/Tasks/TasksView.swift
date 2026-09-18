@@ -110,7 +110,7 @@ struct TasksView: View {
             }
             Button(role: .destructive) { handle(task, .delete) } label: { Label("删除", systemImage: "trash") }
         } label: {
-            Image(systemName: "ellipsis")
+            Image(systemName: "ellipsis").accessibilityHidden(true)
                 .rotationEffect(.degrees(90))
                 .font(.system(size: 14))
                 .foregroundStyle(theme.textMuted)

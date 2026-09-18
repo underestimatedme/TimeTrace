@@ -131,6 +131,7 @@ struct ProfileView: View {
                 Image(systemName: item.icon)
                     .font(.system(size: 19, weight: .light))
                     .foregroundStyle(theme.textSecondary).frame(width: 21)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.label).font(Typo.sans(13, weight: .medium)).foregroundStyle(theme.text)
                     if let value = item.value {
@@ -139,7 +140,7 @@ struct ProfileView: View {
                 }
                 Spacer(minLength: 8)
                 if item.route != nil {
-                    Image(systemName: "chevron.right").font(.system(size: 13)).foregroundStyle(theme.textMuted)
+                    Image(systemName: "chevron.right").font(.system(size: 13)).foregroundStyle(theme.textMuted).accessibilityHidden(true)
                 }
             }
             .frame(minHeight: Glass.menuRowHeight)

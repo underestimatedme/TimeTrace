@@ -81,18 +81,20 @@ struct ReportsView: View {
                             HStack(spacing: 12) {
                                 Image(systemName: row.isAccepted ? "checkmark.circle.fill" : "circle")
                                     .foregroundStyle(row.isAccepted ? theme.success : theme.textMuted)
+                                    .accessibilityHidden(true)
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(row.title).font(Typo.sans(Typo.sm, weight: .medium))
                                         .foregroundStyle(theme.text).lineLimit(2)
                                     Text(row.status.label).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
                                 }
                                 Spacer(minLength: 0)
-                                Image(systemName: "chevron.right").font(.system(size: 12)).foregroundStyle(theme.textMuted)
+                                Image(systemName: "chevron.right").font(.system(size: 12)).foregroundStyle(theme.textMuted).accessibilityHidden(true)
                             }
                             .padding(.vertical, 14)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("\(row.title)，\(row.status.label)")
                         if row.id != changeLog.rows.last?.id {
                             Rectangle().fill(theme.border).frame(height: 1)
                         }

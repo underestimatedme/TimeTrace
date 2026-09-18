@@ -51,6 +51,30 @@ xcrun simctl launch booted com.atlaspaces.timetrace --sample-data --screen today
 
 Sample ids: tasks `t1`…`t20` (`t2` is the running focus, `t3` the running AI execution, `t4` waiting review), projects `p1`…`p4`, goals `g1`…`g5`.
 
+## 在真机上运行
+
+工程默认关闭签名（`CODE_SIGNING_ALLOWED: NO`），这样模拟器测试不需要证书。真机要临时打开：
+
+**方式一：Xcode（推荐，自己的手机用这个）**
+
+1. `cd ios && xcodegen generate`，然后 `open KeJi.xcodeproj`
+2. 选中 KeJi target → Signing & Capabilities → 勾选 Automatically manage signing → 选你的 Team
+3. 手机插线，顶部选中你的设备 → Run
+4. 首次运行手机上会提示「不受信任的开发者」：设置 → 通用 → VPN 与设备管理 → 信任
+
+注意：`xcodegen generate` 会覆盖第 2 步的设置，重新生成工程后要再选一次 Team。
+
+**方式二：命令行**
+
+```sh
+DEVELOPMENT_TEAM=<你的 Team ID> bash ios/scripts/run-on-device.sh
+```
+
+脚本不修改 `project.yml`，只在命令行参数里打开签名，然后打印安装与启动命令。
+
+用免费 Apple ID 也能装，但证书 7 天过期，到期要重装。TestFlight 是发给**别人**测试用的，
+自己的设备不需要走 TestFlight。
+
 ## Automated functional QA
 
 ```sh

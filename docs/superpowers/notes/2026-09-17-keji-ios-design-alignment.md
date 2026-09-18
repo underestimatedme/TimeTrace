@@ -39,23 +39,41 @@
 - **视觉重建**：目前只完成了颜色 token 化，排版、圆角、间距、控件样式、今日页 banner
   与图片资源尚未按设计稿重做。已与用户确认排在功能之后单独做。
 
+## 视觉重建（2026-09-18 追加）
+
+功能九步完成后，用户指出「比设计稿难看」，确认先做完功能、再统一做视觉。这一轮：
+
+| 提交 | 内容 |
+| --- | --- |
+| `2c8b8e9` | `glass.css` 的字号/字距/圆角/内边距进 `Glass`（有单测）；分区标题恢复正常大小写；卡片圆角 21、内边距 22、顶部白色内高光；主按钮圆角 14/高 44/描边内高光/投影；底栏模糊与选中圆点 |
+| `03b22a5` | 今日页头部重建：30px 问候语、42px 头像、183px 雪山 banner、目标进度格；`design/src/review/assets` 四张图复制进 `Assets.xcassets` |
+| `...` | 玻璃分段控件替换原生 segmented（时间线 / 分派策略 / 强调色）；项目详情任务列表改为细分隔线长列表；项目名 23px |
+| `a34b7e4` | 报告 hero 48px 交付数字、AI 额度数值 32px、我的页 58px 头像与 20px 名字、额度条 6px 加内发光、徽章圆角 6 |
+| `...` | 深色主题下雪山 banner 压到 26% 不透明度（对应设计稿 `[data-theme=dark] .gl-hero>img`），否则浅色图上的浅色文字不可读 |
+
+过程中两次自己的失误，已修正并记录：
+- 雪山 banner 初版用 `scaledToFill` 直接放进 ZStack，把整页撑出横向溢出（违反 390 宽约束）。
+  改为放进 `background`，不参与布局尺寸。
+- 有一次提交前把 `DEVELOPER_DIR` 指向 CommandLineTools，`xcodebuild` 直接报错退出，
+  当时没看输出就提交了；事后补跑确认通过。`DEVELOPER_DIR` 只该给 git 用。
+
 ## 遗留问题
 
-1. **视觉保真度**：字号字重、卡片圆角与内高光、主按钮样式、分段控件、底栏模糊与选中圆点、
-   今日页 183px banner 与头像、列表行密度，全部仍是旧原型的样子。`design/src/review/assets`
-   里的图片资源尚未引入（已获许可复制）。
-2. **分区标题**：`SectionTitle` 强制大写加字距（显示为 CHANGELOG），设计稿是正常大小写。
-3. **`00-总纲.md` 的 Valley 路径过期**：文档写的 `.worktrees/valley-workspace-review` 不存在；
+1. **视觉仍未完全对齐**：AI 页与「我的」页的页面级层次、`gl-orb` 圆形图标容器、
+   今日页的人机协作流（`collaboration-ribbon`）、启动页的 `glass-hero` 尚未使用。
+   深色主题只逐页看过今日页。
+2. **`00-总纲.md` 的 Valley 路径过期**：文档写的 `.worktrees/valley-workspace-review` 不存在；
    其所述分支 `codex/keji-ai-workspace-fixes` 实际在 `/opt/coding/planb/github/Valley`
    （而文档说该检出没有刻迹代码）。本次契约以该检出为准，另一个 worktree
    `valley-timetrace-remote-runner`（`codex/keji-ai-workspace`）内容一致。
-4. **`--ui-testing` 下的偏好持久化**：原先完全不落盘，导致偏好类设置无法验证跨启动保留。
+3. **`--ui-testing` 下的偏好持久化**：原先完全不落盘，导致偏好类设置无法验证跨启动保留。
    已改为写入独立的 `keji-ui-testing` UserDefaults suite，并在 `--sample-data` 时重置。
-5. **未推送**：全部提交停在本地 `feature/ios-app`，等人工确认后再推。
+4. **未推送**：全部提交停在本地 `feature/ios-app`，等人工确认后再推。
 
 ## 验证
 
-- `xcodebuild test`（KeJiTests）：111 通过，0 失败。
+- `xcodebuild test`（KeJiTests）：112 通过，0 失败。
 - `bash ios/scripts/run-qa.sh`（含 KeJiUITests，fixture 服务器已手动启动）：见 `ios/qa-artifacts/`。
 - 390×844 截图（与设计稿同尺寸，iPhone 16e 模拟器）：今日 / 项目 / 时间线 / AI / 我的 /
-  报告 / 项目报告，无横向溢出。
+  报告 / 项目报告，无横向溢出。视觉重建后的一套在
+  `ios/qa-artifacts/390x844-visual-rebuild/`，重建前的基线在 `390x844-design-compare/`。

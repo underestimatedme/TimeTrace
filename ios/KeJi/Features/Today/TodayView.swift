@@ -161,9 +161,11 @@ struct TodayView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: 183)
         .background(alignment: .trailing) {
+            // .gl-app[data-theme=dark] .gl-hero>img{opacity:.26} —— 深色下压暗，保证文字可读
             Image("mountain-banner")
                 .resizable()
                 .aspectRatio(contentMode: .fill)
+                .opacity(theme.isDark ? 0.26 : 1)
                 .allowsHitTesting(false)
         }
         .clipShape(RoundedRectangle(cornerRadius: Glass.cardRadius, style: .continuous))

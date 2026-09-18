@@ -23,6 +23,14 @@ struct PlanDetailView: View {
         }
     }
 
+    private func applyMode(_ mode: PlanExecutionMode, to plan: PlanItem) {
+        _Concurrency.Task { await store.setPlanExecutionMode(plan.id, mode: mode) }
+    }
+
+    private func applyAutoResume(_ allow: Bool, to plan: PlanItem) {
+        _Concurrency.Task { await store.setPlanAutoResume(plan.id, allow: allow) }
+    }
+
     @ViewBuilder
     private func content(_ plan: PlanItem) -> some View {
         let deps = plan.dependsOn.compactMap { store.plan($0) }
@@ -62,21 +70,19 @@ struct PlanDetailView: View {
         }
         SectionTitle("分派策略")
         if let mode = plan.executionPolicy.executionMode {
-            Picker("分派策略", selection: Binding(
-                get: { mode },
-                set: { next in Task { await store.setPlanExecutionMode(plan.id, mode: next) } })) {
-                ForEach(PlanExecutionMode.allCases) { Text($0.label).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .disabled(!canEditExecutionPolicy(plan) || store.workspaceClient == nil || busy)
-            .accessibilityIdentifier("plan.policy")
+            GlassSegments(options: PlanExecutionMode.allCases.map { ($0, $0.label) },
+                          selection: Binding(
+                            get: { mode },
+                            set: { next in applyMode(next, to: plan) }))
+                .disabled(!canEditExecutionPolicy(plan) || store.workspaceClient == nil || busy)
+                .accessibilityIdentifier("plan.policy")
         } else {
             Text("服务端策略「\(plan.executionPolicy.mode)」暂不支持在此修改。")
                 .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
         }
         Toggle(isOn: Binding(
             get: { plan.executionPolicy.allowAutoResume },
-            set: { allow in Task { await store.setPlanAutoResume(plan.id, allow: allow) } })) {
+            set: { allow in applyAutoResume(allow, to: plan) })) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("自然恢复后自动续跑").font(Typo.sans(Typo.sm)).foregroundStyle(theme.text)
                 Text("原会话 · 已有订阅 · 不额外付费")

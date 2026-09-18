@@ -17,14 +17,12 @@ struct AppearanceView: View {
             .padding(.bottom, 24)
 
             SectionTitle("强调色")
-            Picker("强调色", selection: Binding(
-                get: { store.preferences.accent },
-                set: { next in store.updatePreferences { $0.accent = next } })) {
-                ForEach(AccentPalette.allCases) { Text($0.label).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.bottom, 24)
-            .accessibilityIdentifier("appearance.accent")
+            GlassSegments(options: AccentPalette.allCases.map { ($0, $0.label) },
+                          selection: Binding(
+                            get: { store.preferences.accent },
+                            set: { next in store.updatePreferences { $0.accent = next } }))
+                .padding(.bottom, 24)
+                .accessibilityIdentifier("appearance.accent")
 
             Card {
                 Toggle(isOn: Binding(

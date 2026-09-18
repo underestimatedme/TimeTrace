@@ -41,7 +41,10 @@ struct ProjectsView: View {
                     HStack(spacing: 8) {
                         Text(project.icon).font(.system(size: 20))
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(project.name).font(Typo.sans(Typo.sm, weight: .medium)).foregroundStyle(theme.text)
+                            Text(project.name)
+                                .font(Typo.sans(Glass.cardTitle, weight: .semibold))
+                                .kerning(-0.4)
+                                .foregroundStyle(theme.text)
                             Text(ReportChangeLog(plans: store.plans, tasks: store.tasks, scope: .project(project.id)).acceptanceRatioText)
                                 .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
                         }

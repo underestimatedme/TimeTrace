@@ -75,23 +75,27 @@ struct ProjectDetailView: View {
         let ordered = pending + tasks.filter { TaskStatus.terminal.contains($0.status) }
         SectionTitle("目标范围 (\(ordered.count))")
         if ordered.isEmpty { MissingPlaceholder(text: "暂无任务") }
-        VStack(spacing: 8) {
+        // .gl-task-row —— 细分隔线的长列表，而不是每行一张卡片
+        VStack(spacing: 0) {
             ForEach(ordered) { task in
                 Button { router.push(.taskDetail(task.id)) } label: {
-                    Card {
-                        HStack(spacing: 8) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(task.title).font(Typo.sans(Typo.sm)).foregroundStyle(theme.text)
-                                Text("\(task.priority.label)优先级 · \(store.plans(forTask: task.id).filter { !$0.id.hasPrefix("draft-") }.count) 个 Plan")
-                                    .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
-                            }
-                            Spacer(minLength: 8)
-                            StatusBadge(status: task.status)
+                    HStack(spacing: 13) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(task.title)
+                                .font(Typo.sans(Glass.rowTitle, weight: .medium)).foregroundStyle(theme.text)
+                            Text("\(task.priority.label)优先级 · \(store.plans(forTask: task.id).filter { !$0.id.hasPrefix("draft-") }.count) 个 Plan")
+                                .font(Typo.sans(Glass.small)).foregroundStyle(theme.textSecondary)
                         }
+                        Spacer(minLength: 8)
+                        StatusBadge(status: task.status)
+                        Image(systemName: "chevron.right").font(.system(size: 12)).foregroundStyle(theme.textMuted)
                     }
+                    .padding(.vertical, Glass.rowSpacing)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("task.\(task.id)")
+                if task.id != ordered.last?.id { Divider1() }
             }
         }
     }

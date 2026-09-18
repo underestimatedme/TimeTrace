@@ -63,12 +63,9 @@ struct TimeFlowView: View {
             }
             .padding(.bottom, 12)
 
-            Picker("轨道", selection: $lane) {
-                ForEach(Lane.allCases, id: \.self) { Text($0.label).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.bottom, 16)
-            .accessibilityIdentifier("timeline.lane")
+            GlassSegments(options: Lane.allCases.map { ($0, $0.label) }, selection: $lane)
+                .padding(.bottom, 16)
+                .accessibilityIdentifier("timeline.lane")
 
             TwoColumnGrid {
                 MetricCard(label: "实际经过", value: Format.duration(parallel.wallClockSeconds))

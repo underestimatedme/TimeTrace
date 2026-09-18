@@ -100,7 +100,7 @@ struct AIToolsView: View {
         return Card {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(card.name).font(Typo.sans(Typo.base, weight: .medium)).foregroundStyle(theme.text)
+                    Text(card.name).font(Typo.sans(Glass.quotaTitle, weight: .semibold)).foregroundStyle(theme.text)
                     Text(card.capability).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
                 }
                 Spacer(minLength: 8)
@@ -109,7 +109,10 @@ struct AIToolsView: View {
             .padding(.bottom, 14)
 
             HStack(alignment: .firstTextBaseline) {
-                Text(card.headline).font(Typo.sans(Typo.xl2, weight: .medium)).foregroundStyle(theme.text)
+                Text(card.headline)
+                    .font(Typo.sans(Glass.quotaValue, weight: .medium))
+                    .kerning(-1).monospacedDigit()
+                    .foregroundStyle(theme.text)
                 Spacer(minLength: 8)
                 Text(card.availability).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
             }

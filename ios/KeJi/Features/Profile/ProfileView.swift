@@ -45,14 +45,15 @@ struct ProfileView: View {
 
         TabPage {
             HStack(spacing: 16) {
-                Image(systemName: "person")
-                    .font(.system(size: 26, weight: .light))
-                    .foregroundStyle(theme.accent)
-                    .frame(width: 64, height: 64)
-                    .background(theme.accent.opacity(0.2))
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                Image("avatar")
+                    .resizable().scaledToFill()
+                    .frame(width: 58, height: 58)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(Color.white, lineWidth: 2))
+                    .overlay(Circle().stroke(theme.accent.opacity(0.3), lineWidth: 1).padding(-2))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(store.settings.name).font(Typo.sans(Typo.xl, weight: .medium)).foregroundStyle(theme.text)
+                    Text(store.settings.name)
+                        .font(Typo.sans(Glass.profileName, weight: .semibold)).foregroundStyle(theme.text)
                     Text("连续专注 \(store.settings.streakDays) 天").font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary)
                     syncIndicator
                 }

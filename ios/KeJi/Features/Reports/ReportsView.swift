@@ -52,12 +52,15 @@ struct ReportsView: View {
         // 交付优先：报告先回答「今天交付了什么」，再给时间拆分。
         Card {
             Text("今天的交付").font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text("\(changeLog.acceptedCount)")
-                    .font(Typo.sans(Typo.xl3, weight: .medium)).foregroundStyle(theme.text)
-                Text("个 Plan 已验收").font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
+                    .font(Typo.sans(Glass.heroNumber, weight: .regular))
+                    .kerning(Glass.heroNumberTracking)
+                    .monospacedDigit()
+                    .foregroundStyle(theme.text)
+                Text("个 Plan 已验收").font(Typo.sans(Glass.small)).foregroundStyle(theme.textSecondary)
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, 10)
             .accessibilityIdentifier("reports.delivery")
             Text(scoreText).font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary)
         }

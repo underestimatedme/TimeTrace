@@ -122,5 +122,13 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(Glass.segmentItemRadius, 10)
         XCTAssertEqual(Glass.navBlur, 18)
         XCTAssertEqual(Glass.navDotSize, 3)
+        // .gl-report-hero h2 / .gl-quota-value b / .gl-profile-card h2 / .gl-meter
+        XCTAssertEqual(Glass.heroNumber, 48)
+        XCTAssertEqual(Glass.heroNumberTracking, -2, accuracy: 0.01)
+        XCTAssertEqual(Glass.quotaValue, 32)
+        XCTAssertEqual(Glass.quotaTitle, 17)
+        XCTAssertEqual(Glass.profileName, 20)
+        XCTAssertEqual(Glass.menuRowHeight, 57)
+        XCTAssertEqual(Glass.meterHeight, 6)
     }
 }

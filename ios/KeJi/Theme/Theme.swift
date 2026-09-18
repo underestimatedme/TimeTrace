@@ -203,4 +203,11 @@ enum Glass {
     static let navBlur: CGFloat = 18            // .gl-bottom-nav backdrop-filter
     static let navDotSize: CGFloat = 3          // 选中项下方的圆点
     static let rowSpacing: CGFloat = 20         // .gl-task-row padding
+    static let heroNumber: CGFloat = 48         // .gl-report-hero h2
+    static let heroNumberTracking: CGFloat = -2
+    static let quotaValue: CGFloat = 32         // .gl-quota-value b
+    static let quotaTitle: CGFloat = 17         // .gl-quota-card h2
+    static let profileName: CGFloat = 20        // .gl-profile-card h2
+    static let menuRowHeight: CGFloat = 57      // .gl-menu-row
+    static let meterHeight: CGFloat = 6         // .gl-meter
 }

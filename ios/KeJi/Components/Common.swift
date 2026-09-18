@@ -23,17 +23,28 @@ struct SectionTitle: View {
     }
 }
 
+/// .gl-meter —— 6px 高、圆角 8，填充条右端带一道内发光。
 struct ProgressBar: View {
     @Environment(\.theme) private var theme
     /// 0...100
     let value: Double
-    var height: CGFloat = 4
+    var height: CGFloat = Glass.meterHeight
 
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                Capsule().fill(theme.bgElevated)
-                Capsule().fill(theme.accent)
+                Capsule().fill(theme.bgHover)
+                Capsule()
+                    .fill(theme.accent)
+                    .overlay(alignment: .trailing) {
+                        // inset -15px 0 14px #5ecbf8
+                        Capsule()
+                            .fill(LinearGradient(colors: [.clear, theme.ai.opacity(0.85)],
+                                                 startPoint: .leading, endPoint: .trailing))
+                            .frame(width: 26)
+                            .blur(radius: 4)
+                            .clipShape(Capsule())
+                    }
                     .frame(width: geo.size.width * CGFloat(min(100, max(0, value)) / 100))
                     .animation(.easeInOut(duration: 0.5), value: value)
             }

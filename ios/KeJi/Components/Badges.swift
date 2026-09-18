@@ -26,7 +26,7 @@ struct StatusBadge: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
             .background(colors.bg)
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: Glass.badgeRadius, style: .continuous))
     }
 }
 

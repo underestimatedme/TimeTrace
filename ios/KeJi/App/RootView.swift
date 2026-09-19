@@ -31,6 +31,7 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.3), value: router.phase)
         .task {
             await sync.syncOnForeground()
+            await store.syncPreferences()
             while !_Concurrency.Task.isCancelled {
                 try? await _Concurrency.Task.sleep(nanoseconds: 1_000_000_000)
                 store.tick()

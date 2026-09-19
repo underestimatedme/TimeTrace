@@ -51,6 +51,11 @@ struct Endpoint {
 
     static let accountQuota = Endpoint(method: .get, path: "/quota", requiresAuth: true, body: nil)
     static let resetSignals = Endpoint(method: .get, path: "/reset-signals", requiresAuth: true, body: nil)
+    static let getPreferences = Endpoint(method: .get, path: "/preferences", requiresAuth: true, body: nil)
+    static func putPreferences(expectedRevision: Int64, prefs: UserPreferences) -> Endpoint {
+        Endpoint(method: .put, path: "/preferences", requiresAuth: true,
+                 body: PutPreferencesBody(expectedRevision: expectedRevision, data: prefs))
+    }
     static func createFeedback(_ draft: FeedbackDraft) -> Endpoint {
         Endpoint(method: .post, path: "/feedback", requiresAuth: true, body: FeedbackBody(draft: draft))
     }
@@ -117,6 +122,11 @@ struct AcceptPlanBody: Encodable {
 struct UpdatePlanPolicyBody: Encodable {
     var expectedRevision: Int
     var executionPolicy: PlanExecutionPolicy
+}
+
+struct PutPreferencesBody: Encodable {
+    var expectedRevision: Int64
+    var data: UserPreferences
 }
 
 struct FeedbackBody: Encodable {

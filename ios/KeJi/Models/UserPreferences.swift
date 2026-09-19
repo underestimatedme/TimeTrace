@@ -116,3 +116,49 @@ struct FeedbackTicket: Codable, Equatable {
     var createdAt: Date
     var updatedAt: Date
 }
+
+/// Valley `GET /preferences` / `PUT /preferences` 的记录。服务端还没记录时 revision 为 0、data 为 `{}`。
+struct RemotePreferences: Decodable, Equatable {
+    var revision: Int64
+    var data: UserPreferences
+}
+
+/// 偏好的三方合并。Valley 要求冲突时重新合并、不能静默覆盖：
+/// 以上次同步的版本为基准，只把本机改过的字段套到服务端最新版上。
+enum PreferencesMerge {
+    static func threeWay(base: UserPreferences, local: UserPreferences, remote: UserPreferences) -> UserPreferences {
+        var merged = remote
+        if local.hiddenModules != base.hiddenModules { merged.hiddenModules = local.hiddenModules }
+        if local.reduceMotion != base.reduceMotion { merged.reduceMotion = local.reduceMotion }
+        if local.themeMode != base.themeMode { merged.themeMode = local.themeMode }
+        if local.accent != base.accent { merged.accent = local.accent }
+        if local.diagnosticsEnabled != base.diagnosticsEnabled { merged.diagnosticsEnabled = local.diagnosticsEnabled }
+        if local.notifications != base.notifications { merged.notifications = local.notifications }
+        merged.schemaVersion = max(local.schemaVersion, remote.schemaVersion)
+        return merged
+    }
+}
+
+/// 上次同步成功时的服务端版本号与内容（三方合并的基准）。
+struct PreferencesSyncState: Codable, Equatable {
+    var revision: Int64 = 0
+    var base: UserPreferences = .defaults
+}
+
+/// 偏好同步的决策，纯函数：本机没改过就采用服务端新版本；改过就合并后推送。
+enum PreferencesSync {
+    enum Action: Equatable {
+        case none
+        case adopt(UserPreferences, revision: Int64)
+        case push(UserPreferences, expectedRevision: Int64)
+    }
+
+    static func plan(local: UserPreferences, state: PreferencesSyncState, remote: RemotePreferences) -> Action {
+        let changedLocally = local != state.base
+        guard changedLocally else {
+            return remote.revision != state.revision ? .adopt(remote.data, revision: remote.revision) : .none
+        }
+        let merged = PreferencesMerge.threeWay(base: state.base, local: local, remote: remote.data)
+        return .push(merged, expectedRevision: remote.revision)
+    }
+}

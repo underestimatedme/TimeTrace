@@ -198,6 +198,29 @@ final class AppStore {
         transform(&updated)
         preferences = updated
         preferencesStore.save(updated)
+        _Concurrency.Task { await syncPreferences() }
+    }
+
+    /// 与 Valley 同步偏好（跨设备）。离线时什么都不做；失败时保留本机值，下次再同步。
+    /// 冲突按三方合并处理，不静默覆盖另一台设备的改动。
+    func syncPreferences() async {
+        guard let workspaceClient, let remote = try? await workspaceClient.preferences() else { return }
+        let state = preferencesStore.loadSyncState()
+        switch PreferencesSync.plan(local: preferences, state: state, remote: remote) {
+        case .none:
+            return
+        case let .adopt(data, revision):
+            preferences = data
+            preferencesStore.save(data)
+            preferencesStore.saveSyncState(PreferencesSyncState(revision: revision, base: data))
+        case let .push(merged, expectedRevision):
+            guard let saved = try? await workspaceClient.putPreferences(expectedRevision: expectedRevision, prefs: merged) else {
+                return   // 409 或网络失败：保留本机改动，下次同步重新合并
+            }
+            preferences = saved.data
+            preferencesStore.save(saved.data)
+            preferencesStore.saveSyncState(PreferencesSyncState(revision: saved.revision, base: saved.data))
+        }
     }
     func markActiveFocusDirty() { generation &+= 1; focusGeneration = generation; activeFocusDirty = true; onDirty?() }
     func markAIToolsDirty() { generation &+= 1; toolsGeneration = generation; aiToolsDirty = true; onDirty?() }

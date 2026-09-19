@@ -198,4 +198,30 @@ final class WorkspaceFlowTests: XCTestCase {
         XCTAssertTrue(status.label.contains("工单号 fb-ui-1"), "应显示服务端工单号，实际：\(status.label)")
         capture("feedback-submitted")
     }
+    /// 偏好经 Valley 跨设备同步：改成深海蓝后，用 --sample-data 重启（会清掉本机偏好与同步状态），
+    /// 深海蓝仍被选中，就只可能是从服务端拉回来的。
+    func testPreferencesRoundTripThroughServer() {
+        let base = "http://127.0.0.1:18768/prefs-\(UUID().uuidString)"
+        func launchAppearance() {
+            app.terminate()
+            app.launchArguments = ["--workspace-fixture", "--online-ui-testing", "--api-base-url", base,
+                                   "--screen", "appearance"]
+            app.launchEnvironment["KEJI_OFFLINE"] = "0"
+            app.launch()
+        }
+        launchAppearance()
+        let dark = app.buttons["theme.dark"].firstMatch
+        XCTAssertTrue(dark.waitForExistence(timeout: 8))
+        XCTAssertEqual(app.buttons["theme.light"].value as? String, "已选择", "新会话默认冰晶白")
+        dark.tap()
+        XCTAssertEqual(dark.value as? String, "已选择")
+        sleep(2)   // 等 PUT /preferences 发出
+        launchAppearance()   // --workspace-fixture 带 --sample-data：本机偏好与同步基准都被清空
+        let darkAgain = app.buttons["theme.dark"].firstMatch
+        XCTAssertTrue(darkAgain.waitForExistence(timeout: 8))
+        let adopted = NSPredicate(format: "value == %@", "已选择")
+        expectation(for: adopted, evaluatedWith: darkAgain)
+        waitForExpectations(timeout: 8)
+        capture("preferences-round-trip")
+    }
 }

@@ -16,6 +16,7 @@ final class PreferencesStore {
             if LaunchOptions.current.sampleData {
                 defaults?.removeObject(forKey: key)
                 defaults?.removeObject(forKey: "keji.feedback.pending.v1")
+                defaults?.removeObject(forKey: "keji.preferences.sync.v1")
             }
         } else {
             defaults = .standard
@@ -33,6 +34,20 @@ final class PreferencesStore {
     func save(_ prefs: UserPreferences) {
         guard let defaults, let data = try? JSONCoding.encoder.encode(prefs) else { return }
         defaults.set(data, forKey: key)
+    }
+
+    // 偏好的同步基准：上次同步成功时服务端的版本与内容。
+    private let syncKey = "keji.preferences.sync.v1"
+
+    func loadSyncState() -> PreferencesSyncState {
+        guard let data = defaults?.data(forKey: syncKey),
+              let state = try? JSONCoding.decoder.decode(PreferencesSyncState.self, from: data) else { return .init() }
+        return state
+    }
+
+    func saveSyncState(_ state: PreferencesSyncState) {
+        guard let defaults, let data = try? JSONCoding.encoder.encode(state) else { return }
+        defaults.set(data, forKey: syncKey)
     }
 
     // 未成功提交的反馈草稿（连同幂等键）。离开页面、重启 App 都还在，重试不会重复建单。

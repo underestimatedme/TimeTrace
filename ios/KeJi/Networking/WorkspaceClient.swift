@@ -12,6 +12,14 @@ final class WorkspaceClient {
         try await client.send(.accountQuota, as: AccountQuota.self)
     }
 
+    func preferences() async throws -> RemotePreferences {
+        try await client.send(.getPreferences, as: RemotePreferences.self)
+    }
+
+    func putPreferences(expectedRevision: Int64, prefs: UserPreferences) async throws -> RemotePreferences {
+        try await client.send(.putPreferences(expectedRevision: expectedRevision, prefs: prefs), as: RemotePreferences.self)
+    }
+
     func submitFeedback(_ draft: FeedbackDraft) async throws -> FeedbackTicket {
         try await client.send(.createFeedback(draft), as: FeedbackTicket.self)
     }

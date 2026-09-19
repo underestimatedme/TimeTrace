@@ -17,6 +17,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self.handle_request()
 
+    def do_PUT(self):
+        self.handle_request()
+
     def handle_request(self):
         parts = self.path.strip("/").split("/")
         scenario, path = parts[0], "/" + "/".join(parts[1:])
@@ -36,6 +39,17 @@ class Handler(BaseHTTPRequestHandler):
                     "total_score": 95, "human_seconds": 600, "ai_seconds": 1200, "waiting_seconds": None,
                     "evidence_ids": ["a1", "a2"], "baseline_version": "phase-facts-v2",
                     "breakdown": {"zone": "Asia/Dubai", "evidence_coverage": 1, "facts": facts}}
+        elif path == "/preferences":
+            # 与 Valley PutPreferences 一致：乐观锁，版本不符返回 409/40901 与当前记录。
+            current = state.setdefault("preferences", {"revision": 0, "data": {}, "updated_at": NOW})
+            if self.command == "GET":
+                data = current
+            elif body.get("expected_revision") != current["revision"]:
+                data, status, code = current, 409, 40901
+            else:
+                current = {"revision": current["revision"] + 1, "data": body.get("data", {}), "updated_at": NOW}
+                state["preferences"] = current
+                data = current
         elif path == "/feedback" and self.command == "POST":
             # 与 Valley 一致：同一幂等键返回同一张单（200），新键建新单（201）。
             tickets = state.setdefault("feedback", {})

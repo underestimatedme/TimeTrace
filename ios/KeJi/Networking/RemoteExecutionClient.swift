@@ -63,9 +63,4 @@ final class RemoteExecutionClient {
                                                              idempotencyKey: "cancel-\(job.id)-\(job.revision)"), as: RemoteCommandResponse.self)
     }
 
-    func completeReview(jobID: String) async throws {
-        guard let job = jobsByTask.values.first(where: { $0.id == jobID }) else { throw APIError.decoding(NSError(domain: "RemoteJob", code: 2)) }
-        _ = try await client.send(Endpoint.remoteJobCommand(id: jobID, action: "complete_review", expectedRevision: job.revision,
-                                                             idempotencyKey: "review-\(job.id)-\(job.revision)"), as: RemoteCommandResponse.self)
-    }
 }

@@ -69,11 +69,23 @@
 | `c366192` | 「关于刻迹」页：版本号读 Info.plist（缺失时显示「版本未知」），数据存放 / AI 费用 / 隐私三段为生产版真实说明，替换设计稿的演示说明 |
 | `7468846` | 接入 `GET /reset-signals`（`link_only` 下只展示来源链接，写明不替代个人额度核验）；**修复 AI 页联网时从未加载真实额度**——`accountQuota()` 此前没有任何调用点。联网 UI 测试以 fixture 的 62%（示例数据为 80%）证明请求确实发出 |
 
+## 自查出的问题（2026-09-19 追加）
+
+逐个比对「接口定义了但从没被调用」的地方，查出三处：
+
+| 提交 | 内容 |
+| --- | --- |
+| `ec6a1da` | **反馈从没发出去**：联网时只显示「已保存草稿，等待提交」，实际没请求；草稿也只在页面 `@State` 里，离开页面就丢，「已保存」是假话。现接 `POST /feedback`，草稿连同幂等键落盘，重试不重复建单，显示服务端工单号 |
+| `fef8d33` | 偏好接入 `GET/PUT /preferences`：按 Valley「冲突时重新合并、不静默覆盖」的要求做三方合并，只把本机改过的字段套到服务端最新版上 |
+| `5c63734` | 删除未被调用的 `completeReview`：它发 `complete_review` 远程命令，**绕过验收条件与执行证据**，留着就是一条能跳过验收的路 |
+| `ecbf965` | 卡片上显示的是 provider 原始值（小写 claude / codex），改为显示名 |
+
 过程中两次自己的失误，已修正并记录：
 - 雪山 banner 初版用 `scaledToFill` 直接放进 ZStack，把整页撑出横向溢出（违反 390 宽约束）。
   改为放进 `background`，不参与布局尺寸。
-- 有一次提交前把 `DEVELOPER_DIR` 指向 CommandLineTools，`xcodebuild` 直接报错退出，
-  当时没看输出就提交了；事后补跑确认通过。`DEVELOPER_DIR` 只该给 git 用。
+- 有两次在同一个 shell 里先 `export DEVELOPER_DIR`（给 git 用）再跑 `xcodebuild`，
+  后者直接报错退出。第一次没看输出就提交了，事后补跑确认通过；第二次发现后重跑再提交。
+  现在 git 命令只用单条前缀 `DEVELOPER_DIR=... git ...`，不再 export。
 
 ## 遗留问题
 
@@ -94,9 +106,9 @@
 
 ## 验证
 
-- `xcodebuild test`（KeJiTests）：119 通过，0 失败。
-- `bash ios/scripts/run-qa.sh`（含 KeJiUITests 15 个，fixture 服务器已手动启动）：
-  全部通过，产物 `ios/qa-artifacts/20260919-100832`。
+- `xcodebuild test`（KeJiTests）：129 通过，0 失败。
+- `bash ios/scripts/run-qa.sh`（含 KeJiUITests 17 个，fixture 服务器已手动启动）：
+  全部通过，产物 `ios/qa-artifacts/20260919-114317`。
 - 390×844 截图（与设计稿同尺寸，iPhone 16e 模拟器）：今日 / 项目 / 时间线 / AI / 我的 /
   报告 / 项目报告，无横向溢出。视觉重建后的一套在
   `ios/qa-artifacts/390x844-visual-rebuild/`，重建前的基线在 `390x844-design-compare/`。

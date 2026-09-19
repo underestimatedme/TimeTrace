@@ -32,7 +32,6 @@
 
 - **设计稿的「查看提交与验收证据」「查看评分依据」**：设计稿自己标注这些是演示记录，
   目前没有真实证据来源，不做假页面。
-- **「公共重置信号」（BetterOPC 链接）**：Valley 有 `/v1/reset-signals`，iOS 端未对接，不放假链接。
 - **AI 页的全局「自动续跑」开关**：Valley 里 `allow_auto_resume` 是每个 Plan 的字段，
   偏好接口没有全局项。做成全局要改跨仓契约，现按现有契约放在 Plan 详情。
 - **App 内撤销设备授权**：`/v1` 没有撤销接口，页面写明需在电脑上停止 Runner。
@@ -62,6 +61,14 @@
 固定字号是视觉重建时加重的问题：为对齐设计稿字号把 `.system(size:)` 铺得更开，
 导致全 App 不跟随系统字体大小。已在最大无障碍字号下截图验证布局不崩。
 
+## 上架前置与补齐（2026-09-19 追加）
+
+| 提交 | 内容 |
+| --- | --- |
+| `cb102bc` | `PrivacyInfo.xcprivacy`：不追踪；`UserDefaults` 原因 `CA92.1`；申报邮箱、手机号、用户内容、可选诊断数据，均不用于追踪。`ReleaseReadinessTests` 锁定随包分发与申报内容；上架检查清单 `keji-ios-release-checklist.md` |
+| `c366192` | 「关于刻迹」页：版本号读 Info.plist（缺失时显示「版本未知」），数据存放 / AI 费用 / 隐私三段为生产版真实说明，替换设计稿的演示说明 |
+| `7468846` | 接入 `GET /reset-signals`（`link_only` 下只展示来源链接，写明不替代个人额度核验）；**修复 AI 页联网时从未加载真实额度**——`accountQuota()` 此前没有任何调用点。联网 UI 测试以 fixture 的 62%（示例数据为 80%）证明请求确实发出 |
+
 过程中两次自己的失误，已修正并记录：
 - 雪山 banner 初版用 `scaledToFill` 直接放进 ZStack，把整页撑出横向溢出（违反 390 宽约束）。
   改为放进 `background`，不参与布局尺寸。
@@ -73,8 +80,8 @@
 1. **未在真机验证**：玻璃材质、多层模糊与投影在真机上的观感和性能未知。
    运行方式见 `ios/README.md`「在真机上运行」，需要用户的证书与设备。
 2. **未与真实 Valley 联调**：联网路径只在本地 fixture 服务器下验证过。
-3. **上架前置未做**：无 `PrivacyInfo.xcprivacy`；本机没有 Apple Distribution 证书；
-   工程默认关闭签名。
+3. **上架前置仍缺证书**：隐私清单与检查清单已完成；本机仍没有 Apple Distribution 证书，
+   工程默认关闭签名。见 `keji-ios-release-checklist.md`。
 4. **`00-总纲.md` 的 Valley 路径过期**：文档写的 `.worktrees/valley-workspace-review` 不存在；
    其所述分支 `codex/keji-ai-workspace-fixes` 实际在 `/opt/coding/planb/github/Valley`
    （而文档说该检出没有刻迹代码）。本次契约以该检出为准，另一个 worktree
@@ -82,13 +89,14 @@
    远程提交 `5e9462e` 已将提示词改指 Valley 主检出。
 5. **`--ui-testing` 下的偏好持久化**：原先完全不落盘，导致偏好类设置无法验证跨启动保留。
    已改为写入独立的 `keji-ui-testing` UserDefaults suite，并在 `--sample-data` 时重置。
-6. **合并未经 review**：本机没有 `gh`，`main` 是直接快进合并推送的，没走 PR。
+6. **合并流程**：2026-09-18 那次 `main` 是直接快进推送的，没走 review。
+   此后改为：推功能分支，由用户在 GitHub 上开 PR 审核合并（本机无 `gh`）。
 
 ## 验证
 
-- `xcodebuild test`（KeJiTests）：113 通过，0 失败。
-- `bash ios/scripts/run-qa.sh`（含 KeJiUITests 14 个，fixture 服务器已手动启动）：
-  全部通过，产物 `ios/qa-artifacts/20260918-211212`。
+- `xcodebuild test`（KeJiTests）：119 通过，0 失败。
+- `bash ios/scripts/run-qa.sh`（含 KeJiUITests 15 个，fixture 服务器已手动启动）：
+  全部通过，产物 `ios/qa-artifacts/20260919-100832`。
 - 390×844 截图（与设计稿同尺寸，iPhone 16e 模拟器）：今日 / 项目 / 时间线 / AI / 我的 /
   报告 / 项目报告，无横向溢出。视觉重建后的一套在
   `ios/qa-artifacts/390x844-visual-rebuild/`，重建前的基线在 `390x844-design-compare/`。

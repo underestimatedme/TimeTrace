@@ -55,7 +55,7 @@ struct AIExecutionView: View {
         let status = execution?.status ?? .queued
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Text(task.aiProvider?.rawValue ?? "AI").font(Typo.sans(Typo.sm, weight: .medium)).foregroundStyle(theme.ai)
+                Text(task.aiProvider?.label ?? "AI").font(Typo.sans(Typo.sm, weight: .medium)).foregroundStyle(theme.ai)
                 TintPill(text: status.label, color: statusColor(status))
                     .opacity(status == .running && pulse ? 0.6 : 1)
                     .animation(status == .running ? .easeInOut(duration: 1).repeatForever(autoreverses: true) : .default, value: pulse)

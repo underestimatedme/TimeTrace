@@ -50,6 +50,7 @@ struct Endpoint {
     // MARK: - Workspace (Plans / quota / reports)
 
     static let accountQuota = Endpoint(method: .get, path: "/quota", requiresAuth: true, body: nil)
+    static let resetSignals = Endpoint(method: .get, path: "/reset-signals", requiresAuth: true, body: nil)
     static func taskPlans(taskID: String) -> Endpoint {
         Endpoint(method: .get, path: "/tasks/\(taskID)/plans", requiresAuth: true, body: nil)
     }

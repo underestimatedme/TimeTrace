@@ -35,6 +35,8 @@ struct AIToolsView: View {
                     .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted).padding(.bottom, 24)
             }
 
+            if let signals = store.resetSignals { resetSignalsSection(signals) }
+
             if !sync.isLoggedIn {
                 Card(borderColor: theme.accent.opacity(0.2)) {
                     Text("请先在账号页登录，再绑定电脑。游客账号不能批准 Runner。")
@@ -86,7 +88,10 @@ struct AIToolsView: View {
             .padding(.top, 24)
         }
         .sheet(item: $selectedPool) { pool in poolDetail(pool) }
-        .task { if sync.isLoggedIn { await remote.loadRunners() } }
+        .task {
+            await store.refreshWorkspaceQuota()
+            if sync.isLoggedIn { await remote.loadRunners() }
+        }
         .confirmationDialog("确认绑定这台电脑？", isPresented: Binding(
             get: { pendingInspection != nil }, set: { if !$0 { pendingInspection = nil } }
         ), titleVisibility: .visible) {
@@ -127,6 +132,48 @@ struct AIToolsView: View {
             Text(card.detail).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary).padding(.top, 10)
             Text(card.footnote).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted).padding(.top, 2)
         }
+    }
+
+    /// 公共重置信号：只展示 Valley 给的来源与事件；它不代表个人额度已恢复。
+    @ViewBuilder
+    private func resetSignalsSection(_ response: ResetSignalsResponse) -> some View {
+        SectionTitle("公共重置信号")
+        VStack(spacing: 10) {
+            ForEach(response.signals) { signal in
+                Card(padding: 18, radius: Glass.groupRadius) {
+                    HStack {
+                        Text(signal.products.joined(separator: " / "))
+                            .font(Typo.sans(Glass.body, weight: .semibold)).foregroundStyle(theme.text)
+                        Spacer(minLength: 8)
+                        TintPill(text: signal.confidenceLabel,
+                                 color: signal.canRefreshQuota ? theme.success : theme.warning)
+                    }
+                    Text(signal.effectiveText).font(Typo.sans(Glass.small)).foregroundStyle(theme.textSecondary)
+                        .padding(.top, 6)
+                    Link("查看来源", destination: signal.sourceUrl)
+                        .font(Typo.sans(Glass.small)).padding(.top, 6)
+                }
+            }
+            ForEach(response.sources) { source in
+                Link(destination: source.url) {
+                    Card(padding: 18, radius: Glass.groupRadius) {
+                        HStack {
+                            Text(source.name).font(Typo.sans(Glass.body, weight: .semibold)).foregroundStyle(theme.text)
+                            Spacer(minLength: 8)
+                            Image(systemName: "arrow.up.right").font(.system(size: 13))
+                                .foregroundStyle(theme.textMuted).accessibilityHidden(true)
+                        }
+                        Text(response.signals.isEmpty ? "公共重置与活动动态" : "信号来源")
+                            .font(Typo.sans(Glass.small)).foregroundStyle(theme.textSecondary).padding(.top, 6)
+                    }
+                }
+                .accessibilityIdentifier("reset.source.\(source.name)")
+            }
+        }
+        Text(response.note.isEmpty ? "公共信号不代表你的个人额度已恢复。" : response.note)
+            .font(Typo.sans(Glass.small)).foregroundStyle(theme.textMuted)
+            .padding(.top, 8).padding(.bottom, 24)
+            .accessibilityIdentifier("reset.note")
     }
 
     /// 额度池明细：每个窗口一行，写明来源与采样时间。

@@ -161,4 +161,21 @@ final class WorkspaceFlowTests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
     }
+    /// AI 页联网时从 Valley 拉取个人额度与公共重置信号。
+    /// fixture 返回 62%，示例数据是 80%：看到 62% 才说明请求真的发了出去。
+    func testAIPageLoadsQuotaAndResetSignalsFromServer() {
+        app.terminate()
+        app.launchArguments = ["--workspace-fixture", "--online-ui-testing", "--api-base-url",
+                               "http://127.0.0.1:18768/signals-\(UUID().uuidString)", "--screen", "ai-tools"]
+        app.launchEnvironment["KEJI_OFFLINE"] = "0"
+        app.launch()
+        XCTAssertTrue(app.staticTexts["62%"].waitForExistence(timeout: 8), "额度应当来自服务端，而不是示例数据")
+        let source = app.descendants(matching: .any)["reset.source.BetterOPC"].firstMatch
+        for _ in 0..<6 where !source.exists { app.swipeUp() }
+        XCTAssertTrue(source.waitForExistence(timeout: 5), "应当显示 Valley 返回的信号来源")
+        let note = app.staticTexts["reset.note"].firstMatch
+        XCTAssertTrue(note.exists)
+        XCTAssertTrue(note.label.contains("不替代个人额度核验"), "必须写明公共信号不代表个人额度")
+        capture("ai-reset-signals")
+    }
 }

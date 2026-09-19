@@ -261,3 +261,15 @@ extension AppStore {
         }
     }
 }
+
+extension AppStore {
+    /// 打开 AI 页时从 Valley 拉取个人额度与公共重置信号。
+    /// 之前 accountQuota 只在示例数据里赋值，联网模式从未加载过真实额度。
+    /// 任一请求失败都保留已有值，不用假数据填充。
+    @MainActor
+    func refreshWorkspaceQuota() async {
+        guard let workspaceClient else { return }
+        if let quota = try? await workspaceClient.accountQuota() { accountQuota = quota }
+        if let signals = try? await workspaceClient.resetSignals() { resetSignals = signals }
+    }
+}

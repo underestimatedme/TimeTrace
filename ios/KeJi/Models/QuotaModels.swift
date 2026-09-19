@@ -44,3 +44,41 @@ struct AccountQuota: Codable, Equatable {
     var pools: [AccountQuotaPool]
     var observedAt: Date
 }
+
+/// 公共重置信号（Valley `GET /reset-signals`）。它**永远不能**替代个人额度读数：
+/// 已确认的公共事件最多触发一次个人额度的重新核验，不会直接解除任何阻塞。
+struct ResetSignal: Codable, Equatable, Identifiable {
+    var id: String
+    var sourceUrl: URL
+    var publishedAt: Date
+    var effectiveAt: Date?
+    var products: [String]
+    var plans: [String]
+    var confidence: String      // confirmed / possible
+    var fetchedAt: Date
+    var expiresAt: Date
+    var revision: Int64
+
+    /// 与 Valley `CanRefreshQuota` 一致：只有 confirmed 才能安排一次核验。
+    var canRefreshQuota: Bool { confidence == "confirmed" }
+    var confidenceLabel: String { confidence == "confirmed" ? "已确认" : "可能" }
+    /// 缺生效时间就说未知，不从「今天」推算。
+    var effectiveText: String {
+        effectiveAt.map { "预计 \(Format.dateShort($0)) \(Format.time($0)) 生效" } ?? "生效时间未知"
+    }
+}
+
+struct ResetSource: Codable, Equatable, Identifiable {
+    var name: String
+    var url: URL
+    var id: String { url.absoluteString }
+}
+
+struct ResetSignalsResponse: Codable, Equatable {
+    var integrationStatus: String   // link_only / cached
+    var sources: [ResetSource]
+    var signals: [ResetSignal]
+    var cacheAgeSeconds: Int
+    var fetchedAt: Date?
+    var note: String
+}

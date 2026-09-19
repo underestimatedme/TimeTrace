@@ -32,6 +32,8 @@ final class AppStore {
     /// Transient account quota from the server (WorkspaceClient); not persisted.
     /// Offline/sample builds seed it so the AI tab can render quota windows.
     var accountQuota: AccountQuota?
+    /// 公共重置信号：只来自 Valley，离线时为 nil，不伪造。
+    var resetSignals: ResetSignalsResponse?
     /// Display/behaviour preferences (theme lives in settings). Persisted locally.
     var preferences: UserPreferences = .defaults
     var settings: UserSettings = .defaults()

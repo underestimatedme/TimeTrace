@@ -101,4 +101,28 @@ final class WorkspaceContractTests: XCTestCase {
         }
         XCTAssertFalse(canEditAutoResume(plan("draft-t", .ready)))
     }
+    /// Valley 首发只给来源链接（link_only），事件为空，并注明公共信号不替代个人额度核验。
+    func testResetSignalsDecodesValleyLinkOnlyShape() throws {
+        let json = #"{"integration_status":"link_only","sources":[{"name":"BetterOPC","url":"https://betteropc.com"}],"signals":[],"cache_age_seconds":0,"note":"尚无确认可用的公共信号接口或抓取许可；仅提供来源链接。公共信号不替代个人额度核验。"}"#
+        let response = try JSONCoding.decoder.decode(ResetSignalsResponse.self, from: Data(json.utf8))
+        XCTAssertEqual(response.integrationStatus, "link_only")
+        XCTAssertEqual(response.sources.first?.name, "BetterOPC")
+        XCTAssertEqual(response.sources.first?.url.absoluteString, "https://betteropc.com")
+        XCTAssertTrue(response.signals.isEmpty)
+        XCTAssertNil(response.fetchedAt)
+        XCTAssertEqual(Endpoint.resetSignals.path, "/reset-signals")
+    }
+
+    /// 生效时间缺失时保持未知，不从「今天」推算；只有 confirmed 才算已确认。
+    func testResetSignalWithoutEffectiveTimeStaysUnknown() throws {
+        let json = #"{"id":"s1","source_url":"https://betteropc.com/x","published_at":"2026-09-18T08:00:00Z","effective_at":null,"products":["codex"],"plans":["plus"],"confidence":"possible","fetched_at":"2026-09-18T09:00:00Z","expires_at":"2026-09-19T09:00:00Z","revision":1}"#
+        let signal = try JSONCoding.decoder.decode(ResetSignal.self, from: Data(json.utf8))
+        XCTAssertNil(signal.effectiveAt)
+        XCTAssertEqual(signal.effectiveText, "生效时间未知")
+        XCTAssertEqual(signal.confidenceLabel, "可能")
+        XCTAssertFalse(signal.canRefreshQuota, "possible 不能触发额度核验")
+        var confirmed = signal; confirmed.confidence = "confirmed"
+        XCTAssertEqual(confirmed.confidenceLabel, "已确认")
+        XCTAssertTrue(confirmed.canRefreshQuota)
+    }
 }

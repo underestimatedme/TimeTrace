@@ -36,6 +36,19 @@ class Handler(BaseHTTPRequestHandler):
                     "total_score": 95, "human_seconds": 600, "ai_seconds": 1200, "waiting_seconds": None,
                     "evidence_ids": ["a1", "a2"], "baseline_version": "phase-facts-v2",
                     "breakdown": {"zone": "Asia/Dubai", "evidence_coverage": 1, "facts": facts}}
+        elif path == "/reset-signals":
+            # 与 Valley linkOnlyResetSignals() 完全一致：只给来源链接，不给事件。
+            data = {"integration_status": "link_only",
+                    "sources": [{"name": "BetterOPC", "url": "https://betteropc.com"}],
+                    "signals": [], "cache_age_seconds": 0,
+                    "note": "尚无确认可用的公共信号接口或抓取许可；仅提供来源链接。公共信号不替代个人额度核验。"}
+        elif path == "/quota":
+            data = {"pools": [{"pool_id": "pool-codex", "provider": "codex", "availability": "available",
+                               "windows": [{"pool_id": "pool-codex", "scope": "short", "kind": "codex",
+                                            "limit_id": "", "window_mins": 300, "used_percent": 38,
+                                            "observed_at": NOW, "expires_at": "2099-01-01T00:00:00Z",
+                                            "source": "runner", "confidence": "exact"}]}],
+                    "observed_at": NOW}
         elif path == "/runners":
             data = [{"runner": {"id": "runner-ui", "name": "Test Mac", "platform": "darwin", "client_version": "1",
                                 "status": "online", "created_at": NOW, "updated_at": NOW},

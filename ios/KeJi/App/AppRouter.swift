@@ -48,6 +48,7 @@ enum Route: Hashable {
     case aiTools
     case appearance
     case devices
+    case about
     case account
     case privacy
     case homeCustomization
@@ -104,6 +105,7 @@ final class AppRouter {
         case ("reports", let id?): go(.projects); push(.project(id)); push(.reports(.project(id)))
         case ("appearance", _): go(.mine); push(.appearance)
         case ("devices", _): go(.mine); push(.devices)
+        case ("about", _): go(.mine); push(.about)
         case ("account", _): go(.mine); push(.account)
         default: go(.today)
         }

@@ -38,4 +38,10 @@ final class ReleaseReadinessTests: XCTestCase {
                            "\(entry["NSPrivacyCollectedDataType"] ?? "?") 不应标为追踪")
         }
     }
+    /// 关于页显示的版本号来自包信息，不写死。
+    func testAboutVersionTextComesFromBundleInfo() {
+        XCTAssertEqual(AppVersion.text(info: ["CFBundleShortVersionString": "0.1.0", "CFBundleVersion": "2026091201"]),
+                       "版本 0.1.0（2026091201）")
+        XCTAssertEqual(AppVersion.text(info: [:]), "版本未知", "缺信息时不编造版本号")
+    }
 }

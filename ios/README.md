@@ -44,7 +44,7 @@ xcrun simctl launch booted com.atlaspaces.timetrace --sample-data --screen today
 | Argument | Effect |
 |---|---|
 | `--sample-data` | Load `createSampleData()`, mark onboarding done, skip Splash |
-| `--screen <route>` | Jump to a page: `today`, `tasks`, `tasks/new`, `tasks/<id>`, `timeline`, `insights`, `profile`, `focus/<id>`, `ai/<id>`, `projects`, `projects/<id>`, `goals/<id>`, `plans/<id>`, `ai-tools`, `reports`, `reports/<projectId>`, `appearance`, `devices`, `account`, `onboarding`, `splash` |
+| `--screen <route>` | Jump to a page: `today`, `tasks`, `tasks/new`, `tasks/<id>`, `timeline`, `insights`, `profile`, `focus/<id>`, `ai/<id>`, `projects`, `projects/<id>`, `goals/<id>`, `plans/<id>`, `ai-tools`, `reports`, `reports/<projectId>`, `appearance`, `devices`, `about`, `account`, `onboarding`, `splash` |
 | `--theme <name>` | `light` (冰晶白) \| `dark` (深海蓝) \| `claude` \| `codex` \| `cursor` — 调试用，覆盖「主题与动效」的设置 |
 | `--offline` | Disable all networking (fully usable offline) |
 | `--api-base-url <url>` | Override the API base URL |

@@ -81,6 +81,7 @@ struct MainShellView: View {
         case .aiTools: AIToolsView()
         case .appearance: AppearanceView()
         case .devices: DevicesView()
+        case .about: AboutView()
         case .account: AccountView()
         case .privacy: PrivacyView()
         case .homeCustomization: HomeCustomizationView()

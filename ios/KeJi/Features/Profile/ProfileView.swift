@@ -34,7 +34,7 @@ struct ProfileView: View {
             MenuItem(icon: "square.grid.2x2", label: "首页个性化", route: .homeCustomization),
             MenuItem(icon: "paintpalette", label: "主题与动效", value: store.preferences.themeMode.label, route: .appearance),
             MenuItem(icon: "bubble.left", label: "反馈", route: .feedback),
-            MenuItem(icon: "info.circle", label: "关于刻迹", value: "v0.1.0"),
+            MenuItem(icon: "info.circle", label: "关于刻迹", value: AppVersion.current, route: .about),
         ]
     }
 

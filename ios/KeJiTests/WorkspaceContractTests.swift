@@ -125,4 +125,33 @@ final class WorkspaceContractTests: XCTestCase {
         XCTAssertEqual(confirmed.confidenceLabel, "已确认")
         XCTAssertTrue(confirmed.canRefreshQuota)
     }
+    /// 反馈走 Valley 的 POST /feedback：body / idempotency_key / include_diagnostics。
+    func testFeedbackRequestMatchesValleyContract() throws {
+        let draft = FeedbackDraft(idempotencyKey: "key-1", text: "  额度页看不到周窗口  ", attachDiagnostics: true)
+        let endpoint = Endpoint.createFeedback(draft)
+        XCTAssertEqual(endpoint.path, "/feedback")
+        XCTAssertEqual(endpoint.method, .post)
+        let body = try JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(FeedbackBody(draft: draft))) as? [String: Any]
+        XCTAssertEqual(body?["body"] as? String, "额度页看不到周窗口", "提交前去掉首尾空白")
+        XCTAssertEqual(body?["idempotency_key"] as? String, "key-1")
+        XCTAssertEqual(body?["include_diagnostics"] as? Bool, true)
+    }
+
+    func testFeedbackTicketDecodesValleyShape() throws {
+        let json = #"{"ticket_id":"fb_123","body":"额度页看不到周窗口","status":"open","include_diagnostics":false,"created_at":"2026-09-19T08:00:00Z","updated_at":"2026-09-19T08:00:00Z"}"#
+        let ticket = try JSONCoding.decoder.decode(FeedbackTicket.self, from: Data(json.utf8))
+        XCTAssertEqual(ticket.ticketId, "fb_123")
+        XCTAssertEqual(ticket.status, "open")
+    }
+
+    /// 重试必须沿用同一个幂等键，服务端才会返回同一张单而不是重复建单；
+    /// 内容改了才算新的一条反馈。
+    func testFeedbackRetryReusesIdempotencyKeyUnlessTextChanges() {
+        let pending = FeedbackDraft(idempotencyKey: "key-1", text: "同一条反馈", attachDiagnostics: false)
+        XCTAssertEqual(FeedbackDraft.next(pending: pending, text: "同一条反馈", attachDiagnostics: false).idempotencyKey, "key-1")
+        XCTAssertEqual(FeedbackDraft.next(pending: pending, text: "同一条反馈 ", attachDiagnostics: false).idempotencyKey, "key-1",
+                       "只差首尾空白算同一条")
+        XCTAssertNotEqual(FeedbackDraft.next(pending: pending, text: "另一条反馈", attachDiagnostics: false).idempotencyKey, "key-1")
+        XCTAssertNotEqual(FeedbackDraft.next(pending: nil, text: "同一条反馈", attachDiagnostics: false).idempotencyKey, "")
+    }
 }

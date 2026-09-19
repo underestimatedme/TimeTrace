@@ -36,6 +36,18 @@ class Handler(BaseHTTPRequestHandler):
                     "total_score": 95, "human_seconds": 600, "ai_seconds": 1200, "waiting_seconds": None,
                     "evidence_ids": ["a1", "a2"], "baseline_version": "phase-facts-v2",
                     "breakdown": {"zone": "Asia/Dubai", "evidence_coverage": 1, "facts": facts}}
+        elif path == "/feedback" and self.command == "POST":
+            # 与 Valley 一致：同一幂等键返回同一张单（200），新键建新单（201）。
+            tickets = state.setdefault("feedback", {})
+            key = body.get("idempotency_key", "")
+            if key in tickets:
+                data = tickets[key]
+            else:
+                data = {"ticket_id": "fb-ui-%d" % (len(tickets) + 1), "body": body.get("body", ""),
+                        "status": "open", "include_diagnostics": body.get("include_diagnostics", False),
+                        "created_at": NOW, "updated_at": NOW}
+                tickets[key] = data
+                status = 201
         elif path == "/reset-signals":
             # 与 Valley linkOnlyResetSignals() 完全一致：只给来源链接，不给事件。
             data = {"integration_status": "link_only",

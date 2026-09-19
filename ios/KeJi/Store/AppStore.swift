@@ -158,7 +158,40 @@ final class AppStore {
 
     private let preferencesStore = PreferencesStore()
 
-    func loadPreferences() { preferences = preferencesStore.load() }
+    func loadPreferences() {
+        preferences = preferencesStore.load()
+        pendingFeedback = preferencesStore.loadPendingFeedback()
+    }
+
+    // MARK: - Feedback
+
+    /// 还没成功提交的反馈草稿。持久化，所以「已保存草稿」这句话是真的。
+    var pendingFeedback: FeedbackDraft?
+
+    enum FeedbackOutcome: Equatable {
+        case submitted(ticketId: String)
+        case savedOffline
+        case failed(String)
+    }
+
+    /// 提交反馈。先把草稿落盘，再发请求；成功才清掉草稿，失败保留、重试沿用同一幂等键。
+    func submitFeedback(text: String, attachDiagnostics: Bool) async -> FeedbackOutcome {
+        let draft = FeedbackDraft.next(pending: pendingFeedback, text: text, attachDiagnostics: attachDiagnostics)
+        guard draft.isValid else { return .failed("请填写反馈内容（最多 \(FeedbackDraft.maxLength) 字）。") }
+        pendingFeedback = draft
+        preferencesStore.savePendingFeedback(draft)
+        guard let workspaceClient else { return .savedOffline }
+        do {
+            let ticket = try await workspaceClient.submitFeedback(draft)
+            pendingFeedback = nil
+            preferencesStore.savePendingFeedback(nil)
+            return .submitted(ticketId: ticket.ticketId)
+        } catch let error as APIError where error.code == 42910 {
+            return .failed("提交过于频繁，请稍后再试。草稿已保留。")
+        } catch {
+            return .failed("提交失败：\(error.localizedDescription)。草稿已保留，重试不会重复建单。")
+        }
+    }
 
     func updatePreferences(_ transform: (inout UserPreferences) -> Void) {
         var updated = preferences

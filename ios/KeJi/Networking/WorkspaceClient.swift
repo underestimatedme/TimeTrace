@@ -12,6 +12,10 @@ final class WorkspaceClient {
         try await client.send(.accountQuota, as: AccountQuota.self)
     }
 
+    func submitFeedback(_ draft: FeedbackDraft) async throws -> FeedbackTicket {
+        try await client.send(.createFeedback(draft), as: FeedbackTicket.self)
+    }
+
     func resetSignals() async throws -> ResetSignalsResponse {
         try await client.send(.resetSignals, as: ResetSignalsResponse.self)
     }

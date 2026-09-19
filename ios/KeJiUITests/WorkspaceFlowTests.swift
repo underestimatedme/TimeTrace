@@ -178,4 +178,24 @@ final class WorkspaceFlowTests: XCTestCase {
         XCTAssertTrue(note.label.contains("不替代个人额度核验"), "必须写明公共信号不代表个人额度")
         capture("ai-reset-signals")
     }
+    /// 反馈真的发到服务端，并显示服务端返回的工单号（之前联网时只显示「已保存草稿」，其实什么都没发）。
+    func testFeedbackIsSubmittedToServerAndShowsTicket() {
+        app.terminate()
+        app.launchArguments = ["--workspace-fixture", "--online-ui-testing", "--api-base-url",
+                               "http://127.0.0.1:18768/feedback-\(UUID().uuidString)", "--screen", "profile"]
+        app.launchEnvironment["KEJI_OFFLINE"] = "0"
+        app.launch()
+        let entry = app.buttons["反馈"].firstMatch
+        for _ in 0..<6 where !entry.isHittable { app.swipeUp() }
+        entry.tap()
+        let field = app.textViews["feedback.text"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("额度页看不到周窗口")
+        tap("feedback.submit")
+        let status = app.staticTexts["feedback.status"].firstMatch
+        XCTAssertTrue(status.waitForExistence(timeout: 8))
+        XCTAssertTrue(status.label.contains("工单号 fb-ui-1"), "应显示服务端工单号，实际：\(status.label)")
+        capture("feedback-submitted")
+    }
 }

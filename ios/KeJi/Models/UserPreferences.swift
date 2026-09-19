@@ -93,4 +93,26 @@ struct FeedbackDraft: Codable, Equatable {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return !trimmed.isEmpty && trimmed.count <= FeedbackDraft.maxLength
     }
+
+    var trimmedText: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// 重试同一条反馈时沿用原来的幂等键，服务端返回同一张单，不会重复建单；
+    /// 内容变了才生成新键。
+    static func next(pending: FeedbackDraft?, text: String, attachDiagnostics: Bool) -> FeedbackDraft {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let pending, pending.trimmedText == trimmed {
+            return FeedbackDraft(idempotencyKey: pending.idempotencyKey, text: text, attachDiagnostics: attachDiagnostics)
+        }
+        return .new(text: text, attachDiagnostics: attachDiagnostics)
+    }
+}
+
+/// Valley 返回的反馈工单。
+struct FeedbackTicket: Codable, Equatable {
+    var ticketId: String
+    var body: String
+    var status: String
+    var includeDiagnostics: Bool
+    var createdAt: Date
+    var updatedAt: Date
 }

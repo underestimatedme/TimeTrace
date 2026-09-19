@@ -5,7 +5,6 @@ import SwiftUI
 struct FeedbackView: View {
     @Environment(\.theme) private var theme
     @Environment(AppStore.self) private var store
-    @Environment(AppEnvironment.self) private var appEnv
 
     @State private var text = ""
     @State private var attachDiagnostics = false
@@ -37,6 +36,14 @@ struct FeedbackView: View {
                 submit()
             }
             .accessibilityIdentifier("feedback.submit")
+            .onAppear {
+                // 恢复上次没提交成功的草稿；「草稿已保留」这句话必须是真的。
+                if text.isEmpty, let pending = store.pendingFeedback {
+                    text = pending.text
+                    attachDiagnostics = pending.attachDiagnostics
+                    status = "上次的反馈还没提交成功，已恢复草稿。"
+                }
+            }
 
             if let status {
                 Text(status).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
@@ -46,15 +53,20 @@ struct FeedbackView: View {
     }
 
     private func submit() {
-        let draft = FeedbackDraft.new(text: text, attachDiagnostics: attachDiagnostics)
-        guard draft.isValid else { return }
-        if appEnv.options.offline {
-            // No server: keep the draft, never fabricate a ticket id.
-            status = "已保存草稿（离线）。恢复网络后可重试提交，不会重复建单。"
-            return
+        submitting = true
+        _Concurrency.Task {
+            let outcome = await store.submitFeedback(text: text, attachDiagnostics: attachDiagnostics)
+            submitting = false
+            switch outcome {
+            case .submitted(let ticketId):
+                status = "已提交，工单号 \(ticketId)。"
+                text = ""
+                attachDiagnostics = false
+            case .savedOffline:
+                status = "已保存草稿（离线）。恢复网络后重新提交，不会重复建单。"
+            case .failed(let message):
+                status = message
+            }
         }
-        // Online submission over AccountSettingsClient lands with I4 server work;
-        // until then, keep the draft rather than claim acceptance.
-        status = "已保存草稿，等待提交。"
     }
 }

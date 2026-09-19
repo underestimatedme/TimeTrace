@@ -51,6 +51,9 @@ struct Endpoint {
 
     static let accountQuota = Endpoint(method: .get, path: "/quota", requiresAuth: true, body: nil)
     static let resetSignals = Endpoint(method: .get, path: "/reset-signals", requiresAuth: true, body: nil)
+    static func createFeedback(_ draft: FeedbackDraft) -> Endpoint {
+        Endpoint(method: .post, path: "/feedback", requiresAuth: true, body: FeedbackBody(draft: draft))
+    }
     static func taskPlans(taskID: String) -> Endpoint {
         Endpoint(method: .get, path: "/tasks/\(taskID)/plans", requiresAuth: true, body: nil)
     }
@@ -114,6 +117,18 @@ struct AcceptPlanBody: Encodable {
 struct UpdatePlanPolicyBody: Encodable {
     var expectedRevision: Int
     var executionPolicy: PlanExecutionPolicy
+}
+
+struct FeedbackBody: Encodable {
+    var body: String
+    var idempotencyKey: String
+    var includeDiagnostics: Bool
+
+    init(draft: FeedbackDraft) {
+        body = draft.trimmedText
+        idempotencyKey = draft.idempotencyKey
+        includeDiagnostics = draft.attachDiagnostics
+    }
 }
 
 struct RevisionBody: Encodable {

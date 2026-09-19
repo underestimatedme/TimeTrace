@@ -1,0 +1,41 @@
+import XCTest
+@testable import KeJi
+
+/// 上架前置条件：隐私清单必须随 App 打包，并如实申报。
+final class ReleaseReadinessTests: XCTestCase {
+    private func privacyManifest() throws -> [String: Any] {
+        let url = try XCTUnwrap(Bundle.main.url(forResource: "PrivacyInfo", withExtension: "xcprivacy"),
+                                "PrivacyInfo.xcprivacy 没有打进 App 包，审核会被打回")
+        let data = try Data(contentsOf: url)
+        return try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+    }
+
+    /// 刻迹不做跨 App 追踪，也不接任何追踪域名。
+    func testPrivacyManifestDeclaresNoTracking() throws {
+        let manifest = try privacyManifest()
+        XCTAssertEqual(manifest["NSPrivacyTracking"] as? Bool, false)
+        XCTAssertEqual((manifest["NSPrivacyTrackingDomains"] as? [String])?.isEmpty, true)
+    }
+
+    /// 偏好存在 UserDefaults 里，这是需要申报原因的 API（CA92.1：仅本 App 读写）。
+    func testPrivacyManifestDeclaresUserDefaultsReason() throws {
+        let manifest = try privacyManifest()
+        let apis = try XCTUnwrap(manifest["NSPrivacyAccessedAPITypes"] as? [[String: Any]])
+        let defaults = apis.first { $0["NSPrivacyAccessedAPIType"] as? String == "NSPrivacyAccessedAPICategoryUserDefaults" }
+        XCTAssertEqual(defaults?["NSPrivacyAccessedAPITypeReasons"] as? [String], ["CA92.1"])
+    }
+
+    /// 如实申报：登录用的邮箱/手机号、用户写的任务内容；都不用于追踪。
+    func testPrivacyManifestDeclaresCollectedDataWithoutTracking() throws {
+        let manifest = try privacyManifest()
+        let collected = try XCTUnwrap(manifest["NSPrivacyCollectedDataTypes"] as? [[String: Any]])
+        let types = Set(collected.compactMap { $0["NSPrivacyCollectedDataType"] as? String })
+        XCTAssertTrue(types.isSuperset(of: ["NSPrivacyCollectedDataTypeEmailAddress",
+                                            "NSPrivacyCollectedDataTypePhoneNumber",
+                                            "NSPrivacyCollectedDataTypeOtherUserContent"]))
+        for entry in collected {
+            XCTAssertEqual(entry["NSPrivacyCollectedDataTypeTracking"] as? Bool, false,
+                           "\(entry["NSPrivacyCollectedDataType"] ?? "?") 不应标为追踪")
+        }
+    }
+}

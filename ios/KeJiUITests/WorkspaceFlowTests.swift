@@ -3,6 +3,58 @@ import XCTest
 /// Run TestSupport/workspace_server.py on the host before the HTTP scenarios.
 /// Offline fixtures never unlock dependencies; HTTP scenarios use the real client.
 final class WorkspaceFlowTests: XCTestCase {
+    func testFeedbackDraftSurvivesLeavingPage() {
+        app.terminate()
+        app.launchArguments = ["--ui-testing", "--offline", "--sample-data", "--screen", "profile"]
+        app.launch()
+        app.swipeUp()
+        app.buttons["反馈"].firstMatch.tap()
+        let editor = app.textViews["feedback.text"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        editor.tap()
+        editor.typeText("Feedback draft persists")
+        let expected = editor.value as? String
+        XCTAssertTrue(expected?.contains("Feedback draft persists") == true)
+        tap("subpage.back")
+        app.swipeUp()
+        app.buttons["反馈"].firstMatch.tap()
+        XCTAssertEqual(app.textViews["feedback.text"].value as? String, expected)
+        XCTAssertTrue(app.staticTexts["feedback.status"].label.contains("仅本机草稿"))
+    }
+
+    func testFeedbackHTTPFailureRestartRetryAndConfirmedCleanup() {
+        app.terminate()
+        app.launchArguments = ["--workspace-fixture", "--online-ui-testing", "--api-base-url",
+                               "http://127.0.0.1:18768/feedback-\(UUID().uuidString)", "--screen", "profile"]
+        app.launchEnvironment["KEJI_OFFLINE"] = "0"
+        app.launch()
+        app.swipeUp()
+        app.buttons["反馈"].firstMatch.tap()
+        let editor = app.textViews["feedback.text"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 8))
+        editor.tap()
+        editor.typeText("My feedback after restart")
+        tap("feedback.submit")
+        let status = app.staticTexts["feedback.status"]
+        let failed = NSPredicate(format: "label CONTAINS %@", "提交未确认")
+        expectation(for: failed, evaluatedWith: status)
+        waitForExpectations(timeout: 8)
+        app.terminate()
+        app.launch()
+        app.swipeUp()
+        app.buttons["反馈"].firstMatch.tap()
+        XCTAssertTrue(editor.waitForExistence(timeout: 8))
+        XCTAssertEqual(editor.value as? String, "My feedback after restart")
+        tap("feedback.submit")
+        expectation(for: NSPredicate(format: "label CONTAINS %@", "已提交 · 工单 ticket-f11"), evaluatedWith: status)
+        waitForExpectations(timeout: 8)
+        tap("subpage.back")
+        app.swipeUp()
+        app.buttons["反馈"].firstMatch.tap()
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        XCTAssertEqual(editor.value as? String, "")
+        XCTAssertFalse(app.buttons["feedback.submit"].isEnabled)
+    }
     private var app: XCUIApplication!
 
     override func setUpWithError() throws {

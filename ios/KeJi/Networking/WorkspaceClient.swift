@@ -8,6 +8,10 @@ final class WorkspaceClient {
 
     init(client: APIClient) { self.client = client }
 
+    func submitFeedback(_ draft: FeedbackDraft) async throws -> FeedbackReceipt {
+        try await client.send(Endpoint.feedback(draft), as: FeedbackReceipt.self)
+    }
+
     func accountQuota() async throws -> AccountQuota {
         try await client.send(.accountQuota, as: AccountQuota.self)
     }

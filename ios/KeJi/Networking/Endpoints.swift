@@ -50,6 +50,12 @@ struct Endpoint {
     // MARK: - Workspace (Plans / quota / reports)
 
     static let accountQuota = Endpoint(method: .get, path: "/quota", requiresAuth: true, body: nil)
+    static func feedback(_ draft: FeedbackDraft) throws -> Endpoint {
+        guard draft.isValid else { throw APIError(code: -8, message: "反馈请勿包含凭据、邮箱或环境信息，且不得超过 4000 字节。") }
+        return Endpoint(method: .post, path: "/feedback", requiresAuth: true,
+                        body: FeedbackBody(body: draft.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                                           idempotencyKey: draft.idempotencyKey))
+    }
     static func taskPlans(taskID: String) -> Endpoint {
         Endpoint(method: .get, path: "/tasks/\(taskID)/plans", requiresAuth: true, body: nil)
     }
@@ -80,6 +86,11 @@ struct Endpoint {
 struct CriterionResultBody: Codable, Equatable {
     var index: Int
     var accepted: Bool
+}
+
+private struct FeedbackBody: Encodable {
+    let body: String
+    let idempotencyKey: String
 }
 
 struct CreatePlanBody: Encodable {

@@ -31,6 +31,7 @@ final class SyncEngine {
     @ObservationIgnored private var inFlight = false
     @ObservationIgnored private var completionWaiters: [CheckedContinuation<Void, Never>] = []
     @ObservationIgnored private var sessionTask: _Concurrency.Task<Bool, Never>?
+    @ObservationIgnored private var sessionGeneration: UInt64 = 0
     private static let userKey = "keji.sync.user"
 
     init(store: AppStore, client: APIClient, enabled: Bool) {
@@ -38,9 +39,10 @@ final class SyncEngine {
         self.client = client
         self.enabled = enabled
         if !enabled { status = .offline }
-        if let data = UserDefaults.standard.data(forKey: SyncEngine.userKey) {
+        if enabled, client.hasSession, let data = UserDefaults.standard.data(forKey: SyncEngine.userKey) {
             user = try? JSONCoding.decoder.decode(UserInfo.self, from: data)
         }
+        store.loadPreferences(userID: enabled && client.hasSession ? user?.id : nil)
         store.onDirty = { [weak self] in self?.schedulePush() }
     }
 
@@ -81,12 +83,17 @@ final class SyncEngine {
     func login(identifier: String, code: String) async throws {
         guard enabled else { throw APIError.offline }
         let tokens = try await client.send(Endpoint.login(identifier: identifier, code: code), as: SessionTokens.self)
+        sessionGeneration &+= 1
         client.storeTokens(tokens)
+        setUser(nil) // Do not show the previous account while bootstrap is pending.
+        await waitForCompletion()
         await syncOnForeground()
     }
 
     func logout() async {
         guard enabled else { return }
+        sessionGeneration &+= 1
+        setUser(nil)
         if client.hasSession {
             _ = try? await client.send(Endpoint.logout, as: RevokedResponse.self)
         }
@@ -99,6 +106,7 @@ final class SyncEngine {
     func deleteAccount() async throws {
         guard enabled else { throw APIError.offline }
         _ = try await client.send(Endpoint.deleteAccount, as: DeletedResponse.self)
+        sessionGeneration &+= 1
         client.clearTokens()
         setUser(nil)
         store.clearAll()
@@ -149,9 +157,11 @@ final class SyncEngine {
         inFlight = true
         defer { finishSync() }
         status = .syncing
+        let generation = sessionGeneration
         guard await ensureSession() else { return }
         do {
             let bootstrap = try await client.send(Endpoint.bootstrap, as: Bootstrap.self)
+            guard generation == sessionGeneration else { return }
             apply(bootstrap)
             try await refreshPlansBeforeCompletingSync()
             status = .idle
@@ -179,6 +189,7 @@ final class SyncEngine {
         inFlight = true
         defer { finishSync() }
         status = .syncing
+        let generation = sessionGeneration
         guard await ensureSession() else { return }
 
         let dirty = store.dirty
@@ -191,6 +202,7 @@ final class SyncEngine {
                                    activeFocus: sendFocus, aiTools: sendTools)
         do {
             let bootstrap = try await client.send(Endpoint.sync(request), as: Bootstrap.self)
+            guard generation == sessionGeneration else { return }
             store.acknowledge(checkpoint, settings: sendSettings, activeFocus: sendFocus, aiTools: sendTools)
             apply(bootstrap)
             try await refreshPlansBeforeCompletingSync()
@@ -243,6 +255,7 @@ final class SyncEngine {
 
     private func setUser(_ u: UserInfo?) {
         user = u
+        store.loadPreferences(userID: u?.id)
         if let u, let data = try? JSONCoding.encoder.encode(u) {
             UserDefaults.standard.set(data, forKey: SyncEngine.userKey)
         } else {

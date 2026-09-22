@@ -46,6 +46,8 @@ extension RootPhase: Equatable {}
 /// NavigationStack wrapping the tabs; sub-pages push on top (no tab bar, like the prototype).
 struct MainShellView: View {
     @Environment(AppRouter.self) private var router
+    @Environment(SyncEngine.self) private var sync
+    @Environment(AppEnvironment.self) private var appEnv
 
     var body: some View {
         @Bindable var router = router
@@ -76,7 +78,7 @@ struct MainShellView: View {
         case .privacy: PrivacyView()
         case .homeCustomization: HomeCustomizationView()
         case .notifications: NotificationPreferencesView()
-        case .feedback: FeedbackView()
+        case .feedback: FeedbackView(userID: appEnv.options.offline ? "local-offline" : sync.user?.id)
         }
     }
 }

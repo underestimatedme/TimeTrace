@@ -155,14 +155,18 @@ final class AppStore {
     // MARK: - Preferences (local display/behaviour; not synced)
 
     private let preferencesStore = PreferencesStore()
+    private var preferencesUserID: String?
 
-    func loadPreferences() { preferences = preferencesStore.load() }
+    func loadPreferences(userID: String? = nil) {
+        preferencesUserID = userID
+        preferences = preferencesStore.load(userID: userID)
+    }
 
     func updatePreferences(_ transform: (inout UserPreferences) -> Void) {
         var updated = preferences
         transform(&updated)
         preferences = updated
-        preferencesStore.save(updated)
+        preferencesStore.save(updated, userID: preferencesUserID)
     }
     func markActiveFocusDirty() { generation &+= 1; focusGeneration = generation; activeFocusDirty = true; onDirty?() }
     func markAIToolsDirty() { generation &+= 1; toolsGeneration = generation; aiToolsDirty = true; onDirty?() }
@@ -207,6 +211,7 @@ final class AppStore {
     }
 
     func clearAll() {
+        loadPreferences()
         replaceAll(with: SampleData.createEmptyData(), useSample: false)
         hasOnboarded = false
         commit()

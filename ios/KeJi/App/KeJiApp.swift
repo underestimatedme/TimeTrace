@@ -25,11 +25,15 @@ final class AppEnvironment {
     let sync: SyncEngine
     let remote: RemoteExecutionClient
     let stateStore: StateStore
+    let feedbackDraftStore: FeedbackDraftStore
 
     @ObservationIgnored private var saveTask: _Concurrency.Task<Void, Never>?
 
     init(options: LaunchOptions) {
         self.options = options
+        feedbackDraftStore = options.uiTesting
+            ? FeedbackDraftStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent("feedback-ui-tests"))
+            : FeedbackDraftStore()
         let store = AppStore()
         let router = AppRouter()
         let stateStore = StateStore(fileName: options.uiTesting ? "keji-ui-testing-state.json" : StateStore.fileName)

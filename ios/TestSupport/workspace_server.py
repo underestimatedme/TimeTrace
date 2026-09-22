@@ -26,6 +26,18 @@ class Handler(BaseHTTPRequestHandler):
         data, status, code = {}, 200, 0
         if path == "/auth/guest" or path == "/auth/refresh":
             data = {"access_token": "local-test", "refresh_token": "local-refresh", "expires_in": 900}
+        elif path == "/feedback":
+            assert set(body) == {"body", "idempotency_key"}, body
+            assert self.headers.get("Authorization") == "Bearer local-test"
+            previous = state.get("feedback")
+            if previous is None:
+                # The server accepted the ticket but the first response failed.
+                state["feedback"] = body
+                status, code = 503, 50300
+            elif previous != body:
+                status, code = 409, 40900
+            else:
+                data = {"ticket_id": "ticket-f11", "body": body["body"], "status": "received"}
         elif path.startswith("/reports"):
             facts = [
                 {"id": "h1", "task_id": "t", "track": "human", "state": "known", "start": "2026-09-14T20:00:00Z", "end": "2026-09-14T20:10:00Z"},
@@ -57,8 +69,9 @@ class Handler(BaseHTTPRequestHandler):
                     existing = {item["id"]: item for item in state.get(key, [])}
                     existing.update({item["id"]: item for item in values})
                     state[key] = list(existing.values())
-            data = {"user": {"id": "local-test", "is_guest": False}, "state": {
-                key: value for key, value in state.items() if key not in ["plans", "jobs"]}}
+            user_id = scenario if scenario.startswith("feedback-") else "local-test"
+            data = {"user": {"id": user_id, "is_guest": False}, "state": {
+                key: value for key, value in state.items() if key not in ["plans", "jobs", "feedback"]}}
         elif path.startswith("/tasks/") and path.endswith("/plans"):
             task_id = path.split("/")[2]
             if self.command == "POST":

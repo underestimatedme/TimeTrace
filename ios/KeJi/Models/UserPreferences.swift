@@ -78,6 +78,8 @@ struct FeedbackDraft: Codable, Equatable {
     var idempotencyKey: String
     var text: String
     var attachDiagnostics: Bool = false
+    /// Once a request may have reached the server, retries keep the same body.
+    var attempted = false
 
     static let maxLength = 4000
 
@@ -87,6 +89,8 @@ struct FeedbackDraft: Codable, Equatable {
 
     var isValid: Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !trimmed.isEmpty && trimmed.count <= FeedbackDraft.maxLength
+        let unsafe = #"(?i)(authorization|bearer\s+|[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}|(?:token|api[_-]?key|password|secret|environment(?:_snapshot)?|env)["']?\s*[=:]|(?-i:\b[A-Z][A-Z0-9_]+["']?\s*[=:]))"#
+        return !trimmed.isEmpty && trimmed.utf8.count <= FeedbackDraft.maxLength
+            && trimmed.range(of: unsafe, options: .regularExpression) == nil
     }
 }

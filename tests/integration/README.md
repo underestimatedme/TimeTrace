@@ -20,8 +20,10 @@ with a disabled logger; no test SMS implementation or external delivery is used.
 This verifies auth/token/database behavior, not production SMS delivery.
 
 For an **already-owned isolated** server, the test is normally discovered by
-Go's full timetrace suite. Database failures or missing paired tests fail; do
-not accept any SKIP:
+Go's full timetrace suite. With `KEJI_WORKSPACE_INTEGRATION_REQUIRED=1` (set by
+`run.sh`) database failures or missing paired tests fail; do not accept any SKIP
+in that mode. Without the variable — the shared Valley pipeline, a plain
+`go test ./...` — the Go test skips, because no isolated cluster exists there:
 
 ```sh
 cd /path/to/Valley

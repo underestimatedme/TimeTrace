@@ -19,6 +19,8 @@ trap cleanup EXIT HUP INT TERM
 initdb -D "$F12_PG_DIR/data" -A trust -U postgres --encoding=UTF8 --locale=C > "$F12_PG_DIR/init.log"
 pg_ctl -D "$F12_PG_DIR/data" -l "$F12_PG_DIR/server.log" -o '-h 127.0.0.1 -p 54329' start
 export APP_DSN_TIMETRACE_TEST='host=127.0.0.1 port=54329 user=postgres dbname=valley_timetrace_test sslmode=disable client_encoding=UTF8'
+# Only this runner owns the isolated cluster; make a missing database a hard failure here.
+export KEJI_WORKSPACE_INTEGRATION_REQUIRED=1
 export LC_ALL=C
 cd "$VALLEY_ROOT"
 if [ "$#" -eq 0 ]; then set -- -run TestWorkspacePythonIntegration; fi

@@ -259,4 +259,50 @@ private final class BoundaryHTTP: URLProtocol {
         XCTAssertEqual(sync.user?.id, "bob")
         XCTAssertEqual(api.tokens?.accessToken, bob.accessToken)
     }
+
+    func testLoginInvalidatedDebounceDoesNotBlockNextEdit() async throws {
+        try await assertDebounceSurvivesSessionChange(waitForOldTimer: true)
+    }
+
+    func testLoginReplacesPendingDebounceAndCoalescesImmediateEdits() async throws {
+        try await assertDebounceSurvivesSessionChange(waitForOldTimer: false)
+    }
+
+    func testLogoutCancelledDebounceDoesNotBlockNewLoginEdits() async throws {
+        try await assertDebounceSurvivesSessionChange(waitForOldTimer: false, logoutFirst: true)
+    }
+
+    private func assertDebounceSurvivesSessionChange(waitForOldTimer: Bool, logoutFirst: Bool = false) async throws {
+        await establishAlice()
+        store.completeOnboarding(useSample: false)
+        let bootstrap = bobBootstrap
+        var pushes = 0
+        var pushed: XCTestExpectation?
+        BoundaryHTTP.handle = { transport in
+            if transport.request.url!.path.hasSuffix("/auth/login") {
+                transport.reply(200, #"{"code":0,"data":{"access_token":"test-bob","refresh_token":"test-bob-refresh","expires_in":900}}"#)
+            } else {
+                if transport.request.url!.path.hasSuffix("/sync") { pushes += 1; pushed?.fulfill() }
+                transport.reply(200, bootstrap)
+            }
+        }
+        store.onDirty = { [sync] in sync?.schedulePush() }
+        store.updateSettings { $0.name = "before login" }
+        await Task.yield()
+        if logoutFirst { await sync.logout() }
+        try await sync.login(identifier: "test-login", code: "000000")
+        XCTAssertEqual(sync.user?.id, "bob")
+        if waitForOldTimer { try await Task.sleep(nanoseconds: 2_200_000_000) }
+        pushes = 0
+        pushed = expectation(description: "new edit is automatically pushed")
+        pushed?.assertForOverFulfill = true
+        store.updateSettings { $0.name = "after login" }
+        store.updateSettings { $0.name = "coalesced edit" }
+        await fulfillment(of: [pushed!], timeout: 4)
+        // Observe another entire debounce window: the two edits must not leave
+        // a duplicate scheduled push after the first request is acknowledged.
+        try await Task.sleep(nanoseconds: 2_200_000_000)
+        XCTAssertEqual(pushes, 1)
+        store.onDirty = nil
+    }
 }

@@ -28,6 +28,7 @@ final class SyncEngine {
     let enabled: Bool
 
     @ObservationIgnored private var pushTask: _Concurrency.Task<Void, Never>?
+    @ObservationIgnored private var pushTaskID: UUID?
     @ObservationIgnored private var inFlight = false
     @ObservationIgnored private var completionWaiters: [CheckedContinuation<Void, Never>] = []
     @ObservationIgnored private var sessionTask: _Concurrency.Task<Bool, Never>?
@@ -101,6 +102,7 @@ final class SyncEngine {
         let previousGeneration = sessionGeneration
         let tokens = try await client.send(Endpoint.login(identifier: identifier, code: code), as: SessionTokens.self)
         guard !loggingOut, previousGeneration == sessionGeneration else { throw APIError.sessionChanged }
+        cancelScheduledPush()
         sessionGeneration &+= 1
         let generation = sessionGeneration
         sessionSuppressed = false // Only explicit login re-enables a logged-out engine.
@@ -117,8 +119,7 @@ final class SyncEngine {
         loggingOut = true
         sessionSuppressed = true
         sessionGeneration &+= 1
-        pushTask?.cancel()
-        pushTask = nil
+        cancelScheduledPush()
         sessionTask?.cancel()
         sessionTask = nil
         let credentials = client.tokens
@@ -144,6 +145,7 @@ final class SyncEngine {
         let generation = sessionGeneration
         _ = try await client.send(Endpoint.deleteAccount, as: DeletedResponse.self)
         guard isCurrent(generation) else { throw APIError.sessionChanged }
+        cancelScheduledPush()
         sessionGeneration &+= 1
         sessionSuppressed = true
         client.clearTokens()
@@ -221,12 +223,24 @@ final class SyncEngine {
         // Coalesce into one pending push. Continuous timer updates must not postpone it forever.
         guard canSynchronize, store.hasOnboarded, pushTask == nil else { return }
         let generation = sessionGeneration
+        let taskID = UUID()
+        pushTaskID = taskID
         pushTask = _Concurrency.Task { [weak self] in
             try? await _Concurrency.Task.sleep(nanoseconds: 2_000_000_000)
-            guard !_Concurrency.Task.isCancelled, self?.isCurrent(generation) == true else { return }
-            self?.pushTask = nil
-            await self?.pushDirty()
+            // An old cancelled task can resume after a replacement was installed.
+            // Only the owner may release this slot, including on stale exits.
+            guard let self, self.pushTaskID == taskID else { return }
+            self.pushTask = nil
+            self.pushTaskID = nil
+            guard !_Concurrency.Task.isCancelled, self.isCurrent(generation) else { return }
+            await self.pushDirty()
         }
+    }
+
+    private func cancelScheduledPush() {
+        pushTaskID = nil
+        pushTask?.cancel()
+        pushTask = nil
     }
 
     func pushDirty() async {

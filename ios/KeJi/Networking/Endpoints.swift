@@ -136,6 +136,7 @@ struct APIError: Error, LocalizedError, Equatable {
 
     static let offline = APIError(code: -1, message: "离线模式")
     static let noSession = APIError(code: -2, message: "尚未建立会话")
+    static let sessionChanged = APIError(code: -9, message: "账号会话已变化，请重试")
     static func transport(_ error: Error) -> APIError { APIError(code: -3, message: error.localizedDescription) }
     static func decoding(_ error: Error) -> APIError { APIError(code: -4, message: "响应解析失败: \(error.localizedDescription)") }
     static let unauthorizedCode = 40100

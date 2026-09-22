@@ -8,8 +8,16 @@ final class WorkspaceClient {
 
     init(client: APIClient) { self.client = client }
 
-    func submitFeedback(_ draft: FeedbackDraft) async throws -> FeedbackReceipt {
-        try await client.send(Endpoint.feedback(draft), as: FeedbackReceipt.self)
+    @MainActor func feedbackSession(for userID: String) throws -> APIClient.SessionIdentity {
+        try client.identity(for: userID)
+    }
+
+    @MainActor func validateFeedbackSession(_ identity: APIClient.SessionIdentity) throws {
+        try client.validate(identity)
+    }
+
+    @MainActor func submitFeedback(_ draft: FeedbackDraft, identity: APIClient.SessionIdentity) async throws -> FeedbackReceipt {
+        try await client.send(Endpoint.feedback(draft), as: FeedbackReceipt.self, identity: identity)
     }
 
     func accountQuota() async throws -> AccountQuota {

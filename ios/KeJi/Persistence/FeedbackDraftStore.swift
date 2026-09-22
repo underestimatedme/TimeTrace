@@ -88,10 +88,15 @@ final class FeedbackModel {
 
     func submit(using client: WorkspaceClient?) async {
         guard let client else { _ = persist(); return }
-        await submit { try await client.submitFeedback($0) }
+        do {
+            let identity = try client.feedbackSession(for: userID)
+            await submit(validate: { try client.validateFeedbackSession(identity) }) {
+                try await client.submitFeedback($0, identity: identity)
+            }
+        } catch { self.error = "账号会话已变化；仅本机草稿已保留。" }
     }
 
-    func submit(_ send: (FeedbackDraft) async throws -> FeedbackReceipt) async {
+    func submit(validate: () throws -> Void = {}, _ send: (FeedbackDraft) async throws -> FeedbackReceipt) async {
         guard canSubmit else { return }
         draft.text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         draft.attempted = true
@@ -101,6 +106,9 @@ final class FeedbackModel {
         defer { submitting = false }
         do {
             let confirmed = try await send(sent)
+            // Recheck after the model's own await, immediately before clearing
+            // persistent state; a valid earlier response is not enough.
+            try validate()
             guard !confirmed.ticketId.isEmpty, confirmed.body == sent.text,
                   ["received", "open", "in_progress", "resolved", "closed"].contains(confirmed.status) else {
                 throw APIError(code: -8, message: "服务端未确认收到反馈")

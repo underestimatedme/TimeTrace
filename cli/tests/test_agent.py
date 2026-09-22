@@ -58,6 +58,12 @@ class Adapter:
 
 
 class AgentOccurrenceTest(unittest.TestCase):
+    def test_go_rfc3339_lease_fraction_is_valid_on_python39(self):
+        for fraction, expected in [("1", .1), ("12", .12), ("12345", .12345), ("123456789", .123456)]:
+            with self.subTest(fraction=fraction):
+                deadline = Agent._deadline({"lease_expires_at": "2030-01-01T00:00:00." + fraction + "Z"})
+                self.assertAlmostEqual(deadline, 1893456000 + expected, places=5)
+
     def check_boundary(self, delay):
         class Clock:
             value = datetime.now(timezone.utc)

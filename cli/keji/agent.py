@@ -2,6 +2,7 @@
 import time
 import uuid
 import hashlib
+import re
 import threading
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
@@ -117,7 +118,13 @@ class Agent:
     @staticmethod
     def _deadline(lease):
         try:
-            return datetime.fromisoformat(lease["lease_expires_at"].replace("Z", "+00:00")).timestamp()
+            # Go RFC3339Nano emits 1–9 fractional digits. Python 3.9 accepts
+            # only 3 or 6; truncate nanoseconds (never extend authority) and
+            # pad to microseconds before parsing the unchanged timezone.
+            value = re.sub(r"\.(\d{1,9})(?=Z$|[+-]\d{2}:\d{2}$)",
+                           lambda match: "." + match.group(1)[:6].ljust(6, "0"),
+                           lease["lease_expires_at"])
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
         except (KeyError, TypeError, ValueError, AttributeError):
             return 0.0
 

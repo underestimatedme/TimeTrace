@@ -76,6 +76,8 @@ class Handler(BaseHTTPRequestHandler):
             task_id = path.split("/")[2]
             if self.command == "POST":
                 data = dict(body, id="plan-" + task_id, task_id=task_id, revision=1, created_at=NOW, updated_at=NOW)
+                if scenario.startswith("happy"):
+                    data["criteria"] = ["行为符合要求", "结果经人工检查"]
                 state["plans"][data["id"]] = data
                 status = 201
             else:
@@ -101,6 +103,7 @@ class Handler(BaseHTTPRequestHandler):
             assert body.get("evidence_ids") == ["job-ui"], body
             assert body.get("expected_revision") == data["revision"], body
             assert len(body.get("criteria", [])) == len(data["criteria"]), body
+            assert body.get("criteria", []) == [{"index": i, "accepted": True} for i in range(len(data["criteria"]))], "criterion selections missing"
             if scenario.startswith("conflict"):
                 data.update(criteria=["新增验收项"], revision=data["revision"] + 1)
                 status, code = 409, 40901

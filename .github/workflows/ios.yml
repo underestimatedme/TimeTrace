@@ -24,6 +24,21 @@ jobs:
         working-directory: ios
         run: xcodegen generate
 
+      - name: Pick an available iPhone simulator
+        id: sim
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available | grep -E 'iPhone' | head -20
+          udid=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = [d for v in json.load(sys.stdin)["devices"].values() for d in v if d.get("isAvailable") and d["name"].startswith("iPhone")]
+          devices.sort(key=lambda d: (("Pro" in d["name"]) or ("Plus" in d["name"]) or ("Max" in d["name"]) or ("SE" in d["name"]) or ("e" in d["name"].split()[-1]), d["name"]))
+          print(devices[0]["udid"] if devices else "")')
+          test -n "$udid" || { echo "no available iPhone simulator"; exit 1; }
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          echo "Using simulator $udid"
+          xcrun simctl boot "$udid" || true
+
       - name: Start workspace fixture server
         working-directory: ios
         run: |
@@ -41,7 +56,7 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -project KeJi.xcodeproj -scheme KeJi \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
             -derivedDataPath DerivedData \
             -parallel-testing-enabled NO \
             -resultBundlePath TestResults.xcresult \

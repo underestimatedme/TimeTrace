@@ -142,3 +142,11 @@ time for report day slicing. Keep the runner clock synchronized; deploy the
 Valley nullable `observed_at` migration before this runner update. Legacy outbox
 events without this field remain unknown report measurements, not zero-duration
 execution. Existing expired-lease reporting restrictions remain in force.
+
+Pending events for each `(job_id, attempt_id, lease_epoch)` are sent together,
+ordered by sequence, then acknowledged in one atomic SQLite update. Attempt
+groups follow durable enqueue order, not UUID lexical order. A lost response or
+failed local acknowledgment retries the whole unchanged batch; a 409 is never
+silently discarded. No schema migration is needed for existing outboxes.
+See `tests/integration/README.md` for the real Valley/PostgreSQL cancellation
+regression, including lost-response recovery and the next job claim.

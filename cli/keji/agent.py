@@ -452,7 +452,15 @@ class Agent:
         return total
 
     def flush_outbox(self) -> None:
+        batches = {}
         for row in self.db.pending_remote_events():
-            self.cloud.append_events(self.access_token(), row["job_id"], row["attempt_id"],
-                                     row["lease_epoch"], [row["payload"]])
-            self.db.mark_remote_event_sent(row["id"])
+            key = (row["job_id"], row["attempt_id"], row["lease_epoch"])
+            batches.setdefault(key, []).append(row)
+        # Insertion-ordered groups preserve durable attempt order (UUID lexical
+        # order is not chronology). Never split an attempt's terminal batch:
+        # Valley may close a cancelled attempt at the end of the first request.
+        for (job, attempt, epoch), rows in batches.items():
+            rows.sort(key=lambda row: row["seq"])
+            self.cloud.append_events(self.access_token(), job, attempt, epoch,
+                                     [row["payload"] for row in rows])
+            self.db.mark_remote_events_sent([row["id"] for row in rows])

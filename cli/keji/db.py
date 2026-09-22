@@ -171,7 +171,7 @@ class Database:
 
     def pending_remote_events(self) -> List[Dict[str, Any]]:
         rows = self.conn.execute(
-            "SELECT * FROM remote_outbox WHERE sent_at IS NULL ORDER BY job_id,attempt_id,seq"
+            "SELECT * FROM remote_outbox WHERE sent_at IS NULL ORDER BY id"
         ).fetchall()
         result = []
         for row in rows:
@@ -182,6 +182,15 @@ class Database:
 
     def mark_remote_event_sent(self, event_id: int, now: Optional[int] = None) -> None:
         self.conn.execute("UPDATE remote_outbox SET sent_at=? WHERE id=?", (now or _now(), event_id))
+
+    def mark_remote_events_sent(self, event_ids: List[int], now: Optional[int] = None) -> None:
+        if not event_ids:
+            return
+        # One SQLite statement is atomic even with our autocommit connection.
+        # A crash/failed ack retains the batch for an idempotent whole-batch retry.
+        placeholders = ",".join("?" for _ in event_ids)
+        self.conn.execute("UPDATE remote_outbox SET sent_at=? WHERE id IN (" + placeholders + ")",
+                          [now or _now()] + list(event_ids))
 
     # ---- checkpoints ------------------------------------------------------
     def mark_plan_started(self, plan_id: str, job_id: str, attempt_id: str) -> None:

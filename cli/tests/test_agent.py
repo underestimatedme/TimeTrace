@@ -243,7 +243,7 @@ class AgentTest(unittest.TestCase):
     def test_completion_survives_network_failure_in_outbox(self):
         class FlakyCloud(FakeCloud):
             def append_events(self, token, job_id, attempt_id, epoch, events):
-                if events[0]["seq"] == 2 and not getattr(self, "recovered", False):
+                if any(event["seq"] == 2 for event in events) and not getattr(self, "recovered", False):
                     raise OSError("offline")
                 super().append_events(token, job_id, attempt_id, epoch, events)
         with tempfile.TemporaryDirectory() as d:
@@ -255,8 +255,8 @@ class AgentTest(unittest.TestCase):
             agent = Agent(db, cloud, {"codex": Adapter()}, Path(d), lambda: "token",
                           prepare_workspace=lambda repo, task_id, home, base: (repo, "keji/test"))
             self.assertEqual(agent.run_once(), "job j1 → awaiting_review")
-            self.assertEqual([row["seq"] for row in db.pending_remote_events()], [2])
-            queued_event = db.pending_remote_events()[0]["payload"]
+            self.assertEqual([row["seq"] for row in db.pending_remote_events()], [1, 2])
+            queued_event = db.pending_remote_events()[1]["payload"]
             self.assertIn("observed_at", queued_event)
             observed = queued_event["observed_at"]
             self.assertLessEqual(datetime.fromisoformat(observed.replace("Z", "+00:00")).timestamp(), time.time())

@@ -71,3 +71,11 @@ Valley 侧对应的 7 个 9/22 提交（`feac72f..eac7a19`）此前未推送。
   报告页显示「时区 Asia/Dubai · 本地草稿」且无「时区不匹配」错误，「你的 AI」页正确提示游客不能绑定 Runner。
 - iOS CI 在加 fixture 后由 8 个失败降到 1 个，剩余的是「报告时区写死 Asia/Dubai」和「小屏模拟器上时间拆分区块在屏幕外」，
   均已改测试；同时把完整 xcodebuild 日志作为 CI 产物上传，失败时打印断言行。
+
+## CI 收尾与一个首次安装 bug（追加）
+
+- CI 依次修掉：fixture 服务器未启动（8 个失败）→ 报告时区写死 → 小屏模拟器上时间拆分区块在屏幕外 → runner 无「iPhone 16」设备名 →
+  runner 默认选到 Xcode 16.4（现改为优先 Xcode 26.x，按 UDID 动态选一台可用 iPhone）。
+- 最后一个失败暴露了真实 bug：`AIToolsView` 只在页面出现时拉一次额度；全新安装时游客会话尚未建立，首次请求失败后不再重试，
+  AI 页永远拿不到真实额度。本机钥匙串里残留着 UI 测试会话，所以本地一直是绿的。已在本机 `xcrun simctl keychain reset` 后复现红灯，
+  改为 `.task(id: sync.user?.id)`（会话身份出现/变化即重拉）后变绿。

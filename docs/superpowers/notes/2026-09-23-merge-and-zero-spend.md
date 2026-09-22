@@ -66,3 +66,8 @@ Valley 侧对应的 7 个 9/22 提交（`feac72f..eac7a19`）此前未推送。
   但 `/reports?date=…&zone=Asia/Dubai` 返回 422，只有 `zone=UTC` 能过。根因：运行镜像 `alpine:3.20` 没有 zoneinfo，
   `time.LoadLocation` 对所有非 UTC 时区失败并映射为 ErrInvalidInput。修复：`internal/apps/timetrace/tzdata.go`
   嵌入 `time/tzdata`，Dockerfile 加 `apk add tzdata`；第二次部署后复测见下文。
+- 第二次部署（含 tzdata 修复）后，新游客会话下 `GET /reports?date=2026-09-23&zone=Asia/Dubai|Asia/Shanghai|America/New_York` 均 200，
+  `POST /reports {zone: Asia/Dubai}` 返回 revision 1 的草稿。模拟器直连生产：「我的」页显示「已同步」，
+  报告页显示「时区 Asia/Dubai · 本地草稿」且无「时区不匹配」错误，「你的 AI」页正确提示游客不能绑定 Runner。
+- iOS CI 在加 fixture 后由 8 个失败降到 1 个，剩余的是「报告时区写死 Asia/Dubai」和「小屏模拟器上时间拆分区块在屏幕外」，
+  均已改测试；同时把完整 xcodebuild 日志作为 CI 产物上传，失败时打印断言行。

@@ -24,7 +24,15 @@ def _default_pool_binding(provider: str):
 
 def _capability_zero_spend(adapter: Any, job: Dict[str, Any]) -> bool:
     """Safe default: only a verified adapter capability authorises spend-free
-    execution. A manual/source claim can never grant it."""
+    execution. A manual/source claim can never grant it. The billing verdict is
+    re-checked (cache bypassed) right here, at the gate before any spawn, so a
+    logout or a newly exported API key since the last poll closes the gate."""
+    verdict = getattr(getattr(adapter, "billing", None), "verdict", None)
+    if callable(verdict):
+        try:
+            verdict(force=True)
+        except Exception:
+            return False
     return adapter_zero_spend_verified(adapter)
 
 

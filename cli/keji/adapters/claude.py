@@ -12,6 +12,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from keji.adapters.base import SAFETY_RULES, ToolAdapter, run_streaming
+from keji.billing import billing_env_keys, claude_verifier
 from keji.models import CLAUDE, RunResult, Sample
 from keji.quota import merge_capabilities
 
@@ -113,20 +114,23 @@ class ClaudeAdapter(ToolAdapter):
     name = CLAUDE
     adapter_version = "claude-code/0.4"
 
-    def __init__(self, cfg: Dict[str, Any]):
+    def __init__(self, cfg: Dict[str, Any], billing=None):
         self.cfg = cfg
+        # Real check: `claude auth status` must report a claude.ai subscription
+        # login with the first-party provider, and no API-key path may exist in
+        # the environment or settings. Tests inject a StaticBilling.
+        self.billing = billing or claude_verifier(cfg)
 
     def capabilities(self) -> Dict[str, bool]:
         # Implemented surface: records runs, dispatches headless, resumes the
         # original session via `--resume`. No on-demand quota read. Zero-spend
-        # enforcement stays unverified (raised only by R4 billing checks), so
-        # unattended resume is not yet authorised for this adapter.
+        # comes only from the billing verdict; unverified keeps the gate closed.
         return merge_capabilities({
             "can_record": True,
             "can_read_quota": False,
             "can_dispatch": True,
             "can_resume": True,
-            "can_enforce_zero_spend": False,
+            "can_enforce_zero_spend": self.billing.verdict().verified,
         })
 
     def read_limits(self) -> Optional[List[Sample]]:
@@ -141,7 +145,8 @@ class ClaudeAdapter(ToolAdapter):
                          session_id, cancel_event)
 
     def _run(self, cmd: List[str], cwd: str, log_file: str, session_id: str, cancel_event=None) -> RunResult:
-        code, lines = run_streaming(cmd, cwd, log_file, timeout=float(self.cfg.get("timeout_seconds", 3600)), cancel_event=cancel_event)
+        code, lines = run_streaming(cmd, cwd, log_file, timeout=float(self.cfg.get("timeout_seconds", 3600)),
+                                    cancel_event=cancel_event, drop_env=billing_env_keys(CLAUDE))
         res = parse_stream(lines)
         res.exit_code = code
         res.session_id = res.session_id or session_id

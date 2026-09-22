@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from keji.adapters.base import SAFETY_RULES, ToolAdapter, run_streaming
 from keji.models import CODEX, RunResult, Sample
+from keji.billing import billing_env_keys, codex_verifier, sanitized_env
 from keji.quota import merge_capabilities
 
 LIMIT_TEXT_MARKERS = ("usage limit", "rate limit", "try again at")
@@ -52,7 +53,7 @@ def parse_rate_limits(response: Dict[str, Any], tool: str = CODEX) -> List[Sampl
 def app_server_request(bin_: str, method: str, params: Optional[dict] = None,
                        timeout: float = 15.0) -> Dict[str, Any]:
     """Minimal JSON-RPC client: initialize, initialized, one request, then kill."""
-    env = dict(os.environ)
+    env = sanitized_env(CODEX, os.environ)
     env.pop("RUST_LOG", None)
     proc = subprocess.Popen(
         [bin_, "app-server"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -157,19 +158,22 @@ class CodexAdapter(ToolAdapter):
     name = CODEX
     adapter_version = "codex-cli/0.151"
 
-    def __init__(self, cfg: Dict[str, Any]):
+    def __init__(self, cfg: Dict[str, Any], billing=None):
         self.cfg = cfg
+        # Real check: `codex login status` must report a ChatGPT login and the
+        # auth file must hold no API key; no key may exist in the environment.
+        self.billing = billing or codex_verifier(cfg)
 
     def capabilities(self) -> Dict[str, bool]:
         # Implemented surface: records runs, reads quota on demand via
         # app-server (no quota consumed), dispatches headless, resumes a thread.
-        # Zero-spend enforcement stays unverified until R4 billing checks.
+        # Zero-spend comes only from the billing verdict.
         return merge_capabilities({
             "can_record": True,
             "can_read_quota": True,
             "can_dispatch": True,
             "can_resume": True,
-            "can_enforce_zero_spend": False,
+            "can_enforce_zero_spend": self.billing.verdict().verified,
         })
 
     def read_limits(self) -> Optional[List[Sample]]:
@@ -188,7 +192,8 @@ class CodexAdapter(ToolAdapter):
         return res
 
     def _run(self, cmd: List[str], cwd: str, log_file: str, cancel_event=None) -> RunResult:
-        code, lines = run_streaming(cmd, cwd, log_file, timeout=float(self.cfg.get("timeout_seconds", 3600)), cancel_event=cancel_event)
+        code, lines = run_streaming(cmd, cwd, log_file, timeout=float(self.cfg.get("timeout_seconds", 3600)),
+                                    cancel_event=cancel_event, drop_env=billing_env_keys(CODEX))
         res = parse_exec(lines)
         res.exit_code = code
         if code != 0 and not res.blocked:

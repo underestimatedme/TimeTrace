@@ -15,11 +15,14 @@ MAX_LOG_BYTES = 10 * 1024 * 1024
 def run_streaming(
     cmd: Sequence[str], cwd: str, log_file: str, env: Optional[dict] = None,
     timeout: Optional[float] = None, cancel_event: Optional[threading.Event] = None,
+    drop_env: Optional[Sequence[str]] = None,
 ) -> Tuple[int, List[str]]:
+    """`drop_env` names variables the child must not inherit (billing keys and
+    endpoints that could switch a subscription tool to metered API usage)."""
     lines: List[str] = []
     run_env = dict(os.environ)
     for key in list(run_env):
-        if key.startswith("CLAUDE"):
+        if key.startswith("CLAUDE") or key in set(drop_env or ()):
             run_env.pop(key, None)
     if env:
         run_env.update(env)

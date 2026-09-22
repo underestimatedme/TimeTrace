@@ -118,17 +118,20 @@ class AdapterCapabilityTest(unittest.TestCase):
         from keji.adapters.claude import ClaudeAdapter
         from keji.adapters.codex import CodexAdapter
 
-        for adapter in (ClaudeAdapter({}), CodexAdapter({})):
+        from keji.billing import StaticBilling
+
+        unverified = StaticBilling(False, "not_logged_in")
+        for adapter in (ClaudeAdapter({}, billing=unverified), CodexAdapter({}, billing=unverified)):
             caps = adapter.capabilities()
             self.assertEqual(set(caps), set(default_capabilities()))
             self.assertTrue(caps["can_record"])
-            # Billing-safety capability stays unverified until R4 checks it,
-            # so unattended resume is not authorised on the adapter alone.
+            # Billing safety is never declared by the adapter itself; it comes
+            # only from a billing verdict (subscription login, no API-key path).
             self.assertFalse(caps["can_enforce_zero_spend"])
             self.assertTrue(adapter.adapter_version)
 
-        self.assertFalse(ClaudeAdapter({}).capabilities()["can_read_quota"])
-        self.assertTrue(CodexAdapter({}).capabilities()["can_read_quota"])
+        self.assertFalse(ClaudeAdapter({}, billing=unverified).capabilities()["can_read_quota"])
+        self.assertTrue(CodexAdapter({}, billing=unverified).capabilities()["can_read_quota"])
 
 
 if __name__ == "__main__":

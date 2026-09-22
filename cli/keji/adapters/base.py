@@ -1,6 +1,7 @@
 """ToolAdapter interface plus the subprocess helper both adapters share."""
 from typing import Dict, List, Optional
 
+from keji.billing import StaticBilling
 from keji.models import RunResult, Sample
 from keji.process import run_streaming
 from keji.quota import default_capabilities
@@ -22,12 +23,27 @@ class ToolAdapter:
 
     name = "base"
     adapter_version = "0"
+    # Zero-spend authority never comes from the adapter code itself; it is a
+    # verdict from keji.billing (subscription login, no API-key path). The base
+    # surface is management-only.
+    billing = StaticBilling(False, "management_only")
 
     def capabilities(self) -> Dict[str, bool]:
         """Verified capability flags for this adapter. The base surface claims
         nothing — every flag is False until a subclass asserts what its
         implemented commands and verified billing config actually support."""
         return default_capabilities()
+
+    def capability_details(self) -> Dict[str, object]:
+        """Who/what verified the billing flag, for inventory logs and `agent doctor`."""
+        verdict = self.billing.verdict()
+        return {
+            "adapter_version": self.adapter_version,
+            "can_enforce_zero_spend": verdict.verified,
+            "verified_at": verdict.verified_at if verdict.verified else None,
+            "unsupported_reason": verdict.reason,
+            "auth_method": verdict.auth_method,
+        }
 
     def read_limits(self) -> Optional[List[Sample]]:
         """On-demand quota read. Return None when the tool has no such channel."""

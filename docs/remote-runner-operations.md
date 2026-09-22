@@ -36,12 +36,14 @@ keji agent install
 - 电脑在线：Agent 每 5 秒领取一次任务。
 - 电脑休眠/关机：任务停留在 Valley 队列；不会转到云端执行。
 - Keychain 锁定、Claude/Codex 退出登录或额度耗尽：Runner 应上报等待/失败状态，由手机明确展示。
+- 零付费核验：每次派发前 Runner 实测工具是订阅登录（Claude `auth status`、Codex `login status`）且环境/配置里没有 API key 路径；
+  不通过就以 `billing_unverified` 拒绝派发，`keji agent doctor` 可查看原因。启动工具时所有计费相关环境变量都被剔除。见 `cli/README.md`「零付费核验」。
 - LaunchAgent 日志：`~/.keji/daemon.log` 与 `~/.keji/daemon.err`。
 
 ## 发布门槛
 
 - Valley TimeTrace 单元/集成/race 测试通过；迁移在空库与存量备份上通过。
-- CLI 全套测试以及 Claude/Codex 当前版本、登录状态探针通过。
+- CLI 全套测试以及 Claude/Codex 当前版本、登录状态探针通过；目标机器上 `keji agent doctor` 的零付费核验对要派发的工具显示「通过」。
 - iOS 单元、HTTP 契约和 UI 流程通过。
 - 测试环境完成 iPhone 蜂窝网 → Valley → Mac → Valley → iPhone 的真实闭环。
 - 生产前完成电脑重启、网络断开重连、重复派发、过期租约和至少 24 小时稳定性验证。

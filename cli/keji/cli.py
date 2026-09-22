@@ -1,5 +1,6 @@
 """argparse front-end. Every subcommand is a thin wrapper over the modules."""
 import argparse
+from datetime import datetime
 import fcntl
 import hashlib
 import json
@@ -153,15 +154,28 @@ def cmd_agent_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _iso_local(epoch) -> str:
+    try:
+        return datetime.fromtimestamp(float(epoch)).strftime("%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return "未知时间"
+
+
 def cmd_agent_doctor(args: argparse.Namespace) -> int:
     home, cfg, db = _open(args)
     paired = CredentialStore().load() is not None
     print("Valley: %s" % cfg["cloud_base_url"])
     print("配对: %s" % ("已完成" if paired else "未完成"))
     print("工作区: %d" % len(db.list_workspaces()))
+    adapters = _adapters(cfg)
     for name in TOOLS:
         binary = str(cfg.get(name, {}).get("bin", name))
         print("%s: %s" % (name, shutil.which(binary) or "未找到"))
+        details = adapters[name].capability_details() if name in adapters else {}
+        if details.get("can_enforce_zero_spend"):
+            print("  零付费核验: 通过（%s，%s）" % (details.get("auth_method"), _iso_local(details.get("verified_at"))))
+        else:
+            print("  零付费核验: 未通过（%s）→ 该工具不会被派发任务" % (details.get("unsupported_reason") or "unknown"))
     diagnostics = lock_diagnostics(home)
     for message in diagnostics:
         print("Execution lock: %s" % message)

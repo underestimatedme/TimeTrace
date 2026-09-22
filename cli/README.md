@@ -90,6 +90,26 @@ tail -f ~/.keji/daemon.log
 - 熔断：默认 5 小时内 3 次失败就停止派工，直到窗口过去或你 `keji retry`。
 - v0.3 的 on_success 钩子只产出一份声明式 JSON 到 `~/.keji/inbox/`，由守护进程下一轮校验后入库；钩子生成的任务不能再生成任务。
 
+## 零付费核验（派发门禁的计费项）
+
+Runner 只在「运行任务不可能产生新增费用」时才派发。这不是配置项，而是每次派发前的实测：
+
+| 工具 | 通过条件 | 实现 |
+| --- | --- | --- |
+| Claude Code | `claude auth status` 报告 `loggedIn=true`、`authMethod=claude.ai`、`apiProvider=firstParty` 且有 `subscriptionType` | `keji/billing.py: verify_claude` |
+| Codex | `codex login status` 报告 `Logged in using ChatGPT`，且 `~/.codex/auth.json` 的 `auth_mode=chatgpt`、无 `OPENAI_API_KEY` | `keji/billing.py: verify_codex` |
+
+另外两条对两个工具都生效：
+
+- 环境里不能有 API key 或替代端点（`ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、`CLAUDE_CODE_USE_BEDROCK/VERTEX/FOUNDRY`、`OPENAI_API_KEY`、`CODEX_API_KEY`、`OPENAI_BASE_URL`），
+  Claude 的 `settings.json` 里不能有 `apiKeyHelper` 或上述 `env`。
+- 无论核验结果如何，启动工具进程时这些变量都会从子进程环境中剔除，订阅工具不可能悄悄切到按量计费。
+
+核验通过时 adapter 的 `can_enforce_zero_spend` 为 true；否则为 false 并带机器可读原因
+（`not_logged_in`、`auth_method_not_subscription:<x>`、`api_key_fallback_in_env:<VAR>` 等），
+统一门禁返回 `billing_unverified`，该工具不会收到任务。结论缓存 5 分钟，但真正 spawn 前会强制重新核验。
+`keji agent doctor` 会逐工具打印核验结论。核验只读登录状态，不会启动模型、不消耗额度。
+
 ## 限额消耗的两部分覆盖：终端 + 软件
 
 限额是账号级的，不管你在终端里跑还是在软件里点，烧的都是同一个窗口。keji 的到期判断和续接时机必须两边都看得到：

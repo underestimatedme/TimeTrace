@@ -15,7 +15,15 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.4.app || sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort | tail -1)"
+        # The project is developed and verified on Xcode 26 (iOS 26 SDK, see ios/README.md);
+        # prefer the newest Xcode 26 on the runner and only fall back to 16.x.
+        run: |
+          ls -d /Applications/Xcode*.app
+          pick=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$pick" ] || pick=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          echo "Selecting $pick"
+          sudo xcode-select -s "$pick"
+          xcodebuild -version
 
       - name: Install xcodegen
         run: brew install xcodegen

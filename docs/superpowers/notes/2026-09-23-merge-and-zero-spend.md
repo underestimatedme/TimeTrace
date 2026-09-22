@@ -58,3 +58,11 @@ Valley 侧对应的 7 个 9/22 提交（`feac72f..eac7a19`）此前未推送。
   加了一个提交让配对集成测试在没有隔离库时 skip 而不是 Fatal（否则 Valley 流水线的 `go test ./...` 必红）。
   推送该分支即触发生产部署，**由用户决定何时推**。
 - iOS UI 测试：合并后 21 项通过（20 项首轮 + 修复离线偏好持久化后补跑 5 项全过）。
+
+## 生产部署（追加，用户授权）
+
+- `publish.yml` 对 `release/**` 只跑测试与镜像，部署需 `workflow_dispatch` 且 `deploy=true`（总纲与旧 memory 里「推 release 即发布」已过期）。
+- 第一次部署成功后 curl 探测：`/quota` `/preferences` `/runners` `/bootstrap` 由 404 变 401，游客会话下均 200；
+  但 `/reports?date=…&zone=Asia/Dubai` 返回 422，只有 `zone=UTC` 能过。根因：运行镜像 `alpine:3.20` 没有 zoneinfo，
+  `time.LoadLocation` 对所有非 UTC 时区失败并映射为 ErrInvalidInput。修复：`internal/apps/timetrace/tzdata.go`
+  嵌入 `time/tzdata`，Dockerfile 加 `apk add tzdata`；第二次部署后复测见下文。

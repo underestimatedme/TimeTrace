@@ -4,7 +4,9 @@ App：刻迹（KeJi）· bundle id `com.atlaspaces.timetrace` · 当前版本 `0
 
 **推荐路线**：先 TestFlight 内部测试，真机跑通、和真实 Valley 联调过，再提交审核。
 
-**当前状态（2026-09-23）**：build 2026092301 已上传，等处理；Valley 新后端尚未部署，装上后 Plan/额度/报告页会拿到 404，先部署 `release/timetrace-ai-workspace` 再测。
+**当前状态（2026-09-23 凌晨）**：build 2026092301 已上传，等处理。Valley 新后端已部署到生产（`release/timetrace-ai-workspace`，
+用 `gh workflow run publish.yml -f deploy=true` 手动 dispatch；release 分支推送本身只出镜像不部署）。
+首次部署后发现所有非 UTC 时区的报告请求 422（alpine 镜像无 tzdata），已用 `time/tzdata` 嵌入 + 镜像装 tzdata 修复并重新部署。
 
 ## 一、必须由你完成（涉及账号与凭据）
 
@@ -26,8 +28,8 @@ App：刻迹（KeJi）· bundle id `com.atlaspaces.timetrace` · 当前版本 `0
 - [x] 打包命令见 `ios/README.md`「TestFlight archive」，Team ID 只在命令行传入，未写进 `project.yml`
 - [x] `CURRENT_PROJECT_VERSION` 已递增到 `2026092301`（下次上传前再递增）
 - [ ] 真机验证（玻璃模糊叠层的性能、深色主题）
-- [ ] 与真实 Valley 联调（派发 / 验收 / 额度），目前只在本地 fixture 下验证过。
-      **前提：先把 Valley `release/timetrace-ai-workspace` 推上去部署**，否则生产的 plans/quota/reports 接口是 404
+- [ ] 与真实 Valley 联调（派发 / 验收 / 额度）。后端已上线；游客会话下 bootstrap / quota / preferences /
+      reset-signals / runners 已用 curl 验证返回 200。派发与验收需要一台绑定的 Mac 跑 Runner，尚未做
 
 ## 三、App 隐私问卷（App Store Connect → App 隐私）
 

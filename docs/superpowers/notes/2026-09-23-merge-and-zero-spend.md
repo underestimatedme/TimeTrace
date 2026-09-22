@@ -79,3 +79,5 @@ Valley 侧对应的 7 个 9/22 提交（`feac72f..eac7a19`）此前未推送。
 - 最后一个失败暴露了真实 bug：`AIToolsView` 只在页面出现时拉一次额度；全新安装时游客会话尚未建立，首次请求失败后不再重试，
   AI 页永远拿不到真实额度。本机钥匙串里残留着 UI 测试会话，所以本地一直是绿的。已在本机 `xcrun simctl keychain reset` 后复现红灯，
   改为 `.task(id: sync.user?.id)`（会话身份出现/变化即重拉）后变绿。
+- GitHub Actions 最终结果：run 35795340671 成功，160 单元 + 21 UI 全过（Xcode 26.3，动态选取的 iPhone 模拟器，fixture 服务器由 CI 启动）。
+- 构建 `2026092302`（含该修复）已归档，上传时 Xcode 账号会话失效（Failed to Use Accounts），待用户在 Xcode 重新登录后上传。

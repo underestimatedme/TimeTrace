@@ -1,6 +1,6 @@
 # 刻迹 iOS · 上架前检查清单
 
-App：刻迹（KeJi）· bundle id `com.atlaspaces.timetrace` · 当前版本 `0.1.0 (2026092301)`
+App：刻迹（KeJi）· bundle id `com.atlaspaces.timetrace` · 当前版本 `0.1.0 (2026092302)`
 
 **推荐路线**：先 TestFlight 内部测试，真机跑通、和真实 Valley 联调过，再提交审核。
 
@@ -16,7 +16,10 @@ App：刻迹（KeJi）· bundle id `com.atlaspaces.timetrace` · 当前版本 `0
       （提交历史里有 `align bundle identifier with App Store record`，应当已建好）
 - [x] 上传构建包：`0.1.0 (2026092301)` 已于 2026-09-23 00:24 由 `xcodebuild -exportArchive` 上传
       （`ExportOptions-AppStore.plist` 的 `destination=upload` 会直接上传，见 `ios/README.md`）。
-      后续上传前先递增 build 号
+- [ ] **上传 `2026092302`**：含「全新安装时 AI 页拿不到额度」修复，归档在 `ios/build/KeJi.xcarchive`，
+      上传时 Xcode 报「Failed to Use Accounts: App Store Connect access for HZ788934TW is required」。
+      在 Xcode → Settings → Accounts 重新登录后，用 Organizer 上传该归档，或重跑 `ios/README.md` 里的 exportArchive 命令。
+      TestFlight 请测这个构建，不要测 2026092301
 - [ ] 在 App Store Connect → TestFlight 等待处理完成，填写出口合规（无加密：选「否」），把构建加入内部测试组
 - [ ] 在 App Store Connect 提交审核
 

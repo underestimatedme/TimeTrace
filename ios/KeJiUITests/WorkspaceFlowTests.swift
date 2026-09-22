@@ -92,13 +92,13 @@ final class WorkspaceFlowTests: XCTestCase {
         app.launchEnvironment["KEJI_OFFLINE"] = "0"
         app.launch()
         tap("reports.open")
-        XCTAssertTrue(app.staticTexts["时区 Asia/Dubai · 修订 7 · 私有草稿"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["时区 \(TimeZone.current.identifier) · 修订 7 · 私有草稿"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["10 分钟"].exists)
         XCTAssertTrue(app.staticTexts["20 分钟"].exists)
         XCTAssertTrue(app.staticTexts["无记录"].exists)
         XCTAssertFalse(app.staticTexts["95"].exists)
         tap("reports.generate")
-        XCTAssertTrue(app.staticTexts["时区 Asia/Dubai · 修订 8 · 私有草稿"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["时区 \(TimeZone.current.identifier) · 修订 8 · 私有草稿"].waitForExistence(timeout: 5))
         capture("report-server-facts")
     }
 
@@ -110,7 +110,7 @@ final class WorkspaceFlowTests: XCTestCase {
         app.launch()
         tap("project.keji")
         tap("reports.open.project")
-        XCTAssertTrue(app.staticTexts["时区 Asia/Dubai · 修订 7 · 私有草稿"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["时区 \(TimeZone.current.identifier) · 修订 7 · 私有草稿"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["10 分钟"].exists)
         XCTAssertTrue(app.staticTexts["20 分钟"].exists)
         XCTAssertFalse(app.staticTexts["30 分钟"].exists, "other project's AI must be excluded")

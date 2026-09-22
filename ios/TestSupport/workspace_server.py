@@ -61,18 +61,21 @@ class Handler(BaseHTTPRequestHandler):
                 {"id": "a1", "task_id": "t", "track": "ai", "state": "known", "start": "2026-09-14T20:00:00Z", "end": "2026-09-14T20:10:00Z"},
                 {"id": "a2", "task_id": "t", "track": "ai", "state": "known", "start": "2026-09-14T20:00:00Z", "end": "2026-09-14T20:10:00Z"}]
             query = parse_qs(urlsplit(path).query)
+            # Like Valley, answer in the zone the client asked for; the app rejects any
+            # other zone, and CI machines are not in the developer's time zone.
+            zone = (query.get("zone", [""])[0] if self.command == "GET" else body.get("zone")) or "Asia/Dubai"
             data = {"local_date": query.get("date", [""])[0] if self.command == "GET" else body["date"],
                     "revision": 8 if self.command == "POST" else 7, "status": "draft", "coverage": 0.79,
                     "total_score": 95, "human_seconds": 600, "ai_seconds": 1200, "waiting_seconds": None,
                     "evidence_ids": ["a1", "a2"], "baseline_version": "phase-facts-v2",
-                    "breakdown": {"zone": "Asia/Dubai", "evidence_coverage": 1, "facts": facts}}
+                    "breakdown": {"zone": zone, "evidence_coverage": 1, "facts": facts}}
             if scenario.startswith("reports-project"):
                 for fact in facts:
                     fact["task_id"] = "quota"
                 facts.append(dict(facts[-1], id="other-project", task_id="outside"))
                 data["ai_seconds"] = 1800
             if scenario.startswith("reports-zone-mismatch"):
-                data["breakdown"]["zone"] = "America/New_York"
+                data["breakdown"]["zone"] = "America/New_York" if zone != "America/New_York" else "Asia/Dubai"
         elif path == "/preferences":
             # 与 Valley PutPreferences 一致：乐观锁，版本不符返回 409/40901 与当前记录。
             current = state.setdefault("preferences", {"revision": 0, "data": {}, "updated_at": NOW})

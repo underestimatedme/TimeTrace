@@ -45,7 +45,14 @@ jobs:
             -derivedDataPath DerivedData \
             -parallel-testing-enabled NO \
             -resultBundlePath TestResults.xcresult \
-            build test CODE_SIGNING_ALLOWED=NO | tail -200
+            build test CODE_SIGNING_ALLOWED=NO 2>&1 | tee xcodebuild.log \
+            | grep -E --line-buffered 'error:|warning: .*(sign|provision)|Test Case .* failed|Test Suite .* (passed|failed)|Executed [0-9]+ tests|Failing tests|BUILD (SUCCEEDED|FAILED)|TEST (SUCCEEDED|FAILED)|xcodebuild: (error|WARNING)'
+
+      - name: Show failing assertions
+        if: failure()
+        working-directory: ios
+        run: |
+          grep -E 'swift:[0-9]+: error|Test Case .* failed \(|Failing tests|^\s+[A-Za-z]+Tests\.[a-zA-Z]+\(\)' xcodebuild.log | head -100 || true
 
       - name: Upload test results and UI screenshots
         if: always()
@@ -55,6 +62,7 @@ jobs:
           path: |
             ios/TestResults.xcresult
             ios/fixture-server.log
+            ios/xcodebuild.log
           if-no-files-found: warn
 
       - name: Zip app

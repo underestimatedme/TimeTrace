@@ -267,12 +267,15 @@ final class WorkspaceFlowTests: XCTestCase {
                                "http://127.0.0.1:18768/signals-\(UUID().uuidString)", "--screen", "ai-tools"]
         app.launchEnvironment["KEJI_OFFLINE"] = "0"
         app.launch()
-        XCTAssertTrue(app.staticTexts["62%"].waitForExistence(timeout: 8), "额度应当来自服务端，而不是示例数据")
+        // CI simulators are slower and smaller: allow the guest session + quota fetch more
+        // time, and scroll until each element is in the accessibility tree.
+        XCTAssertTrue(app.staticTexts["62%"].waitForExistence(timeout: 20), "额度应当来自服务端，而不是示例数据")
         let source = app.descendants(matching: .any)["reset.source.BetterOPC"].firstMatch
-        for _ in 0..<6 where !source.exists { app.swipeUp() }
+        for _ in 0..<8 where !source.exists { app.swipeUp() }
         XCTAssertTrue(source.waitForExistence(timeout: 5), "应当显示 Valley 返回的信号来源")
         let note = app.staticTexts["reset.note"].firstMatch
-        XCTAssertTrue(note.exists)
+        for _ in 0..<4 where !note.exists { app.swipeUp() }
+        XCTAssertTrue(note.waitForExistence(timeout: 5), "应当显示公共信号说明")
         XCTAssertTrue(note.label.contains("不替代个人额度核验"), "必须写明公共信号不代表个人额度")
         capture("ai-reset-signals")
     }

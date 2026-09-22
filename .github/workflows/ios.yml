@@ -24,6 +24,18 @@ jobs:
         working-directory: ios
         run: xcodegen generate
 
+      - name: Start workspace fixture server
+        working-directory: ios
+        run: |
+          # KeJiUITests/WorkspaceFlowTests drive the real HTTP stack against this local
+          # contract fixture (127.0.0.1:18768); without it every HTTP scenario fails.
+          nohup python3 TestSupport/workspace_server.py > fixture-server.log 2>&1 &
+          for _ in $(seq 1 20); do
+            curl -s -o /dev/null http://127.0.0.1:18768/ci/content/version && break
+            sleep 0.5
+          done
+          curl -s http://127.0.0.1:18768/ci/content/version | head -c 200; echo
+
       - name: Build and test
         working-directory: ios
         run: |
@@ -40,7 +52,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: KeJi-test-results
-          path: ios/TestResults.xcresult
+          path: |
+            ios/TestResults.xcresult
+            ios/fixture-server.log
           if-no-files-found: warn
 
       - name: Zip app

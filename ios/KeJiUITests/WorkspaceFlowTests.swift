@@ -64,6 +64,13 @@ final class WorkspaceFlowTests: XCTestCase {
         app.launch()
     }
 
+    /// Scrolls until the "生成新修订" button (below the time breakdown cards) is hittable.
+    private func scrollToTimeBreakdown() {
+        let generate = app.buttons["reports.generate"].firstMatch
+        for _ in 0..<8 where !generate.isHittable { app.swipeUp() }
+        XCTAssertTrue(app.staticTexts["等待"].waitForExistence(timeout: 3))
+    }
+
     private func tap(_ id: String, timeout: TimeInterval = 5, file: StaticString = #filePath, line: UInt = #line) {
         let el = app.buttons[id].firstMatch
         XCTAssertTrue(el.waitForExistence(timeout: timeout), "missing \(id)", file: file, line: line)
@@ -93,6 +100,9 @@ final class WorkspaceFlowTests: XCTestCase {
         app.launch()
         tap("reports.open")
         XCTAssertTrue(app.staticTexts["时区 \(TimeZone.current.identifier) · 修订 7 · 私有草稿"].waitForExistence(timeout: 8))
+        // The time breakdown sits below the ChangeLog; on smaller simulators it is not
+        // in the accessibility tree until scrolled into view.
+        scrollToTimeBreakdown()
         XCTAssertTrue(app.staticTexts["10 分钟"].exists)
         XCTAssertTrue(app.staticTexts["20 分钟"].exists)
         XCTAssertTrue(app.staticTexts["无记录"].exists)
@@ -111,6 +121,7 @@ final class WorkspaceFlowTests: XCTestCase {
         tap("project.keji")
         tap("reports.open.project")
         XCTAssertTrue(app.staticTexts["时区 \(TimeZone.current.identifier) · 修订 7 · 私有草稿"].waitForExistence(timeout: 8))
+        scrollToTimeBreakdown()
         XCTAssertTrue(app.staticTexts["10 分钟"].exists)
         XCTAssertTrue(app.staticTexts["20 分钟"].exists)
         XCTAssertFalse(app.staticTexts["30 分钟"].exists, "other project's AI must be excluded")

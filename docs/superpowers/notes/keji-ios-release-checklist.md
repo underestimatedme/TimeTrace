@@ -1,13 +1,13 @@
 # 刻迹 iOS · 上架前检查清单
 
-App：刻迹（KeJi）· bundle id `com.atlaspaces.timetrace` · 当前版本 `0.1.0 (2026091201)`
+App：刻迹（KeJi）· bundle id `com.atlaspaces.timetrace` · 当前版本 `0.1.0 (2026092301)`
 
 **推荐路线**：先 TestFlight 内部测试，真机跑通、和真实 Valley 联调过，再提交审核。
 
 ## 一、必须由你完成（涉及账号与凭据）
 
-- [ ] 在本机钥匙串安装 **Apple Distribution** 证书（现在只有两个 Apple Development 证书，
-      打不出上架包）
+- [x] 本机钥匙串已有 **Apple Distribution** 证书（team `HZ788934TW`），且已下载该 team 的
+      `com.atlaspaces.timetrace` App Store 描述文件（2026-09-23 核实）
 - [ ] 在 App Store Connect 确认 `com.atlaspaces.timetrace` 的 App 记录存在
       （提交历史里有 `align bundle identifier with App Store record`，应当已建好）
 - [ ] 上传构建包：用 Xcode Organizer，或自己配 App Store Connect API 密钥后用
@@ -19,11 +19,11 @@ App：刻迹（KeJi）· bundle id `com.atlaspaces.timetrace` · 当前版本 `0
 - [x] `PrivacyInfo.xcprivacy` 已加入并随包分发，有单元测试锁定（`ReleaseReadinessTests`）
 - [x] `ExportOptions-AppStore.plist` 已存在
 - [x] 动态字体、VoiceOver 标签已补齐
-- [ ] 打包时填 `DEVELOPMENT_TEAM` 并打开签名。工程默认关闭签名是为了模拟器测试，
-      见 `ios/scripts/run-on-device.sh` 的做法，**不要**把 Team ID 写死进 `project.yml`
-- [ ] 每次上传前递增 `CURRENT_PROJECT_VERSION`（`project.yml`）
+- [x] 打包命令见 `ios/README.md`「TestFlight archive」，Team ID 只在命令行传入，未写进 `project.yml`
+- [x] `CURRENT_PROJECT_VERSION` 已递增到 `2026092301`（下次上传前再递增）
 - [ ] 真机验证（玻璃模糊叠层的性能、深色主题）
-- [ ] 与真实 Valley 联调（派发 / 验收 / 额度），目前只在本地 fixture 下验证过
+- [ ] 与真实 Valley 联调（派发 / 验收 / 额度），目前只在本地 fixture 下验证过。
+      **前提：先把 Valley `release/timetrace-ai-workspace` 推上去部署**，否则生产的 plans/quota/reports 接口是 404
 
 ## 三、App 隐私问卷（App Store Connect → App 隐私）
 

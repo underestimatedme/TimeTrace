@@ -82,6 +82,11 @@ bash ios/scripts/run-qa.sh                         # from the repository root
 SIMULATOR_NAME='iPhone 16' bash ios/scripts/run-qa.sh
 ```
 
+**Start the contract fixture first** — `KeJiUITests/WorkspaceFlowTests` drive the real HTTP stack against
+`python3 ios/TestSupport/workspace_server.py` on `127.0.0.1:18768`; neither the scheme nor `run-qa.sh` starts it,
+and without it every HTTP scenario fails (CI starts it in `.github/workflows/ios.yml`). If the port is already
+taken by a stale server from another worktree, kill it and start the current one.
+
 The scheme runs unit/HTTP-contract tests and `KeJiUITests` sequentially. UI coverage includes onboarding,
 task creation, focus pause/resume/completion, AI task routing/pause/resume/cancellation/review,
 all five tabs, project/goal/tool/account pages, four themes and persistence after relaunch.
@@ -94,6 +99,24 @@ HTTP tests intercept URLSession requests locally and do not contact production.
 `--ui-testing` when you want to preserve the simulator's normal app data.
 
 离线 UI 测试仍使用显式模拟模式；正常联网模式通过 Valley 绑定电脑、选择本地 workspace/CLI 并派发真实远程任务。自动测试不等同于真机蜂窝网、电脑休眠恢复或 24 小时稳定性验证。
+
+## TestFlight archive
+
+Team `HZ788934TW` holds the Apple Distribution certificate and the App Store profile for
+`com.atlaspaces.timetrace`. The project keeps signing off for simulator runs; pass it on the command line:
+
+```sh
+cd ios && xcodegen generate
+xcodebuild archive -project KeJi.xcodeproj -scheme KeJi -configuration Release \
+  -destination 'generic/platform=iOS' -archivePath build/KeJi.xcarchive \
+  DEVELOPMENT_TEAM=HZ788934TW CODE_SIGN_STYLE=Automatic CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES \
+  -allowProvisioningUpdates
+xcodebuild -exportArchive -archivePath build/KeJi.xcarchive \
+  -exportOptionsPlist ExportOptions-AppStore.plist -exportPath build/export -allowProvisioningUpdates
+```
+
+Bump `CURRENT_PROJECT_VERSION` in `project.yml` before every upload, then upload `build/export/KeJi.ipa` with
+Transporter or Xcode Organizer using your own App Store Connect login.
 
 ## API base URL
 

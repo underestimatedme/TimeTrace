@@ -20,10 +20,13 @@ struct ReportsView: View {
     @Environment(\.theme) private var theme
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
+    @Environment(\.timeZone) private var timeZone
     let scope: ReportScope
-    @State private var report: DailyReport?
-    @State private var loading = false
-    @State private var reportError: String?
+    @State private var loader = ReportLoader()
+    private var context: ReportContext { ReportContext(now: store.now, timeZone: timeZone) }
+    private var report: DailyReport? { loader.currentReport(for: context) }
+    private var loading: Bool { loader.context == context && loader.loading }
+    private var reportError: String? { loader.context == context ? loader.error : nil }
 
     private var title: String {
         switch scope { case .all: return "报告"; case .project: return "项目报告" }
@@ -31,12 +34,12 @@ struct ReportsView: View {
 
     var body: some View {
         SubPageScaffold(title: title) { content }
-            .task(id: Format.dayKey(store.now)) { await loadReport(generate: false) }
+            .task(id: context) { await loadReport(generate: false) }
     }
 
     @ViewBuilder
     private var content: some View {
-        let day = Format.dayKey(store.now)
+        let day = context.date
         let sessions = sessionsInScope(scope, tasks: store.tasks, sessions: store.timeSessions)
         let presentation = presentation(sessions: sessions, day: day)
         let changeLog = ReportChangeLog(plans: store.plans, tasks: store.tasks, scope: scope)
@@ -44,7 +47,7 @@ struct ReportsView: View {
         VStack(alignment: .leading, spacing: 0) {
             Text(Format.date(store.now)).font(Typo.sans(Typo.sm, weight: .medium)).foregroundStyle(theme.text)
             Text(report.map { "时区 \($0.breakdown?.zone ?? TimeZone.current.identifier) · 修订 \($0.revision) · 私有草稿" }
-                 ?? "时区 \(TimeZone.current.identifier) · 本地草稿")
+                 ?? "时区 \(timeZone.identifier) · 本地草稿")
                 .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
         }
         .padding(.bottom, 20)
@@ -161,26 +164,16 @@ struct ReportsView: View {
     }
 
     private func presentation(sessions: [TimeSession], day: String) -> ReportPresentation {
-        if let facts = report?.breakdown?.facts {
-            let ids: Set<String>?
-            switch scope { case .all: ids = nil; case .project(let id): ids = Set(store.tasks.filter { $0.projectId == id }.map(\.id)) }
-            return ReportPresentation(facts: facts, taskIds: ids)
-        }
-        return ReportPresentation(sessions: sessions, day: day, timeZone: .current)
+        let ids: Set<String>?
+        switch scope { case .all: ids = nil; case .project(let id): ids = Set(store.tasks.filter { $0.projectId == id }.map(\.id)) }
+        return loader.presentation(for: context, sessions: sessions, taskIds: ids)
     }
 
     @MainActor private func loadReport(generate: Bool) async {
-        guard let client = store.workspaceClient, !loading else { return }
-        loading = true
-        defer { loading = false }
-        let day = Format.dayKey(store.now)
-        do {
-            let loaded = try await (generate ? client.generateReport(date: day, zone: TimeZone.current.identifier) : client.report(date: day))
-            guard loaded.localDate == day, day == Format.dayKey(store.now) else { return }
-            report = loaded.isEmpty ? nil : loaded
-            reportError = nil
-        } catch {
-            reportError = "报告未更新：\(error.localizedDescription)；当前显示已有草稿。"
+        guard let client = store.workspaceClient else { return }
+        let requested = context
+        await loader.load(context: requested) {
+            try await (generate ? client.generateReport(date: requested.date, zone: requested.zone) : client.report(date: requested.date, zone: requested.zone))
         }
     }
 

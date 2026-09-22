@@ -3,9 +3,14 @@ import XCTest
 
 private final class StubHTTPProtocol: URLProtocol {
     static var handler: ((URLRequest) throws -> (Int, Data))?
+    static var deferredBootstrap: ((StubHTTPProtocol) -> Void)?
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        if request.url?.path.hasSuffix("/bootstrap") == true, let deferred = Self.deferredBootstrap {
+            deferred(self)
+            return
+        }
         do {
             let (status, data) = try Self.handler!(request)
             let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,
@@ -16,6 +21,12 @@ private final class StubHTTPProtocol: URLProtocol {
         } catch { client?.urlProtocol(self, didFailWithError: error) }
     }
     override func stopLoading() {}
+    func finishBootstrap(_ data: Data) {
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
 }
 
 @MainActor
@@ -36,7 +47,29 @@ final class HTTPClientTests: XCTestCase {
         client.clearTokens()
         session.invalidateAndCancel()
         StubHTTPProtocol.handler = nil
+        StubHTTPProtocol.deferredBootstrap = nil
         super.tearDown()
+    }
+
+    func testLateBootstrapAfterLogoutCannotRestorePreviousAccountOrPreferences() async throws {
+        client.storeTokens(SessionTokens(accessToken: "alice", refreshToken: "refresh", expiresIn: 900))
+        let store = AppStore()
+        let engine = SyncEngine(store: store, client: client, enabled: true)
+        store.loadPreferences(userID: "alice")
+        store.updatePreferences { $0.reduceMotion = true }
+        let pending = expectation(description: "bootstrap held at transport")
+        var held: StubHTTPProtocol?
+        StubHTTPProtocol.deferredBootstrap = { held = $0; pending.fulfill() }
+        StubHTTPProtocol.handler = { _ in (200, Data(#"{"code":0,"data":{}}"#.utf8)) }
+        let request = Task { await engine.pull() }
+        await fulfillment(of: [pending], timeout: 5)
+        await engine.logout()
+        XCTAssertNil(engine.user)
+        XCTAssertEqual(store.preferences, .defaults)
+        held?.finishBootstrap(Data(#"{"code":0,"data":{"user":{"id":"alice","is_guest":false},"state":{}}}"#.utf8))
+        await request.value
+        XCTAssertNil(engine.user, "late response must not resurrect the logged-out account")
+        XCTAssertEqual(store.preferences, .defaults)
     }
 
     func testGuestThenAuthenticatedSyncAndBootstrap() async throws {

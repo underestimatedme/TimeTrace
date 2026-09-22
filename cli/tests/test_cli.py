@@ -17,6 +17,38 @@ def git(*args, cwd):
 
 
 class CliTest(unittest.TestCase):
+    def test_inventory_uploads_explicit_zero_spend_capability(self):
+        class CapabilityAdapter:
+            def __init__(self, value):
+                self.value = value
+
+            def capabilities(self):
+                return self.value
+
+        # Inspect the payload at the HTTP boundary: an installed binary is not
+        # evidence of zero-spend safety.
+        for caps, expected in (({}, False), ({"can_enforce_zero_spend": False}, False),
+                               ({"can_enforce_zero_spend": True}, True),
+                               ({"can_enforce_zero_spend": "true"}, False)):
+            with self.subTest(caps=caps), tempfile.TemporaryDirectory() as home:
+                payloads = []
+
+                def request(client, method, path, body=None, token=None):
+                    if path == "/runner/inventory":
+                        payloads.append(json.loads(json.dumps(body)))
+                    return {}
+
+                with patch.dict(os.environ, {"KEJI_HOME": home}), \
+                     patch("keji.cli._adapters", return_value={"codex": CapabilityAdapter(caps)}), \
+                     patch("keji.cli.SessionManager.token", return_value="test-token"), \
+                     patch("keji.cloud.CloudClient.request", new=request), \
+                     patch("keji.cli.Agent.run_once", return_value="idle"), \
+                     patch("keji.cli.shutil.which", return_value="/test/codex"):
+                    code, _, err = self.run_cli("agent", "run", "--once")
+                self.assertEqual(code, 0, err)
+                self.assertEqual(len(payloads), 1)
+                self.assertIs(payloads[0]["tools"][0].get("can_enforce_zero_spend"), expected)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)

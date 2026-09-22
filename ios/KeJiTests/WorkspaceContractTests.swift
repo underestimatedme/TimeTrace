@@ -128,7 +128,7 @@ final class WorkspaceContractTests: XCTestCase {
     /// 反馈走 Valley 的 POST /feedback：body / idempotency_key / include_diagnostics。
     func testFeedbackRequestMatchesValleyContract() throws {
         let draft = FeedbackDraft(idempotencyKey: "key-1", text: "  额度页看不到周窗口  ", attachDiagnostics: true)
-        let endpoint = Endpoint.createFeedback(draft)
+        let endpoint = try Endpoint.feedback(draft)
         XCTAssertEqual(endpoint.path, "/feedback")
         XCTAssertEqual(endpoint.method, .post)
         let body = try JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(FeedbackBody(draft: draft))) as? [String: Any]
@@ -137,11 +137,17 @@ final class WorkspaceContractTests: XCTestCase {
         XCTAssertEqual(body?["include_diagnostics"] as? Bool, true)
     }
 
-    func testFeedbackTicketDecodesValleyShape() throws {
+    func testFeedbackReceiptDecodesValleyShape() throws {
         let json = #"{"ticket_id":"fb_123","body":"额度页看不到周窗口","status":"open","include_diagnostics":false,"created_at":"2026-09-19T08:00:00Z","updated_at":"2026-09-19T08:00:00Z"}"#
-        let ticket = try JSONCoding.decoder.decode(FeedbackTicket.self, from: Data(json.utf8))
+        let ticket = try JSONCoding.decoder.decode(FeedbackReceipt.self, from: Data(json.utf8))
         XCTAssertEqual(ticket.ticketId, "fb_123")
         XCTAssertEqual(ticket.status, "open")
+        XCTAssertEqual(ticket.body, "额度页看不到周窗口")
+    }
+
+    /// 含凭据/邮箱/环境信息的反馈在客户端就被拒绝，不会构造请求。
+    func testFeedbackEndpointRefusesUnsafeDraft() {
+        XCTAssertThrowsError(try Endpoint.feedback(FeedbackDraft.new(text: "token=secret")))
     }
 
     /// 重试必须沿用同一个幂等键，服务端才会返回同一张单而不是重复建单；

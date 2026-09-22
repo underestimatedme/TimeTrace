@@ -5,12 +5,13 @@ import threading
 import time
 import unittest
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from unittest.mock import patch
 from contextlib import redirect_stdout
 from pathlib import Path
 
 from keji.agent import Agent
+from keji import worktree
 from keji.checkpoints import Checkpoint
 from keji.db import Database
 from keji.models import RunResult, Sample
@@ -54,6 +55,84 @@ class Adapter:
     def start(self, prompt, cwd, session_id, log_file, cancel_event=None):
         self.args = (prompt, cwd)
         return RunResult(exit_code=0, ok=True, output="finished", session_id=session_id)
+
+
+class AgentOccurrenceTest(unittest.TestCase):
+    def test_go_rfc3339_lease_fraction_is_valid_on_python39(self):
+        for fraction, expected in [("1", .1), ("12", .12), ("12345", .12345), ("123456789", .123456)]:
+            with self.subTest(fraction=fraction):
+                deadline = Agent._deadline({"lease_expires_at": "2030-01-01T00:00:00." + fraction + "Z"})
+                self.assertAlmostEqual(deadline, 1893456000 + expected, places=5)
+
+    def check_boundary(self, delay):
+        class Clock:
+            value = datetime.now(timezone.utc)
+            @classmethod
+            def now(cls, zone):
+                return cls.value
+            @staticmethod
+            def fromisoformat(value):
+                return datetime.fromisoformat(value)
+            @classmethod
+            def advance(cls, seconds):
+                cls.value += timedelta(seconds=seconds)
+
+        class SlowCloud(FakeCloud):
+            def append_events(self, *args):
+                if delay == "running_flush" and args[-1][0]["type"] == "running":
+                    Clock.advance(7)
+                return super().append_events(*args)
+            def renew(self, *args):
+                if delay == "renew":
+                    Clock.advance(11)
+                return super().renew(*args)
+            def post_quota_samples(self, *args):
+                Clock.advance(13)
+                return super().post_quota_samples(*args)
+
+        class TimedAdapter(Adapter):
+            def start(self, prompt, cwd, session_id, log_file, cancel_event=None):
+                self.entered = Clock.value
+                Clock.advance(2)
+                self.exited = Clock.value
+                if delay == "cancel_return":
+                    cancel_event.set()
+                    return RunResult(exit_code=143, ok=False, error="cancelled")
+                if delay in ("exception", "cancel"):
+                    if delay == "cancel":
+                        cancel_event.set()
+                    raise RuntimeError("adapter stopped")
+                if delay == "quota_upload":
+                    return RunResult(exit_code=1, blocked=True, session_id=session_id,
+                                     samples=[Sample(bucket_key="codex:codex:primary", tool="codex", used_pct=100, reset_at=2000, window_mins=300)])
+                return RunResult(exit_code=0, ok=True)
+
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "keji.db")
+            repo = Path(d) / "repo"; init_repo(repo)
+            db.upsert_workspace("ws1", "repo", str(repo), "main")
+            cloud, adapter = SlowCloud(), TimedAdapter()
+            agent = Agent(db, cloud, {"codex": adapter}, Path(d), lambda: "token",
+                          prepare_workspace=lambda *args: (str(repo), "main"))
+            original_snapshot = worktree.snapshot
+            def slow_snapshot(path):
+                Clock.advance(17)
+                return original_snapshot(path)
+            with patch("keji.agent.datetime", Clock), patch("keji.agent.worktree.snapshot", slow_snapshot):
+                agent.run_once()
+            self.assertEqual([e["type"] for e in cloud.events], ["running", {"quota_upload": "waiting_quota", "exception": "failed", "cancel": "cancelled", "cancel_return": "cancelled"}.get(delay, "completed")])
+            start, end = [datetime.fromisoformat(e["observed_at"].replace("Z", "+00:00")) for e in cloud.events]
+            self.assertEqual(start, adapter.entered, "pre-start network wait is not AI activity")
+            self.assertEqual(end, adapter.exited, "post-adapter IO is not AI activity")
+            self.assertEqual((end - start).total_seconds(), 2)
+            self.assertEqual(db.pending_remote_events(), [])
+
+    def test_slow_running_flush_not_active(self): self.check_boundary("running_flush")
+    def test_slow_renew_not_active(self): self.check_boundary("renew")
+    def test_slow_quota_upload_and_snapshot_not_active(self): self.check_boundary("quota_upload")
+    def test_exception_ends_at_adapter_boundary(self): self.check_boundary("exception")
+    def test_cancel_exception_ends_at_adapter_boundary(self): self.check_boundary("cancel")
+    def test_cancel_return_ends_at_adapter_boundary(self): self.check_boundary("cancel_return")
 
 
 class AgentTest(unittest.TestCase):
@@ -170,7 +249,7 @@ class AgentTest(unittest.TestCase):
     def test_completion_survives_network_failure_in_outbox(self):
         class FlakyCloud(FakeCloud):
             def append_events(self, token, job_id, attempt_id, epoch, events):
-                if events[0]["seq"] == 2 and not getattr(self, "recovered", False):
+                if any(event["seq"] == 2 for event in events) and not getattr(self, "recovered", False):
                     raise OSError("offline")
                 super().append_events(token, job_id, attempt_id, epoch, events)
         with tempfile.TemporaryDirectory() as d:
@@ -182,11 +261,16 @@ class AgentTest(unittest.TestCase):
             agent = Agent(db, cloud, {"codex": Adapter()}, Path(d), lambda: "token",
                           prepare_workspace=lambda repo, task_id, home, base: (repo, "keji/test"))
             self.assertEqual(agent.run_once(), "job j1 → awaiting_review")
-            self.assertEqual([row["seq"] for row in db.pending_remote_events()], [2])
+            self.assertEqual([row["seq"] for row in db.pending_remote_events()], [1, 2])
+            queued_event = db.pending_remote_events()[1]["payload"]
+            self.assertIn("observed_at", queued_event)
+            observed = queued_event["observed_at"]
+            self.assertLessEqual(datetime.fromisoformat(observed.replace("Z", "+00:00")).timestamp(), time.time())
             cloud.recovered = True
             agent.flush_outbox()
             self.assertEqual(db.pending_remote_events(), [])
             self.assertEqual(cloud.events[-1]["type"], "completed")
+            self.assertEqual(cloud.events[-1]["observed_at"], observed)
 
     def test_unverified_billing_blocks_execution(self):
         class UnverifiedAdapter(Adapter):
@@ -627,27 +711,41 @@ class RecoveryFenceTest(unittest.TestCase):
         self.assertIn("lease", self.agent.run_once())
         self.assertEqual(self.calls, [])
 
-    def test_resume_capability_change_while_reporting_running_never_spawns(self):
+    def test_resume_capability_change_during_preflight_renew_never_spawns(self):
         self.checkpoint()
-        original = self.cloud.append_events
-        def report(*args):
-            original(*args)
-            if args[-1][0]["type"] == "running":
-                self.adapter.capabilities = lambda: {"can_dispatch": True, "can_resume": False,
-                                                     "can_enforce_zero_spend": True}
-        self.cloud.append_events = report
+        original = self.cloud.renew
+        def renew(*args):
+            self.adapter.capabilities = lambda: {"can_dispatch": True, "can_resume": False,
+                                                 "can_enforce_zero_spend": True}
+            return original(*args)
+        self.cloud.renew = renew
         self.assertIn("waiting_input", self.agent.run_once())
         self.assertEqual(self.calls, [])
         self.assertIsNotNone(self.db.get_checkpoint("j1"))
 
-    def test_cancellation_while_reporting_running_never_spawns(self):
+    def test_resume_occurrence_excludes_preflight_network_wait(self):
         self.checkpoint()
-        original = self.cloud.append_events
-        def report(*args):
-            original(*args)
-            if args[-1][0]["type"] == "running":
-                self.cloud.renew = lambda *args: {"desired_action": "cancel"}
-        self.cloud.append_events = report
+        current = [datetime.now(timezone.utc)]
+        entered = []
+        original = self.cloud.renew
+        def renew(*args):
+            current[0] += timedelta(seconds=11)
+            return original(*args)
+        def resume(*args):
+            entered.append(current[0])
+            current[0] += timedelta(seconds=2)
+            return RunResult(exit_code=0, ok=True)
+        self.cloud.renew, self.adapter.resume = renew, resume
+        with patch("keji.agent.datetime", wraps=datetime) as clock:
+            clock.now.side_effect = lambda zone: current[0]
+            self.assertIn("awaiting_review", self.agent.run_once())
+        start, end = [datetime.fromisoformat(e["observed_at"].replace("Z", "+00:00")) for e in self.cloud.events[-2:]]
+        self.assertEqual(start, entered[0])
+        self.assertEqual((end-start).total_seconds(), 2)
+
+    def test_cancellation_during_preflight_renew_never_spawns(self):
+        self.checkpoint()
+        self.cloud.renew = lambda *args: {"desired_action": "cancel"}
         self.assertIn("cancel", self.agent.run_once())
         self.assertEqual(self.calls, [])
         self.assertIsNone(self.db.get_checkpoint("j1"))

@@ -4,6 +4,7 @@ No production credentials or services. UI actions use the production HTTP stack.
 """
 import json
 import time
+from urllib.parse import urlsplit, parse_qs
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 NOW = "2026-09-15T10:00:00Z"
@@ -28,17 +29,50 @@ class Handler(BaseHTTPRequestHandler):
         data, status, code = {}, 200, 0
         if path == "/auth/guest" or path == "/auth/refresh":
             data = {"access_token": "local-test", "refresh_token": "local-refresh", "expires_in": 900}
+        elif path == "/feedback":
+            assert {"body", "idempotency_key"} <= set(body) <= {"body", "idempotency_key", "include_diagnostics"}, body
+            assert self.headers.get("Authorization") == "Bearer local-test"
+            if scenario.startswith("feedback-ok"):
+                # 与 Valley 一致：同一幂等键返回同一张单（200），新键建新单（201）。
+                tickets = state.setdefault("feedback_tickets", {})
+                key = body["idempotency_key"]
+                if key in tickets:
+                    data = tickets[key]
+                else:
+                    data = {"ticket_id": "fb-ui-%d" % (len(tickets) + 1), "body": body["body"],
+                            "status": "received", "include_diagnostics": body.get("include_diagnostics", False),
+                            "created_at": NOW, "updated_at": NOW}
+                    tickets[key] = data
+                    status = 201
+            else:
+                previous = state.get("feedback")
+                if previous is None:
+                    # The server accepted the ticket but the first response failed.
+                    state["feedback"] = body
+                    status, code = 503, 50300
+                elif previous != body:
+                    status, code = 409, 40900
+                else:
+                    data = {"ticket_id": "ticket-f11", "body": body["body"], "status": "received"}
         elif path.startswith("/reports"):
             facts = [
                 {"id": "h1", "task_id": "t", "track": "human", "state": "known", "start": "2026-09-14T20:00:00Z", "end": "2026-09-14T20:10:00Z"},
                 {"id": "h2", "task_id": "t", "track": "human", "state": "known", "start": "2026-09-14T20:05:00Z", "end": "2026-09-14T20:10:00Z"},
                 {"id": "a1", "task_id": "t", "track": "ai", "state": "known", "start": "2026-09-14T20:00:00Z", "end": "2026-09-14T20:10:00Z"},
                 {"id": "a2", "task_id": "t", "track": "ai", "state": "known", "start": "2026-09-14T20:00:00Z", "end": "2026-09-14T20:10:00Z"}]
-            data = {"local_date": path.split("date=")[-1] if self.command == "GET" else body["date"],
+            query = parse_qs(urlsplit(path).query)
+            data = {"local_date": query.get("date", [""])[0] if self.command == "GET" else body["date"],
                     "revision": 8 if self.command == "POST" else 7, "status": "draft", "coverage": 0.79,
                     "total_score": 95, "human_seconds": 600, "ai_seconds": 1200, "waiting_seconds": None,
                     "evidence_ids": ["a1", "a2"], "baseline_version": "phase-facts-v2",
                     "breakdown": {"zone": "Asia/Dubai", "evidence_coverage": 1, "facts": facts}}
+            if scenario.startswith("reports-project"):
+                for fact in facts:
+                    fact["task_id"] = "quota"
+                facts.append(dict(facts[-1], id="other-project", task_id="outside"))
+                data["ai_seconds"] = 1800
+            if scenario.startswith("reports-zone-mismatch"):
+                data["breakdown"]["zone"] = "America/New_York"
         elif path == "/preferences":
             # 与 Valley PutPreferences 一致：乐观锁，版本不符返回 409/40901 与当前记录。
             current = state.setdefault("preferences", {"revision": 0, "data": {}, "updated_at": NOW})
@@ -50,18 +84,6 @@ class Handler(BaseHTTPRequestHandler):
                 current = {"revision": current["revision"] + 1, "data": body.get("data", {}), "updated_at": NOW}
                 state["preferences"] = current
                 data = current
-        elif path == "/feedback" and self.command == "POST":
-            # 与 Valley 一致：同一幂等键返回同一张单（200），新键建新单（201）。
-            tickets = state.setdefault("feedback", {})
-            key = body.get("idempotency_key", "")
-            if key in tickets:
-                data = tickets[key]
-            else:
-                data = {"ticket_id": "fb-ui-%d" % (len(tickets) + 1), "body": body.get("body", ""),
-                        "status": "open", "include_diagnostics": body.get("include_diagnostics", False),
-                        "created_at": NOW, "updated_at": NOW}
-                tickets[key] = data
-                status = 201
         elif path == "/reset-signals":
             # 与 Valley linkOnlyResetSignals() 完全一致：只给来源链接，不给事件。
             data = {"integration_status": "link_only",
@@ -87,12 +109,15 @@ class Handler(BaseHTTPRequestHandler):
                     existing = {item["id"]: item for item in state.get(key, [])}
                     existing.update({item["id"]: item for item in values})
                     state[key] = list(existing.values())
-            data = {"user": {"id": "local-test", "is_guest": False}, "state": {
-                key: value for key, value in state.items() if key not in ["plans", "jobs"]}}
+            user_id = scenario if scenario.startswith("feedback-") else "local-test"
+            data = {"user": {"id": user_id, "is_guest": False}, "state": {
+                key: value for key, value in state.items() if key not in ["plans", "jobs", "feedback", "feedback_tickets", "preferences"]}}
         elif path.startswith("/tasks/") and path.endswith("/plans"):
             task_id = path.split("/")[2]
             if self.command == "POST":
                 data = dict(body, id="plan-" + task_id, task_id=task_id, revision=1, created_at=NOW, updated_at=NOW)
+                if scenario.startswith("happy"):
+                    data["criteria"] = ["行为符合要求", "结果经人工检查"]
                 state["plans"][data["id"]] = data
                 status = 201
             else:
@@ -118,6 +143,7 @@ class Handler(BaseHTTPRequestHandler):
             assert body.get("evidence_ids") == ["job-ui"], body
             assert body.get("expected_revision") == data["revision"], body
             assert len(body.get("criteria", [])) == len(data["criteria"]), body
+            assert body.get("criteria", []) == [{"index": i, "accepted": True} for i in range(len(data["criteria"]))], "criterion selections missing"
             if scenario.startswith("conflict"):
                 data.update(criteria=["新增验收项"], revision=data["revision"] + 1)
                 status, code = 409, 40901

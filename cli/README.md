@@ -123,3 +123,30 @@ keji statusline --install
 ```sh
 cd cli && python3 -m unittest discover -s tests -v
 ```
+
+## Report occurrence timestamps
+
+Runner phase events include an `observed_at` UTC RFC 3339 timestamp captured
+at the actual adapter start/resume call and its return/exception boundary.
+Preflight renewal, running-event transport, quota upload and checkpoint/git IO
+do not define the execution interval. The worker captures times; the owning
+thread durably enqueues running without a blocking flush, then flushes events
+in sequence after terminal handling. Claim/Plan identity is durable before any
+execution; event payloads are durable before any send. Lease heartbeats and
+spawn/cancellation fences remain active while the adapter runs. A killed or
+lease-fenced attempt without a trustworthy terminal remains unknown.
+Outbox retries, including after restart, retain the
+original timestamp and event sequence. The server separately records receipt
+time, validates observation order and lease/clock bounds, and uses occurrence
+time for report day slicing. Keep the runner clock synchronized; deploy the
+Valley nullable `observed_at` migration before this runner update. Legacy outbox
+events without this field remain unknown report measurements, not zero-duration
+execution. Existing expired-lease reporting restrictions remain in force.
+
+Pending events for each `(job_id, attempt_id, lease_epoch)` are sent together,
+ordered by sequence, then acknowledged in one atomic SQLite update. Attempt
+groups follow durable enqueue order, not UUID lexical order. A lost response or
+failed local acknowledgment retries the whole unchanged batch; a 409 is never
+silently discarded. No schema migration is needed for existing outboxes.
+See `tests/integration/README.md` for the real Valley/PostgreSQL cancellation
+regression, including lost-response recovery and the next job claim.

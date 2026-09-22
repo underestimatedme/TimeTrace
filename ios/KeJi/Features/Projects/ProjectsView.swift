@@ -32,7 +32,7 @@ struct ProjectsView: View {
         let completed = tasks.filter { $0.status == .completed }.count
         let progress = tasks.isEmpty ? 0 : Double(completed) / Double(tasks.count) * 100
         let sessions = store.timeSessions.filter { s in tasks.contains { $0.id == s.taskId } }
-        let human = Stats.humanSeconds(sessions)
+        let human = Stats.humanSeconds(sessions, asOf: store.now)
         let ai = Stats.aiActiveSeconds(sessions)
 
         return Button { router.push(.project(project.id)) } label: {

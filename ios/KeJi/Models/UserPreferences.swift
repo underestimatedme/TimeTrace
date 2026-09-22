@@ -82,6 +82,8 @@ struct FeedbackDraft: Codable, Equatable {
     var idempotencyKey: String
     var text: String
     var attachDiagnostics: Bool = false
+    /// Once a request may have reached the server, retries keep the same body.
+    var attempted = false
 
     static let maxLength = 4000
 
@@ -91,7 +93,9 @@ struct FeedbackDraft: Codable, Equatable {
 
     var isValid: Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !trimmed.isEmpty && trimmed.count <= FeedbackDraft.maxLength
+        let unsafe = #"(?i)(authorization|bearer\s+|[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}|(?:token|api[_-]?key|password|secret|environment(?:_snapshot)?|env)["']?\s*[=:]|(?-i:\b[A-Z][A-Z0-9_]+["']?\s*[=:]))"#
+        return !trimmed.isEmpty && trimmed.utf8.count <= FeedbackDraft.maxLength
+            && trimmed.range(of: unsafe, options: .regularExpression) == nil
     }
 
     var trimmedText: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -105,16 +109,6 @@ struct FeedbackDraft: Codable, Equatable {
         }
         return .new(text: text, attachDiagnostics: attachDiagnostics)
     }
-}
-
-/// Valley 返回的反馈工单。
-struct FeedbackTicket: Codable, Equatable {
-    var ticketId: String
-    var body: String
-    var status: String
-    var includeDiagnostics: Bool
-    var createdAt: Date
-    var updatedAt: Date
 }
 
 /// Valley `GET /preferences` / `PUT /preferences` 的记录。服务端还没记录时 revision 为 0、data 为 `{}`。

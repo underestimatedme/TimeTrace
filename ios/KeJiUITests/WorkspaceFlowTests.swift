@@ -3,6 +3,58 @@ import XCTest
 /// Run TestSupport/workspace_server.py on the host before the HTTP scenarios.
 /// Offline fixtures never unlock dependencies; HTTP scenarios use the real client.
 final class WorkspaceFlowTests: XCTestCase {
+    func testFeedbackDraftSurvivesLeavingPage() {
+        app.terminate()
+        app.launchArguments = ["--ui-testing", "--offline", "--sample-data", "--screen", "profile"]
+        app.launch()
+        app.swipeUp()
+        app.buttons["反馈"].firstMatch.tap()
+        let editor = app.textViews["feedback.text"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        editor.tap()
+        editor.typeText("Feedback draft persists")
+        let expected = editor.value as? String
+        XCTAssertTrue(expected?.contains("Feedback draft persists") == true)
+        tap("subpage.back")
+        app.swipeUp()
+        app.buttons["反馈"].firstMatch.tap()
+        XCTAssertEqual(app.textViews["feedback.text"].value as? String, expected)
+        XCTAssertTrue(app.staticTexts["feedback.status"].label.contains("仅本机草稿"))
+    }
+
+    func testFeedbackHTTPFailureRestartRetryAndConfirmedCleanup() {
+        app.terminate()
+        app.launchArguments = ["--workspace-fixture", "--online-ui-testing", "--api-base-url",
+                               "http://127.0.0.1:18768/feedback-\(UUID().uuidString)", "--screen", "profile"]
+        app.launchEnvironment["KEJI_OFFLINE"] = "0"
+        app.launch()
+        app.swipeUp()
+        app.buttons["反馈"].firstMatch.tap()
+        let editor = app.textViews["feedback.text"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 8))
+        editor.tap()
+        editor.typeText("My feedback after restart")
+        tap("feedback.submit")
+        let status = app.staticTexts["feedback.status"]
+        let failed = NSPredicate(format: "label CONTAINS %@", "提交未确认")
+        expectation(for: failed, evaluatedWith: status)
+        waitForExpectations(timeout: 8)
+        app.terminate()
+        app.launch()
+        app.swipeUp()
+        app.buttons["反馈"].firstMatch.tap()
+        XCTAssertTrue(editor.waitForExistence(timeout: 8))
+        XCTAssertEqual(editor.value as? String, "My feedback after restart")
+        tap("feedback.submit")
+        expectation(for: NSPredicate(format: "label CONTAINS %@", "已提交 · 工单 ticket-f11"), evaluatedWith: status)
+        waitForExpectations(timeout: 8)
+        tap("subpage.back")
+        app.swipeUp()
+        app.buttons["反馈"].firstMatch.tap()
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        XCTAssertEqual(editor.value as? String, "")
+        XCTAssertFalse(app.buttons["feedback.submit"].isEnabled)
+    }
     private var app: XCUIApplication!
 
     override func setUpWithError() throws {
@@ -50,6 +102,35 @@ final class WorkspaceFlowTests: XCTestCase {
         capture("report-server-facts")
     }
 
+    func testProjectReportUsesOnlyItsServerFacts() {
+        app.terminate()
+        app.launchArguments = ["--workspace-fixture", "--online-ui-testing", "--api-base-url",
+                               "http://127.0.0.1:18768/reports-project-\(UUID().uuidString)", "--screen", "projects"]
+        app.launchEnvironment["KEJI_OFFLINE"] = "0"
+        app.launch()
+        tap("project.keji")
+        tap("reports.open.project")
+        XCTAssertTrue(app.staticTexts["时区 Asia/Dubai · 修订 7 · 私有草稿"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["10 分钟"].exists)
+        XCTAssertTrue(app.staticTexts["20 分钟"].exists)
+        XCTAssertFalse(app.staticTexts["30 分钟"].exists, "other project's AI must be excluded")
+        XCTAssertFalse(app.staticTexts["生产力总分 95"].exists)
+        capture("report-project-server-facts")
+    }
+
+    func testReportRejectsSnapshotFromAnotherTimeZone() {
+        app.terminate()
+        app.launchArguments = ["--workspace-fixture", "--online-ui-testing", "--api-base-url",
+                               "http://127.0.0.1:18768/reports-zone-mismatch-\(UUID().uuidString)", "--screen", "today"]
+        app.launchEnvironment["KEJI_OFFLINE"] = "0"
+        app.launch()
+        tap("reports.open")
+        let mismatch = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "报告日期或时区不匹配")).firstMatch
+        XCTAssertTrue(mismatch.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.staticTexts["20 分钟"].exists)
+        XCTAssertFalse(app.staticTexts["时区 America/New_York · 修订 7 · 私有草稿"].exists)
+    }
+
     func testOfflineCannotAcceptDependenciesOrUnlockDispatch() {
         // Drill down to plan.03.
         tap("project.keji")
@@ -79,7 +160,13 @@ final class WorkspaceFlowTests: XCTestCase {
         createAndDispatch(scenario: "happy")
         XCTAssertTrue(app.staticTexts["待验收"].waitForExistence(timeout: 15))
         tap("plan.accept")
+        XCTAssertFalse(app.buttons["plan.accept.confirm"].isEnabled)
         tap("plan.evidence.job-ui")
+        XCTAssertFalse(app.buttons["plan.accept.confirm"].isEnabled, "evidence alone cannot satisfy criteria")
+        tap("plan.criterion.0")
+        XCTAssertFalse(app.buttons["plan.accept.confirm"].isEnabled, "each criterion requires explicit selection")
+        tap("plan.criterion.1")
+        XCTAssertTrue(app.buttons["plan.accept.confirm"].isEnabled)
         tap("plan.accept.confirm")
         XCTAssertTrue(app.staticTexts["已验收"].waitForExistence(timeout: 10))
         capture("plan-accepted")
@@ -182,7 +269,7 @@ final class WorkspaceFlowTests: XCTestCase {
     func testFeedbackIsSubmittedToServerAndShowsTicket() {
         app.terminate()
         app.launchArguments = ["--workspace-fixture", "--online-ui-testing", "--api-base-url",
-                               "http://127.0.0.1:18768/feedback-\(UUID().uuidString)", "--screen", "profile"]
+                               "http://127.0.0.1:18768/feedback-ok-\(UUID().uuidString)", "--screen", "profile"]
         app.launchEnvironment["KEJI_OFFLINE"] = "0"
         app.launch()
         let entry = app.buttons["反馈"].firstMatch
@@ -195,7 +282,7 @@ final class WorkspaceFlowTests: XCTestCase {
         tap("feedback.submit")
         let status = app.staticTexts["feedback.status"].firstMatch
         XCTAssertTrue(status.waitForExistence(timeout: 8))
-        XCTAssertTrue(status.label.contains("工单号 fb-ui-1"), "应显示服务端工单号，实际：\(status.label)")
+        XCTAssertTrue(status.label.contains("工单 fb-ui-1"), "应显示服务端工单号，实际：\(status.label)")
         capture("feedback-submitted")
     }
     /// 偏好经 Valley 跨设备同步：改成深海蓝后，用 --sample-data 重启（会清掉本机偏好与同步状态），

@@ -8,6 +8,18 @@ final class WorkspaceClient {
 
     init(client: APIClient) { self.client = client }
 
+    @MainActor func feedbackSession(for userID: String) throws -> APIClient.SessionIdentity {
+        try client.identity(for: userID)
+    }
+
+    @MainActor func validateFeedbackSession(_ identity: APIClient.SessionIdentity) throws {
+        try client.validate(identity)
+    }
+
+    @MainActor func submitFeedback(_ draft: FeedbackDraft, identity: APIClient.SessionIdentity) async throws -> FeedbackReceipt {
+        try await client.send(Endpoint.feedback(draft), as: FeedbackReceipt.self, identity: identity)
+    }
+
     func accountQuota() async throws -> AccountQuota {
         try await client.send(.accountQuota, as: AccountQuota.self)
     }
@@ -18,10 +30,6 @@ final class WorkspaceClient {
 
     func putPreferences(expectedRevision: Int64, prefs: UserPreferences) async throws -> RemotePreferences {
         try await client.send(.putPreferences(expectedRevision: expectedRevision, prefs: prefs), as: RemotePreferences.self)
-    }
-
-    func submitFeedback(_ draft: FeedbackDraft) async throws -> FeedbackTicket {
-        try await client.send(.createFeedback(draft), as: FeedbackTicket.self)
     }
 
     func resetSignals() async throws -> ResetSignalsResponse {
@@ -64,8 +72,8 @@ final class WorkspaceClient {
         try await client.send(.cancelPlan(id: id, expectedRevision: expectedRevision), as: PlanItem.self)
     }
 
-    func report(date: String) async throws -> DailyReport {
-        try await client.send(.report(date: date), as: DailyReport.self)
+    func report(date: String, zone: String? = nil) async throws -> DailyReport {
+        try await client.send(.report(date: date, zone: zone), as: DailyReport.self)
     }
 
     func generateReport(date: String, zone: String) async throws -> DailyReport {

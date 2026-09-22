@@ -2,6 +2,22 @@ import XCTest
 @testable import KeJi
 
 final class StatsTests: XCTestCase {
+    func testOpenHumanSessionsAccumulateAndClipAcrossMidnight() {
+        let now = ISO8601.date(from: "2026-09-15T00:10:00Z")!
+        let zone = TimeZone(identifier: "UTC")!
+        let day = "2026-09-15"
+        let midnight = reportDayInterval(day, timeZone: zone)!.start
+        let previousDay = "2026-09-14"
+        var open = session("open", type: .humanFocus, start: midnight.addingTimeInterval(-600), minutes: 1)
+        open.endedAt = nil
+        open.durationSeconds = 999999
+        var overlap = open
+        overlap.id = "overlap"; overlap.type = .humanReview
+        XCTAssertEqual(Stats.humanSeconds([open, overlap], day: previousDay, timeZone: zone, asOf: now), 600)
+        XCTAssertEqual(Stats.humanSeconds([open, overlap], day: day, timeZone: zone, asOf: now), 600)
+        XCTAssertEqual(ReportPresentation(sessions: [open], day: day, timeZone: zone).human, .unknown)
+    }
+
     func testReportMidnightClippingHumanUnionAndDistinctParallelAI() {
         let start = Calendar.current.date(from: DateComponents(year: 2026, month: 9, day: 14, hour: 23, minute: 50))!
         let human = session("human", type: .humanFocus, start: start, minutes: 20)

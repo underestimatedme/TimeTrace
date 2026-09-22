@@ -146,7 +146,8 @@ struct ReportPresentation {
             else if Stats.waitingTypes.contains(s.type) { track = .waiting }
             else { return nil }
             let end = s.endedAt ?? bounds.end
-            guard s.startedAt < bounds.end, end > bounds.start else { return nil }
+            let midnightZero = end == s.startedAt && end == bounds.start
+            guard s.startedAt < bounds.end, end > bounds.start || midnightZero else { return nil }
             return ReportPhaseFact(id: s.id, taskId: s.taskId, track: track,
                                    state: s.endedAt != nil && end >= s.startedAt ? "known" : "unknown",
                                    start: max(s.startedAt, bounds.start), end: min(end, bounds.end))

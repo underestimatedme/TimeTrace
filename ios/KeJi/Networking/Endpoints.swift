@@ -56,8 +56,11 @@ struct Endpoint {
         Endpoint(method: .put, path: "/preferences", requiresAuth: true,
                  body: PutPreferencesBody(expectedRevision: expectedRevision, data: prefs))
     }
-    static func createFeedback(_ draft: FeedbackDraft) -> Endpoint {
-        Endpoint(method: .post, path: "/feedback", requiresAuth: true, body: FeedbackBody(draft: draft))
+    /// 反馈走 Valley 的 POST /feedback：body / idempotency_key / include_diagnostics。
+    /// 含凭据、邮箱、环境信息或超长的草稿在客户端就拒绝，不发出去。
+    static func feedback(_ draft: FeedbackDraft) throws -> Endpoint {
+        guard draft.isValid else { throw APIError(code: -8, message: "反馈请勿包含凭据、邮箱或环境信息，且不得超过 4000 字节。") }
+        return Endpoint(method: .post, path: "/feedback", requiresAuth: true, body: FeedbackBody(draft: draft))
     }
     static func taskPlans(taskID: String) -> Endpoint {
         Endpoint(method: .get, path: "/tasks/\(taskID)/plans", requiresAuth: true, body: nil)
@@ -81,8 +84,9 @@ struct Endpoint {
         Endpoint(method: .post, path: "/plans/\(id)/cancel", requiresAuth: true,
                  body: RevisionBody(expectedRevision: expectedRevision))
     }
-    static func report(date: String) -> Endpoint {
-        Endpoint(method: .get, path: "/reports?date=\(date)", requiresAuth: true, body: nil)
+    static func report(date: String, zone: String? = nil) -> Endpoint {
+        let query = zone.map { "&zone=" + ($0.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "") } ?? ""
+        return Endpoint(method: .get, path: "/reports?date=\(date)\(query)", requiresAuth: true, body: nil)
     }
     static func generateReport(date: String, zone: String) -> Endpoint {
         Endpoint(method: .post, path: "/reports", requiresAuth: true, body: GenerateReportBody(date: date, zone: zone))
@@ -159,6 +163,7 @@ struct APIError: Error, LocalizedError, Equatable {
 
     static let offline = APIError(code: -1, message: "离线模式")
     static let noSession = APIError(code: -2, message: "尚未建立会话")
+    static let sessionChanged = APIError(code: -9, message: "账号会话已变化，请重试")
     static func transport(_ error: Error) -> APIError { APIError(code: -3, message: error.localizedDescription) }
     static func decoding(_ error: Error) -> APIError { APIError(code: -4, message: "响应解析失败: \(error.localizedDescription)") }
     static let unauthorizedCode = 40100

@@ -2,6 +2,33 @@ import XCTest
 @testable import KeJi
 
 final class UserPreferencesTests: XCTestCase {
+    func testFeedbackRefusesSensitiveProseAndUsesServerByteLimit() {
+        for text in ["Authorization: Bearer secret", "token=secret", "contact me@example.com", "API_KEY=secret", "HOME=/Users/private", "PATH=/private/bin", #"{"HOME":"/Users/private"}"#, "environment_snapshot: {}", String(repeating: "中", count: 1400)] {
+            XCTAssertFalse(FeedbackDraft.new(text: text).isValid, "unsafe or oversized feedback must stay local")
+        }
+    }
+
+    @MainActor func testClearingAccountResetsPreferences() {
+        let store = AppStore()
+        store.updatePreferences { $0.reduceMotion = true }
+        store.clearAll()
+        XCTAssertEqual(store.preferences, .defaults)
+    }
+
+    func testPreferencesAccountIsolationAndLegacyUnownedDataNotImported() throws {
+        let suite = "f11.preferences." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var changed = UserPreferences.defaults
+        changed.reduceMotion = true
+        defaults.set(try JSONCoding.encoder.encode(changed), forKey: "keji.preferences.v1")
+        let storage = PreferencesStore(defaults: defaults)
+        XCTAssertEqual(storage.load(userID: "alice"), .defaults)
+        storage.save(changed, userID: "alice")
+        XCTAssertEqual(storage.load(userID: "bob"), .defaults)
+        XCTAssertEqual(storage.load(userID: nil), .defaults)
+        XCTAssertEqual(PreferencesStore(defaults: defaults).load(userID: "alice"), changed)
+    }
     func testCoreModulesCannotBeHidden() {
         var prefs = UserPreferences.defaults
         prefs = prefs.hiding(.goals).hiding(.todos).hiding(.blocked)

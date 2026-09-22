@@ -157,69 +157,45 @@ final class AppStore {
     // MARK: - Preferences (local display/behaviour; not synced)
 
     private let preferencesStore = PreferencesStore()
+    private var preferencesUserID: String?
 
-    func loadPreferences() {
-        preferences = preferencesStore.load()
-        pendingFeedback = preferencesStore.loadPendingFeedback()
-    }
-
-    // MARK: - Feedback
-
-    /// 还没成功提交的反馈草稿。持久化，所以「已保存草稿」这句话是真的。
-    var pendingFeedback: FeedbackDraft?
-
-    enum FeedbackOutcome: Equatable {
-        case submitted(ticketId: String)
-        case savedOffline
-        case failed(String)
-    }
-
-    /// 提交反馈。先把草稿落盘，再发请求；成功才清掉草稿，失败保留、重试沿用同一幂等键。
-    func submitFeedback(text: String, attachDiagnostics: Bool) async -> FeedbackOutcome {
-        let draft = FeedbackDraft.next(pending: pendingFeedback, text: text, attachDiagnostics: attachDiagnostics)
-        guard draft.isValid else { return .failed("请填写反馈内容（最多 \(FeedbackDraft.maxLength) 字）。") }
-        pendingFeedback = draft
-        preferencesStore.savePendingFeedback(draft)
-        guard let workspaceClient else { return .savedOffline }
-        do {
-            let ticket = try await workspaceClient.submitFeedback(draft)
-            pendingFeedback = nil
-            preferencesStore.savePendingFeedback(nil)
-            return .submitted(ticketId: ticket.ticketId)
-        } catch let error as APIError where error.code == 42910 {
-            return .failed("提交过于频繁，请稍后再试。草稿已保留。")
-        } catch {
-            return .failed("提交失败：\(error.localizedDescription)。草稿已保留，重试不会重复建单。")
-        }
+    /// `userID` 为 nil 表示当前没有可归属的账号（登出中、尚未建立会话）：不读也不写任何持久化偏好，
+    /// 这样一个账号的选择不会泄漏给下一个账号。离线模式由 SyncEngine 传入固定的本机身份。
+    func loadPreferences(userID: String? = nil) {
+        preferencesUserID = userID
+        preferences = preferencesStore.load(userID: userID)
     }
 
     func updatePreferences(_ transform: (inout UserPreferences) -> Void) {
         var updated = preferences
         transform(&updated)
         preferences = updated
-        preferencesStore.save(updated)
+        preferencesStore.save(updated, userID: preferencesUserID)
         _Concurrency.Task { await syncPreferences() }
     }
 
-    /// 与 Valley 同步偏好（跨设备）。离线时什么都不做；失败时保留本机值，下次再同步。
-    /// 冲突按三方合并处理，不静默覆盖另一台设备的改动。
+    /// 与 Valley 同步偏好（跨设备）。没有账号或离线时什么都不做；失败时保留本机值，下次再同步。
+    /// 冲突按三方合并处理，不静默覆盖另一台设备的改动。每次 await 之后都确认账号没换，
+    /// 换了就丢弃这次结果，绝不把一个账号的偏好写进另一个账号。
     func syncPreferences() async {
-        guard let workspaceClient, let remote = try? await workspaceClient.preferences() else { return }
-        let state = preferencesStore.loadSyncState()
+        guard let userID = preferencesUserID, let workspaceClient,
+              let remote = try? await workspaceClient.preferences(), preferencesUserID == userID else { return }
+        let state = preferencesStore.loadSyncState(userID: userID)
         switch PreferencesSync.plan(local: preferences, state: state, remote: remote) {
         case .none:
             return
         case let .adopt(data, revision):
             preferences = data
-            preferencesStore.save(data)
-            preferencesStore.saveSyncState(PreferencesSyncState(revision: revision, base: data))
+            preferencesStore.save(data, userID: userID)
+            preferencesStore.saveSyncState(PreferencesSyncState(revision: revision, base: data), userID: userID)
         case let .push(merged, expectedRevision):
-            guard let saved = try? await workspaceClient.putPreferences(expectedRevision: expectedRevision, prefs: merged) else {
-                return   // 409 或网络失败：保留本机改动，下次同步重新合并
+            guard let saved = try? await workspaceClient.putPreferences(expectedRevision: expectedRevision, prefs: merged),
+                  preferencesUserID == userID else {
+                return   // 409、网络失败或账号已切换：保留本机改动，下次同步重新合并
             }
             preferences = saved.data
-            preferencesStore.save(saved.data)
-            preferencesStore.saveSyncState(PreferencesSyncState(revision: saved.revision, base: saved.data))
+            preferencesStore.save(saved.data, userID: userID)
+            preferencesStore.saveSyncState(PreferencesSyncState(revision: saved.revision, base: saved.data), userID: userID)
         }
     }
     func markActiveFocusDirty() { generation &+= 1; focusGeneration = generation; activeFocusDirty = true; onDirty?() }
@@ -265,6 +241,7 @@ final class AppStore {
     }
 
     func clearAll() {
+        loadPreferences()
         replaceAll(with: SampleData.createEmptyData(), useSample: false)
         hasOnboarded = false
         commit()

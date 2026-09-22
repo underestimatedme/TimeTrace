@@ -2,8 +2,9 @@
 import time
 import uuid
 import hashlib
+import re
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pathlib import Path
 from typing import Any, Callable, Dict
@@ -117,7 +118,13 @@ class Agent:
     @staticmethod
     def _deadline(lease):
         try:
-            return datetime.fromisoformat(lease["lease_expires_at"].replace("Z", "+00:00")).timestamp()
+            # Go RFC3339Nano emits 1–9 fractional digits. Python 3.9 accepts
+            # only 3 or 6; truncate nanoseconds (never extend authority) and
+            # pad to microseconds before parsing the unchanged timezone.
+            value = re.sub(r"\.(\d{1,9})(?=Z$|[+-]\d{2}:\d{2}$)",
+                           lambda match: "." + match.group(1)[:6].ljust(6, "0"),
+                           lease["lease_expires_at"])
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
         except (KeyError, TypeError, ValueError, AttributeError):
             return 0.0
 
@@ -165,7 +172,7 @@ class Agent:
             return deadline, "lease_expired"
         return renewed, self._gate(adapter, claim["job"], renewed)
 
-    def _blocked(self, claim, plan_key, reason, checkpoint=None, seq=1):
+    def _blocked(self, claim, plan_key, reason, checkpoint=None, seq=1, observed_at=None):
         cancelled = reason == "cancelled"
         if cancelled:
             self.db.delete_checkpoint(plan_key)
@@ -175,7 +182,8 @@ class Agent:
             checkpoint.reason = reason
             self.db.save_checkpoint(checkpoint)
         event_type = "cancelled" if cancelled else "waiting_input"
-        self._report(claim, [{"seq": seq, "type": event_type, "message": "dispatch blocked: %s" % reason}])
+        self._report(claim, [{"seq": seq, "type": event_type, "message": "dispatch blocked: %s" % reason,
+                              "observed_at": observed_at or self._observed_now()}])
         self.db.update_remote_claim(claim["job"]["id"], "reported")
         if cancelled:
             return "job %s → cancelled" % claim["job"]["id"]
@@ -195,6 +203,7 @@ class Agent:
         if reason:
             return self._blocked(claim, plan_key, reason, checkpoint)
         running_announced = False
+        observed_end = None
         cancel_event = threading.Event()
         try:
             with ThreadPoolExecutor(max_workers=1) as pool:
@@ -233,20 +242,18 @@ class Agent:
                 if reason:
                     return self._blocked(claim, plan_key, reason, checkpoint)
                 self.db.update_remote_claim(job_id, "launching")
-                self._report(claim, [{"seq": 1, "type": "running", "message": "started"}])
-                running_announced = True
-                self.db.update_remote_claim(job_id, "running")
-                # Reporting can block on the network; check authority again at
-                # the actual call boundary, not only before announcing the run.
+                # Renew before execution; transport wait is not AI activity.
                 deadline, reason = self._renew(claim, adapter, deadline)
                 if not reason and resuming and adapter_capabilities(adapter).get("can_resume") is not True:
                     reason = "checkpoint resume capability changed"
                 if reason:
-                    return self._blocked(claim, plan_key, reason, checkpoint, seq=2)
+                    return self._blocked(claim, plan_key, reason, checkpoint)
                 self.db.mark_plan_started(plan_key, job_id, claim["attempt_id"])
                 Path(log_file).touch(exist_ok=True)
                 run = adapter.resume if resuming else adapter.start
                 spawned = False
+                observed_start = None
+                adapter_entered = threading.Event()
                 def authority():
                     if reason:
                         return reason
@@ -255,7 +262,7 @@ class Agent:
                         boundary_reason = "checkpoint resume capability changed"
                     return boundary_reason
                 def invoke():
-                    nonlocal reason, spawned
+                    nonlocal reason, spawned, observed_start, observed_end
                     # Executor scheduling is also a delay: fence inside the
                     # worker, at the call that can actually create a process.
                     if reason or cancel_event.is_set():
@@ -265,11 +272,26 @@ class Agent:
                         reason = "checkpoint resume capability changed"
                     if reason:
                         return None
-                    spawned = True
                     with spawn_authority(authority):
                         enforce_spawn_authority(cancel_event)
-                        return run(job["prompt"], execution_path, session_id, log_file, cancel_event)
+                        spawned = True
+                        observed_start = self._observed_now()
+                        adapter_entered.set()
+                        try:
+                            return run(job["prompt"], execution_path, session_id, log_file, cancel_event)
+                        finally:
+                            observed_end = self._observed_now()
                 future = pool.submit(invoke)
+                future.add_done_callback(lambda _: adapter_entered.set())
+                adapter_entered.wait()
+                if observed_start is not None:
+                    # SQLite and outbox writes stay on their owning thread.
+                    # Execution timestamps are captured only by the worker at
+                    # the call boundaries, independently of this durable IO.
+                    self.db.update_remote_claim(job_id, "running")
+                    self._report(claim, [{"seq": 1, "type": "running", "message": "started",
+                                          "observed_at": observed_start}], flush=False)
+                    running_announced = True
                 while True:
                     try:
                         wait = self.heartbeat_interval if reason else min(self.heartbeat_interval, max(.001, (deadline - time.time()) / 2))
@@ -280,10 +302,11 @@ class Agent:
                             deadline, reason = self._renew(claim, adapter, deadline)
                             if reason:
                                 cancel_event.set()
-                reason = reason or self._gate(adapter, job, deadline)
+                reason = reason or ("cancelled" if cancel_event.is_set() else self._gate(adapter, job, deadline))
                 if reason:
                     if not spawned or reason == "cancelled":
-                        return self._blocked(claim, plan_key, reason, checkpoint, seq=2)
+                        return self._blocked(claim, plan_key, reason, checkpoint,
+                                             seq=2 if running_announced else 1, observed_at=observed_end)
                     self.db.delete_checkpoint(plan_key)
                     self.db.update_remote_claim(job_id, "fenced")
                     return "job %s → fenced (%s)" % (job_id, reason)
@@ -294,17 +317,18 @@ class Agent:
             if (job.get("desired_action") == "cancel" or job.get("status") == "cancelled"
                     or reason == "cancelled" or (cancel_event.is_set() and not reason)
                     or (not reason and isinstance(exc, DispatchDenied) and str(exc) == "cancelled")):
-                return self._blocked(claim, plan_key, "cancelled", checkpoint, seq=terminal_seq)
+                return self._blocked(claim, plan_key, "cancelled", checkpoint, seq=terminal_seq, observed_at=observed_end)
             if reason and cancel_event.is_set():
                 self.db.delete_checkpoint(plan_key)
                 self.db.update_remote_claim(job_id, "fenced")
                 return "job %s → fenced (%s)" % (job_id, reason)
             if isinstance(exc, DispatchDenied):
-                return self._blocked(claim, plan_key, str(exc), checkpoint, seq=terminal_seq)
+                return self._blocked(claim, plan_key, str(exc), checkpoint, seq=terminal_seq, observed_at=observed_end)
             # Invalid recovery evidence must survive for manual diagnosis.
             if resuming:
-                return self._blocked(claim, plan_key, "checkpoint recovery failed: %s" % exc, checkpoint, seq=terminal_seq)
-            self._report(claim, [{"seq": terminal_seq, "type": "failed", "message": "adapter/preparation crashed: %s" % exc}])
+                return self._blocked(claim, plan_key, "checkpoint recovery failed: %s" % exc, checkpoint, seq=terminal_seq, observed_at=observed_end)
+            self._report(claim, [{"seq": terminal_seq, "type": "failed", "message": "adapter/preparation crashed: %s" % exc,
+                                  "observed_at": observed_end or self._observed_now()}])
             self.db.update_remote_claim(job_id, "reported")
             return "job %s → failed" % job_id
 
@@ -330,13 +354,14 @@ class Agent:
                 )
                 self.db.save_checkpoint(cp)
             except Exception as exc:
-                return self._blocked(claim, plan_key, "checkpoint capture failed: %s" % exc, checkpoint, seq=2)
+                return self._blocked(claim, plan_key, "checkpoint capture failed: %s" % exc, checkpoint, seq=2, observed_at=observed_end)
             outcome = "waiting_quota"
             event = {"seq": 2, "type": outcome, "message": (result.error or "quota blocked")[:1000]}
         else:
             self.db.delete_checkpoint(plan_key)
             outcome = "failed"
             event = {"seq": 2, "type": outcome, "message": (result.error or "exit %s" % result.exit_code)[:1000]}
+        event["observed_at"] = observed_end
         self._report(claim, [event])
         self.db.update_remote_claim(job_id, "reported")
         return "job %s → %s" % (job_id, outcome)
@@ -369,9 +394,19 @@ class Agent:
                 time.sleep(backoff)
                 backoff = min(60, max(interval, backoff * 2))
 
-    def _report(self, claim: Dict[str, Any], events: list) -> None:
+    @staticmethod
+    def _observed_now():
+        return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+    def _report(self, claim: Dict[str, Any], events: list, flush=True) -> None:
         for event in events:
+            # Stamp the phase when observed, before durable enqueue. flush_outbox
+            # replays this payload unchanged even after restart/network delay.
+            event = dict(event)
+            event.setdefault("observed_at", self._observed_now())
             self.db.queue_remote_event(claim["job"]["id"], claim["attempt_id"], claim["lease_epoch"], event)
+        if not flush:
+            return
         try:
             self.flush_outbox()
         except Exception:
@@ -424,7 +459,15 @@ class Agent:
         return total
 
     def flush_outbox(self) -> None:
+        batches = {}
         for row in self.db.pending_remote_events():
-            self.cloud.append_events(self.access_token(), row["job_id"], row["attempt_id"],
-                                     row["lease_epoch"], [row["payload"]])
-            self.db.mark_remote_event_sent(row["id"])
+            key = (row["job_id"], row["attempt_id"], row["lease_epoch"])
+            batches.setdefault(key, []).append(row)
+        # Insertion-ordered groups preserve durable attempt order (UUID lexical
+        # order is not chronology). Never split an attempt's terminal batch:
+        # Valley may close a cancelled attempt at the end of the first request.
+        for (job, attempt, epoch), rows in batches.items():
+            rows.sort(key=lambda row: row["seq"])
+            self.cloud.append_events(self.access_token(), job, attempt, epoch,
+                                     [row["payload"] for row in rows])
+            self.db.mark_remote_events_sent([row["id"] for row in rows])

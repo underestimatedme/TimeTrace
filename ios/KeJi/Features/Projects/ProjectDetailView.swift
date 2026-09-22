@@ -29,7 +29,7 @@ struct ProjectDetailView: View {
         .padding(.bottom, 24)
 
         TwoColumnGrid {
-            StatCard(label: "人工投入", value: Format.duration(Stats.humanSeconds(sessions)), valueColor: theme.accent)
+            StatCard(label: "人工投入", value: Format.duration(Stats.humanSeconds(sessions, asOf: store.now)), valueColor: theme.accent)
             StatCard(label: "AI 投入", value: Format.duration(Stats.aiActiveSeconds(sessions)), valueColor: theme.ai)
         }
         .padding(.bottom, 12)

@@ -28,9 +28,13 @@ final class SyncEngine {
     let enabled: Bool
 
     @ObservationIgnored private var pushTask: _Concurrency.Task<Void, Never>?
+    @ObservationIgnored private var pushTaskID: UUID?
     @ObservationIgnored private var inFlight = false
     @ObservationIgnored private var completionWaiters: [CheckedContinuation<Void, Never>] = []
     @ObservationIgnored private var sessionTask: _Concurrency.Task<Bool, Never>?
+    @ObservationIgnored private var sessionGeneration: UInt64 = 0
+    @ObservationIgnored private var loggingOut = false
+    @ObservationIgnored private var sessionSuppressed = false
     private static let userKey = "keji.sync.user"
 
     init(store: AppStore, client: APIClient, enabled: Bool) {
@@ -38,14 +42,25 @@ final class SyncEngine {
         self.client = client
         self.enabled = enabled
         if !enabled { status = .offline }
-        if let data = UserDefaults.standard.data(forKey: SyncEngine.userKey) {
+        if enabled, client.hasSession, let data = UserDefaults.standard.data(forKey: SyncEngine.userKey) {
             user = try? JSONCoding.decoder.decode(UserInfo.self, from: data)
         }
+        // Offline mode has no account but must still keep preferences across launches,
+        // so it owns a fixed local identity; online, preferences follow the account.
+        store.loadPreferences(userID: enabled ? (client.hasSession ? user?.id : nil) : SyncEngine.offlineIdentity)
         store.onDirty = { [weak self] in self?.schedulePush() }
     }
 
+    /// Identity used for local-only state (preferences, feedback drafts) when networking is disabled.
+    static let offlineIdentity = "local-offline"
+
     var isLoggedIn: Bool { (user?.isGuest == false) }
     var hasSession: Bool { client.hasSession }
+
+    private var canSynchronize: Bool { enabled && !loggingOut && !sessionSuppressed }
+    private func isCurrent(_ generation: UInt64) -> Bool {
+        canSynchronize && generation == sessionGeneration
+    }
 
     // MARK: - Session
 
@@ -53,52 +68,91 @@ final class SyncEngine {
     /// (a pull on appear racing a debounced push) share one in-flight request so
     /// only a single guest account is ever created.
     func ensureSession() async -> Bool {
-        guard enabled else { return false }
+        guard canSynchronize else { return false }
+        let generation = sessionGeneration
         if client.hasSession { return true }
-        if let running = sessionTask { return await running.value }
+        if let running = sessionTask {
+            let result = await running.value
+            return isCurrent(generation) && result
+        }
         let task = _Concurrency.Task<Bool, Never> { [client] in
             do {
                 let tokens = try await client.send(Endpoint.guest, as: SessionTokens.self)
+                guard self.isCurrent(generation) else { return false }
                 client.storeTokens(tokens)
                 return true
             } catch {
-                self.fail(error)
+                if self.isCurrent(generation) { self.fail(error) }
                 return false
             }
         }
         sessionTask = task
         let ok = await task.value
-        sessionTask = nil
-        return ok
+        if generation == sessionGeneration { sessionTask = nil }
+        return isCurrent(generation) && ok
     }
 
     func sendCode(identifier: String) async throws {
         guard enabled else { throw APIError.offline }
+        guard !loggingOut else { throw APIError.sessionChanged }
+        let generation = sessionGeneration
         _ = try await client.send(Endpoint.sendCode(identifier: identifier), as: SendCodeResponse.self)
+        guard !loggingOut, generation == sessionGeneration else { throw APIError.sessionChanged }
     }
 
     /// Upgrades the guest (bearer attached when available) and pulls the merged state.
     func login(identifier: String, code: String) async throws {
         guard enabled else { throw APIError.offline }
+        guard !loggingOut else { throw APIError.sessionChanged }
+        let previousGeneration = sessionGeneration
         let tokens = try await client.send(Endpoint.login(identifier: identifier, code: code), as: SessionTokens.self)
+        guard !loggingOut, previousGeneration == sessionGeneration else { throw APIError.sessionChanged }
+        cancelScheduledPush()
+        sessionGeneration &+= 1
+        let generation = sessionGeneration
+        sessionSuppressed = false // Only explicit login re-enables a logged-out engine.
         client.storeTokens(tokens)
+        setUser(nil) // Do not show the previous account while bootstrap is pending.
+        await waitForCompletion()
+        guard isCurrent(generation) else { throw APIError.sessionChanged }
         await syncOnForeground()
+        guard isCurrent(generation) else { throw APIError.sessionChanged }
     }
 
     func logout() async {
-        guard enabled else { return }
-        if client.hasSession {
-            _ = try? await client.send(Endpoint.logout, as: RevokedResponse.self)
-        }
+        guard enabled, !loggingOut else { return }
+        loggingOut = true
+        sessionSuppressed = true
+        sessionGeneration &+= 1
+        cancelScheduledPush()
+        sessionTask?.cancel()
+        sessionTask = nil
+        let credentials = client.tokens
         client.clearTokens()
+        let clearedGeneration = client.sessionGeneration
         setUser(nil)
+        status = .idle
+        if let credentials {
+            try? await client.revokeSession(credentials)
+        }
+        // Close the window a second time. Never wipe a session independently
+        // installed while the old account's remote revocation was in flight.
+        sessionGeneration &+= 1
+        if client.sessionGeneration == clearedGeneration { client.clearTokens() }
+        setUser(nil)
+        loggingOut = false
         status = .idle
     }
 
     /// Deletes the server account and wipes local data (spec: user and all data are deleted).
     func deleteAccount() async throws {
-        guard enabled else { throw APIError.offline }
+        guard canSynchronize else { throw APIError.noSession }
+        let generation = sessionGeneration
         _ = try await client.send(Endpoint.deleteAccount, as: DeletedResponse.self)
+        guard isCurrent(generation) else { throw APIError.sessionChanged }
+        cancelScheduledPush()
+        sessionGeneration &+= 1
+        sessionSuppressed = true
         client.clearTokens()
         setUser(nil)
         store.clearAll()
@@ -123,15 +177,20 @@ final class SyncEngine {
     /// Preserve a caller's dispatch intent until both projections are fresh.
     /// The second pull observes Task revisions changed by explicit Plan creation.
     func prepareForPlanDispatch() async throws {
-        guard enabled else { throw APIError.offline }
+        guard canSynchronize else { throw APIError.noSession }
+        let generation = sessionGeneration
         await waitForCompletion()
+        guard isCurrent(generation) else { throw APIError.sessionChanged }
         await syncOnForeground()
+        guard isCurrent(generation) else { throw APIError.sessionChanged }
         try requireCompletedSync()
         await pull()
+        guard isCurrent(generation) else { throw APIError.sessionChanged }
         try requireCompletedSync()
     }
 
     private func requireCompletedSync() throws {
+        guard canSynchronize else { throw APIError.noSession }
         guard case .idle = status else { throw APIError(code: -7, message: status.label) }
     }
 
@@ -144,42 +203,61 @@ final class SyncEngine {
 
     /// `GET /bootstrap` → replace local state except dirty/deleted entities.
     func pull() async {
-        guard enabled else { return }
+        guard canSynchronize else { return }
         if inFlight { await waitForCompletion(); return }
         inFlight = true
         defer { finishSync() }
         status = .syncing
+        let generation = sessionGeneration
         guard await ensureSession() else { return }
+        guard isCurrent(generation) else { return }
         do {
             let bootstrap = try await client.send(Endpoint.bootstrap, as: Bootstrap.self)
+            guard isCurrent(generation) else { return }
             apply(bootstrap)
             try await refreshPlansBeforeCompletingSync()
+            guard isCurrent(generation) else { return }
             status = .idle
         } catch {
-            fail(error)
+            if isCurrent(generation) { fail(error) }
         }
     }
 
     /// Push 2s after the first pending change, even if more changes arrive.
     func schedulePush() {
         // Coalesce into one pending push. Continuous timer updates must not postpone it forever.
-        guard enabled, store.hasOnboarded, pushTask == nil else { return }
+        guard canSynchronize, store.hasOnboarded, pushTask == nil else { return }
+        let generation = sessionGeneration
+        let taskID = UUID()
+        pushTaskID = taskID
         pushTask = _Concurrency.Task { [weak self] in
             try? await _Concurrency.Task.sleep(nanoseconds: 2_000_000_000)
-            guard !_Concurrency.Task.isCancelled else { return }
-            self?.pushTask = nil
-            await self?.pushDirty()
+            // An old cancelled task can resume after a replacement was installed.
+            // Only the owner may release this slot, including on stale exits.
+            guard let self, self.pushTaskID == taskID else { return }
+            self.pushTask = nil
+            self.pushTaskID = nil
+            guard !_Concurrency.Task.isCancelled, self.isCurrent(generation) else { return }
+            await self.pushDirty()
         }
     }
 
+    private func cancelScheduledPush() {
+        pushTaskID = nil
+        pushTask?.cancel()
+        pushTask = nil
+    }
+
     func pushDirty() async {
-        guard enabled else { return }
+        guard canSynchronize else { return }
+        let generation = sessionGeneration
         await waitForCompletion()
-        guard store.hasPendingSync else { return }
+        guard isCurrent(generation), store.hasPendingSync else { return }
         inFlight = true
         defer { finishSync() }
         status = .syncing
         guard await ensureSession() else { return }
+        guard isCurrent(generation) else { return }
 
         let dirty = store.dirty
         let deleted = store.deleted
@@ -191,19 +269,21 @@ final class SyncEngine {
                                    activeFocus: sendFocus, aiTools: sendTools)
         do {
             let bootstrap = try await client.send(Endpoint.sync(request), as: Bootstrap.self)
+            guard isCurrent(generation) else { return }
             store.acknowledge(checkpoint, settings: sendSettings, activeFocus: sendFocus, aiTools: sendTools)
             apply(bootstrap)
             try await refreshPlansBeforeCompletingSync()
+            guard isCurrent(generation) else { return }
             status = .idle
             if store.hasPendingSync { schedulePush() }
         } catch {
-            fail(error)
+            if isCurrent(generation) { fail(error) }
         }
     }
 
     /// Push if anything is pending, otherwise pull.
     func syncOnForeground() async {
-        guard enabled, store.hasOnboarded else { return }
+        guard canSynchronize, store.hasOnboarded else { return }
         if store.hasPendingSync { await pushDirty() } else { await pull() }
     }
 
@@ -242,7 +322,9 @@ final class SyncEngine {
     }
 
     private func setUser(_ u: UserInfo?) {
+        client.bindUser(u?.id)
         user = u
+        store.loadPreferences(userID: u?.id)
         if let u, let data = try? JSONCoding.encoder.encode(u) {
             UserDefaults.standard.set(data, forKey: SyncEngine.userKey)
         } else {

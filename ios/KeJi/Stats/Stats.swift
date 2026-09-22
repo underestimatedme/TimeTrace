@@ -12,11 +12,13 @@ enum Stats {
     }
 
     static func sessionIntervals(_ sessions: [TimeSession], types: [TimeSessionType], day: String? = nil,
-                                 timeZone: TimeZone = .current) -> [TrackInterval] {
+                                 timeZone: TimeZone = .current, asOf: Date = Date()) -> [TrackInterval] {
         let bounds = day.flatMap { reportDayInterval($0, timeZone: timeZone) }
         if day != nil && bounds == nil { return [] }
         return dedupedByID(sessions.compactMap { s in
-            guard types.contains(s.type), let end = s.endedAt, end >= s.startedAt else { return nil }
+            guard types.contains(s.type) else { return nil }
+            let end = s.endedAt ?? asOf
+            guard end >= s.startedAt else { return nil }
             let start = max(s.startedAt, bounds?.start ?? s.startedAt)
             let clippedEnd = min(end, bounds?.end ?? end)
             guard clippedEnd > start else { return nil }
@@ -25,13 +27,15 @@ enum Stats {
         })
     }
 
-    static func sumSessionSeconds(_ sessions: [TimeSession], types: [TimeSessionType], day: String? = nil) -> Int {
-        let intervals = sessionIntervals(sessions, types: types, day: day)
+    static func sumSessionSeconds(_ sessions: [TimeSession], types: [TimeSessionType], day: String? = nil,
+                                  timeZone: TimeZone = .current, asOf: Date = Date()) -> Int {
+        let intervals = sessionIntervals(sessions, types: types, day: day, timeZone: timeZone, asOf: asOf)
         return Int(unionSeconds(intervals, track: .human) + activeSeconds(intervals, track: .ai) + activeSeconds(intervals, track: .waiting))
     }
 
-    static func humanSeconds(_ sessions: [TimeSession], day: String? = nil) -> Int {
-        sumSessionSeconds(sessions, types: humanTypes, day: day)
+    static func humanSeconds(_ sessions: [TimeSession], day: String? = nil,
+                             timeZone: TimeZone = .current, asOf: Date = Date()) -> Int {
+        sumSessionSeconds(sessions, types: humanTypes, day: day, timeZone: timeZone, asOf: asOf)
     }
 
     static func aiActiveSeconds(_ sessions: [TimeSession], day: String? = nil) -> Int {

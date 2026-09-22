@@ -1,71 +1,65 @@
 import SwiftUI
 
-/// Feedback form. Submit is idempotent (a stable key per attempt); a failed
-/// submit keeps the draft rather than losing it or inventing a ticket number.
+/// Explicit account identity prevents reuse of another account's editor state.
 struct FeedbackView: View {
+    let userID: String?
+    @Environment(AppEnvironment.self) private var appEnv
+
+    var body: some View {
+        if let userID {
+            FeedbackEditor(userID: userID, storage: appEnv.feedbackDraftStore)
+                .id(userID)
+        } else {
+            SubPageScaffold(title: "反馈") {
+                Text("请先建立账号会话，再填写反馈。")
+            }
+        }
+    }
+}
+
+private struct FeedbackEditor: View {
     @Environment(\.theme) private var theme
     @Environment(AppStore.self) private var store
+    @State private var model: FeedbackModel
 
-    @State private var text = ""
-    @State private var attachDiagnostics = false
-    @State private var status: String?
-    @State private var submitting = false
+    init(userID: String, storage: FeedbackDraftStore) {
+        // One-time seed; the parent keys this editor by account identity.
+        _model = State(initialValue: FeedbackModel(userID: userID, storage: storage))
+    }
 
     var body: some View {
         SubPageScaffold(title: "反馈") {
-            Text("遇到问题或有建议？提交后会返回服务器工单号；网络失败时草稿会保留，可重试，不会重复建单。")
+            Text("请勿填写密码、令牌、邮箱或环境信息。正文仅保存在本机，收到服务器工单回执后才显示已提交。")
                 .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted).padding(.bottom, 16)
-
             Card {
-                TextEditor(text: $text)
+                TextEditor(text: $model.text)
                     .frame(minHeight: 120)
                     .font(Typo.sans(Typo.sm))
                     .scrollContentBackground(.hidden)
+                    .disabled(model.draft.attempted || model.receipt != nil)
                     .accessibilityIdentifier("feedback.text")
             }
             .padding(.bottom, 12)
 
-            Toggle(isOn: $attachDiagnostics) {
-                Text("附带脱敏诊断信息").font(Typo.sans(Typo.sm)).foregroundStyle(theme.text)
+            Toggle(isOn: $model.attachDiagnostics) {
+                Text("附带诊断信息（默认关闭，仅 App 版本与设备型号）")
+                    .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
             }
-            .tint(theme.accent)
-            .padding(.bottom, 16)
+            .disabled(model.draft.attempted || model.receipt != nil)
+            .accessibilityIdentifier("feedback.diagnostics")
+            .padding(.bottom, 12)
 
-            AppButton(submitting ? "提交中…" : "提交反馈", variant: .accent, fullWidth: true,
-                      disabled: submitting || !FeedbackDraft.new(text: text).isValid) {
-                submit()
+            AppButton(model.submitting ? "提交中…" : "提交反馈", variant: .accent, fullWidth: true,
+                      disabled: !model.canSubmit) {
+                Task { await model.submit(using: store.workspaceClient) }
             }
             .accessibilityIdentifier("feedback.submit")
-            .onAppear {
-                // 恢复上次没提交成功的草稿；「草稿已保留」这句话必须是真的。
-                if text.isEmpty, let pending = store.pendingFeedback {
-                    text = pending.text
-                    attachDiagnostics = pending.attachDiagnostics
-                    status = "上次的反馈还没提交成功，已恢复草稿。"
-                }
-            }
 
-            if let status {
-                Text(status).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
-                    .padding(.top, 12).accessibilityIdentifier("feedback.status")
-            }
-        }
-    }
-
-    private func submit() {
-        submitting = true
-        _Concurrency.Task {
-            let outcome = await store.submitFeedback(text: text, attachDiagnostics: attachDiagnostics)
-            submitting = false
-            switch outcome {
-            case .submitted(let ticketId):
-                status = "已提交，工单号 \(ticketId)。"
-                text = ""
-                attachDiagnostics = false
-            case .savedOffline:
-                status = "已保存草稿（离线）。恢复网络后重新提交，不会重复建单。"
-            case .failed(let message):
-                status = message
+            Text(model.status).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
+                .padding(.top, 12).accessibilityIdentifier("feedback.status")
+            if model.draft.attempted && model.receipt == nil {
+                Text("为避免重复建单，重试会发送首次提交的正文。")
+                    .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
             }
         }
     }

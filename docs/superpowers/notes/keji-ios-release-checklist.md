@@ -4,14 +4,18 @@ App：刻迹（KeJi）· bundle id `com.atlaspaces.timetrace` · 当前版本 `0
 
 **推荐路线**：先 TestFlight 内部测试，真机跑通、和真实 Valley 联调过，再提交审核。
 
+**当前状态（2026-09-23）**：build 2026092301 已上传，等处理；Valley 新后端尚未部署，装上后 Plan/额度/报告页会拿到 404，先部署 `release/timetrace-ai-workspace` 再测。
+
 ## 一、必须由你完成（涉及账号与凭据）
 
 - [x] 本机钥匙串已有 **Apple Distribution** 证书（team `HZ788934TW`），且已下载该 team 的
       `com.atlaspaces.timetrace` App Store 描述文件（2026-09-23 核实）
 - [ ] 在 App Store Connect 确认 `com.atlaspaces.timetrace` 的 App 记录存在
       （提交历史里有 `align bundle identifier with App Store record`，应当已建好）
-- [ ] 上传构建包：用 Xcode Organizer，或自己配 App Store Connect API 密钥后用
-      `xcrun altool` / Transporter。**密钥和 Apple ID 密码不要交给 AI 代操作**
+- [x] 上传构建包：`0.1.0 (2026092301)` 已于 2026-09-23 00:24 由 `xcodebuild -exportArchive` 上传
+      （`ExportOptions-AppStore.plist` 的 `destination=upload` 会直接上传，见 `ios/README.md`）。
+      后续上传前先递增 build 号
+- [ ] 在 App Store Connect → TestFlight 等待处理完成，填写出口合规（无加密：选「否」），把构建加入内部测试组
 - [ ] 在 App Store Connect 提交审核
 
 ## 二、工程侧（已完成 / 待完成）

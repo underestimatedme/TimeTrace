@@ -49,3 +49,12 @@ Valley 侧对应的 7 个 9/22 提交（`feac72f..eac7a19`）此前未推送。
 
 - iOS CI（`.github/workflows/ios.yml`）没有启动 fixture 服务器，UI 用例在 CI 上必失败；下一步在 workflow 里加一步后台启动。
 - 反馈页失去了远端线上的「最多 N 字」提示文案；现文案为「仅本机草稿，尚未提交」等，功能不缺。
+
+## TestFlight（追加）
+
+- `0.1.0 (2026092301)` 已归档并上传 App Store Connect（自动签名，team `HZ788934TW`；`ExportOptions-AppStore.plist`
+  的 `destination=upload` 让 `-exportArchive` 直接上传，本地无 IPA）。
+- Valley 侧准备了 `release/timetrace-ai-workspace` = `codex/keji-ai-workspace-fixes` + `origin/main`（无冲突，构建通过），
+  加了一个提交让配对集成测试在没有隔离库时 skip 而不是 Fatal（否则 Valley 流水线的 `go test ./...` 必红）。
+  推送该分支即触发生产部署，**由用户决定何时推**。
+- iOS UI 测试：合并后 21 项通过（20 项首轮 + 修复离线偏好持久化后补跑 5 项全过）。

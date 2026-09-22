@@ -88,7 +88,9 @@ struct AIToolsView: View {
             .padding(.top, 24)
         }
         .sheet(item: $selectedPool) { pool in poolDetail(pool) }
-        .task {
+        // Keyed on the account identity: on a fresh install the page can appear before the
+        // guest session exists, and that first request fails. Re-run once the session arrives.
+        .task(id: sync.user?.id) {
             await store.refreshWorkspaceQuota()
             if sync.isLoggedIn { await remote.loadRunners() }
         }

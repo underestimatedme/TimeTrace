@@ -127,7 +127,15 @@ cd cli && python3 -m unittest discover -s tests -v
 ## Report occurrence timestamps
 
 Runner phase events include an `observed_at` UTC RFC 3339 timestamp captured
-before durable enqueue. Outbox retries, including after restart, retain the
+at the actual adapter start/resume call and its return/exception boundary.
+Preflight renewal, running-event transport, quota upload and checkpoint/git IO
+do not define the execution interval. The worker captures times; the owning
+thread durably enqueues running without a blocking flush, then flushes events
+in sequence after terminal handling. Claim/Plan identity is durable before any
+execution; event payloads are durable before any send. Lease heartbeats and
+spawn/cancellation fences remain active while the adapter runs. A killed or
+lease-fenced attempt without a trustworthy terminal remains unknown.
+Outbox retries, including after restart, retain the
 original timestamp and event sequence. The server separately records receipt
 time, validates observation order and lease/clock bounds, and uses occurrence
 time for report day slicing. Keep the runner clock synchronized; deploy the

@@ -3,7 +3,7 @@ import time
 import uuid
 import hashlib
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pathlib import Path
 from typing import Any, Callable, Dict
@@ -371,6 +371,10 @@ class Agent:
 
     def _report(self, claim: Dict[str, Any], events: list) -> None:
         for event in events:
+            # Stamp the phase when observed, before durable enqueue. flush_outbox
+            # replays this payload unchanged even after restart/network delay.
+            event = dict(event)
+            event.setdefault("observed_at", datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z"))
             self.db.queue_remote_event(claim["job"]["id"], claim["attempt_id"], claim["lease_epoch"], event)
         try:
             self.flush_outbox()

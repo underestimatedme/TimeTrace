@@ -183,10 +183,15 @@ class AgentTest(unittest.TestCase):
                           prepare_workspace=lambda repo, task_id, home, base: (repo, "keji/test"))
             self.assertEqual(agent.run_once(), "job j1 → awaiting_review")
             self.assertEqual([row["seq"] for row in db.pending_remote_events()], [2])
+            queued_event = db.pending_remote_events()[0]["payload"]
+            self.assertIn("observed_at", queued_event)
+            observed = queued_event["observed_at"]
+            self.assertLessEqual(datetime.fromisoformat(observed.replace("Z", "+00:00")).timestamp(), time.time())
             cloud.recovered = True
             agent.flush_outbox()
             self.assertEqual(db.pending_remote_events(), [])
             self.assertEqual(cloud.events[-1]["type"], "completed")
+            self.assertEqual(cloud.events[-1]["observed_at"], observed)
 
     def test_unverified_billing_blocks_execution(self):
         class UnverifiedAdapter(Adapter):

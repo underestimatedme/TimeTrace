@@ -33,7 +33,7 @@ struct FocusView: View {
         let target = task.estimatedMinutes * 60
         let remaining = max(0, target - elapsed)
         let progress = target > 0 ? Double(elapsed) / Double(target) : 0
-        let todayTotal = Stats.humanSeconds(store.timeSessions, day: Format.dayKey(store.now))
+        let todayTotal = Stats.humanSeconds(store.timeSessions, day: Format.dayKey(store.now), asOf: store.now)
 
         VStack(spacing: 0) {
             if let project {

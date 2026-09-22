@@ -39,7 +39,7 @@ struct ProfileView: View {
 
     var body: some View {
         let today = Format.dayKey(store.now)
-        let todayHuman = Stats.humanSeconds(store.timeSessions, day: today)
+        let todayHuman = Stats.humanSeconds(store.timeSessions, day: today, asOf: store.now)
         let todayAI = Stats.aiActiveSeconds(store.timeSessions, day: today)
 
         TabPage {

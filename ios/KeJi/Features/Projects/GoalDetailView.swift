@@ -22,7 +22,7 @@ struct GoalDetailView: View {
         let project = store.project(goal.projectId)
         let tasks = store.tasks.filter { $0.goalId == goal.id }
         let sessions = store.timeSessions.filter { s in tasks.contains { $0.id == s.taskId } }
-        let human = Stats.humanSeconds(sessions)
+        let human = Stats.humanSeconds(sessions, asOf: store.now)
         let ai = Stats.aiActiveSeconds(sessions)
         let completed = tasks.filter { $0.status == .completed }.count
 

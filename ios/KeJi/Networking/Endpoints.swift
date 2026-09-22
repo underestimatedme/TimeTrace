@@ -68,8 +68,9 @@ struct Endpoint {
         Endpoint(method: .post, path: "/plans/\(id)/cancel", requiresAuth: true,
                  body: RevisionBody(expectedRevision: expectedRevision))
     }
-    static func report(date: String) -> Endpoint {
-        Endpoint(method: .get, path: "/reports?date=\(date)", requiresAuth: true, body: nil)
+    static func report(date: String, zone: String? = nil) -> Endpoint {
+        let query = zone.map { "&zone=" + ($0.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "") } ?? ""
+        return Endpoint(method: .get, path: "/reports?date=\(date)\(query)", requiresAuth: true, body: nil)
     }
     static func generateReport(date: String, zone: String) -> Endpoint {
         Endpoint(method: .post, path: "/reports", requiresAuth: true, body: GenerateReportBody(date: date, zone: zone))

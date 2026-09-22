@@ -62,6 +62,19 @@ final class WorkspaceFlowTests: XCTestCase {
         capture("report-project-server-facts")
     }
 
+    func testReportRejectsSnapshotFromAnotherTimeZone() {
+        app.terminate()
+        app.launchArguments = ["--workspace-fixture", "--online-ui-testing", "--api-base-url",
+                               "http://127.0.0.1:18768/reports-zone-mismatch-\(UUID().uuidString)", "--screen", "today"]
+        app.launchEnvironment["KEJI_OFFLINE"] = "0"
+        app.launch()
+        tap("reports.open")
+        let mismatch = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "报告日期或时区不匹配")).firstMatch
+        XCTAssertTrue(mismatch.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.staticTexts["20 分钟"].exists)
+        XCTAssertFalse(app.staticTexts["时区 America/New_York · 修订 7 · 私有草稿"].exists)
+    }
+
     func testOfflineCannotAcceptDependenciesOrUnlockDispatch() {
         // Drill down to plan.03.
         tap("project.keji")

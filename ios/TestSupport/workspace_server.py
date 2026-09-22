@@ -4,6 +4,7 @@ No production credentials or services. UI actions use the production HTTP stack.
 """
 import json
 import time
+from urllib.parse import urlsplit, parse_qs
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 NOW = "2026-09-15T10:00:00Z"
@@ -31,7 +32,8 @@ class Handler(BaseHTTPRequestHandler):
                 {"id": "h2", "task_id": "t", "track": "human", "state": "known", "start": "2026-09-14T20:05:00Z", "end": "2026-09-14T20:10:00Z"},
                 {"id": "a1", "task_id": "t", "track": "ai", "state": "known", "start": "2026-09-14T20:00:00Z", "end": "2026-09-14T20:10:00Z"},
                 {"id": "a2", "task_id": "t", "track": "ai", "state": "known", "start": "2026-09-14T20:00:00Z", "end": "2026-09-14T20:10:00Z"}]
-            data = {"local_date": path.split("date=")[-1] if self.command == "GET" else body["date"],
+            query = parse_qs(urlsplit(path).query)
+            data = {"local_date": query.get("date", [""])[0] if self.command == "GET" else body["date"],
                     "revision": 8 if self.command == "POST" else 7, "status": "draft", "coverage": 0.79,
                     "total_score": 95, "human_seconds": 600, "ai_seconds": 1200, "waiting_seconds": None,
                     "evidence_ids": ["a1", "a2"], "baseline_version": "phase-facts-v2",
@@ -41,6 +43,8 @@ class Handler(BaseHTTPRequestHandler):
                     fact["task_id"] = "quota"
                 facts.append(dict(facts[-1], id="other-project", task_id="outside"))
                 data["ai_seconds"] = 1800
+            if scenario.startswith("reports-zone-mismatch"):
+                data["breakdown"]["zone"] = "America/New_York"
         elif path == "/runners":
             data = [{"runner": {"id": "runner-ui", "name": "Test Mac", "platform": "darwin", "client_version": "1",
                                 "status": "online", "created_at": NOW, "updated_at": NOW},

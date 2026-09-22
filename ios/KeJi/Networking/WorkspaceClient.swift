@@ -44,8 +44,8 @@ final class WorkspaceClient {
         try await client.send(.cancelPlan(id: id, expectedRevision: expectedRevision), as: PlanItem.self)
     }
 
-    func report(date: String) async throws -> DailyReport {
-        try await client.send(.report(date: date), as: DailyReport.self)
+    func report(date: String, zone: String? = nil) async throws -> DailyReport {
+        try await client.send(.report(date: date, zone: zone), as: DailyReport.self)
     }
 
     func generateReport(date: String, zone: String) async throws -> DailyReport {

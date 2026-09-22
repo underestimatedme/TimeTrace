@@ -36,6 +36,11 @@ class Handler(BaseHTTPRequestHandler):
                     "total_score": 95, "human_seconds": 600, "ai_seconds": 1200, "waiting_seconds": None,
                     "evidence_ids": ["a1", "a2"], "baseline_version": "phase-facts-v2",
                     "breakdown": {"zone": "Asia/Dubai", "evidence_coverage": 1, "facts": facts}}
+            if scenario.startswith("reports-project"):
+                for fact in facts:
+                    fact["task_id"] = "quota"
+                facts.append(dict(facts[-1], id="other-project", task_id="outside"))
+                data["ai_seconds"] = 1800
         elif path == "/runners":
             data = [{"runner": {"id": "runner-ui", "name": "Test Mac", "platform": "darwin", "client_version": "1",
                                 "status": "online", "created_at": NOW, "updated_at": NOW},

@@ -1,0 +1,9 @@
+{
+  "zone": "Asia/Dubai",
+  "start": "2026-09-14T19:50:00Z",
+  "end": "2026-09-14T20:10:00Z",
+  "days": ["2026-09-14", "2026-09-15"],
+  "human_seconds": 600,
+  "ai_seconds": 1200,
+  "waiting_seconds": 0
+}

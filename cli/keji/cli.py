@@ -17,7 +17,7 @@ from keji.agent import Agent
 from keji.cloud import CloudClient
 from keji.credentials import CredentialStore, SessionManager
 from keji.db import Database
-from keji.dispatch import lock_diagnostics
+from keji.dispatch import adapter_capabilities, lock_diagnostics
 from keji.models import (BLOCKED, CODEX, EV_SAMPLE_FAILURE, FAILED, RUNNABLE, RUNNING, TOOLS,
                          Sample)
 
@@ -142,8 +142,9 @@ def cmd_agent_run(args: argparse.Namespace) -> int:
     inventory = [{"id": row["id"], "name": row["name"], "default_branch": row["default_branch"]}
                  for row in db.list_workspaces()]
     tools = [{"id": name + "-default", "provider": name, "version": "local",
+              "can_enforce_zero_spend": adapter_capabilities(adapter).get("can_enforce_zero_spend") is True,
               "status": "available" if shutil.which(str(cfg.get(name, {}).get("bin", name))) else "unavailable"}
-             for name in adapters]
+             for name, adapter in adapters.items()]
     cloud.update_inventory(sessions.token(), inventory, tools)
     if args.once:
         print(agent.run_once())

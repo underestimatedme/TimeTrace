@@ -7,7 +7,7 @@ App：刻迹 / TimeTrace（工程名仍为 KeJi）· bundle id `com.atlaspaces.t
 
 **推荐路线**：先 TestFlight 内部测试，真机跑通、和真实 Valley 联调过，再提交审核。
 
-**当前状态（2026-09-24 凌晨）**：2026092301 与 2026092302 已上传；2026092303 加入了中英文主屏幕名称，待上传。Valley 新后端已部署到生产（`release/timetrace-ai-workspace`，
+**当前状态（2026-09-24 凌晨）**：2026092301 与 2026092302 已上传；2026092303 加入了中英文主屏幕名称，已于 2026-09-24 01:23 上传，等处理。Valley 新后端已部署到生产（`release/timetrace-ai-workspace`，
 用 `gh workflow run publish.yml -f deploy=true` 手动 dispatch；release 分支推送本身只出镜像不部署）。
 首次部署后发现所有非 UTC 时区的报告请求 422（alpine 镜像无 tzdata），已用 `time/tzdata` 嵌入 + 镜像装 tzdata 修复并重新部署。
 
@@ -21,8 +21,8 @@ App：刻迹 / TimeTrace（工程名仍为 KeJi）· bundle id `com.atlaspaces.t
       （`ExportOptions-AppStore.plist` 的 `destination=upload` 会直接上传，见 `ios/README.md`）。
 - [x] 上传 `2026092302`：含「全新安装时 AI 页拿不到额度」修复。2026-09-24 在 Xcode 重新登录 Apple 账号后
       用 `xcodebuild -exportArchive` 上传成功。不要测 2026092301
-- [ ] **上传 `2026092303`**：主屏幕名称本地化（中文「刻迹」/ 英文「TimeTrace」），其余与 2026092302 相同。
-      TestFlight 最终请测这个构建
+- [x] 上传 `2026092303`：主屏幕名称本地化（中文「刻迹」/ 英文「TimeTrace」），其余与 2026092302 相同。
+      2026-09-24 01:23 由 `xcodebuild -exportArchive` 上传成功。**TestFlight 请测这个构建**
 - [ ] 在 App Store Connect → TestFlight 等待处理完成，填写出口合规（无加密：选「否」），把构建加入内部测试组
 - [ ] 在 App Store Connect 提交审核
 

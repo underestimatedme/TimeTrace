@@ -1,0 +1,3 @@
+/* App name shown on the Home Screen and in system dialogs (English). */
+"CFBundleDisplayName" = "TimeTrace";
+"CFBundleName" = "TimeTrace";

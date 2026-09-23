@@ -16,7 +16,7 @@ settings:
     CODE_SIGNING_ALLOWED: "NO"
     CODE_SIGN_STYLE: Manual
     DEVELOPMENT_TEAM: ""
-    CURRENT_PROJECT_VERSION: "2026092302"
+    CURRENT_PROJECT_VERSION: "2026092303"
     MARKETING_VERSION: "0.1.0"
 targets:
   KeJi:
@@ -36,11 +36,11 @@ targets:
     info:
       path: KeJi/Resources/Info.plist
       properties:
-        CFBundleDisplayName: 刻迹
-        CFBundleName: KeJi
+        CFBundleDisplayName: TimeTrace
+        CFBundleName: TimeTrace
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        CFBundleDevelopmentRegion: zh_CN
+        CFBundleDevelopmentRegion: en
         UILaunchScreen:
           UIColorName: LaunchBackground
         UISupportedInterfaceOrientations:

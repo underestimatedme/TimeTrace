@@ -38,6 +38,34 @@ final class ReleaseReadinessTests: XCTestCase {
                            "\(entry["NSPrivacyCollectedDataType"] ?? "?") 不应标为追踪")
         }
     }
+
+    private func localizedInfoPlist(_ localization: String) throws -> [String: Any] {
+        let url = try XCTUnwrap(Bundle.main.url(forResource: "InfoPlist", withExtension: "strings",
+                                                subdirectory: nil, localization: localization),
+                                "\(localization).lproj/InfoPlist.strings 没有打进 App 包")
+        let data = try Data(contentsOf: url)
+        return try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+    }
+
+    /// 主屏幕名称随系统语言：英文环境叫 TimeTrace，简体中文环境叫刻迹。
+    func testDisplayNameIsLocalizedPerSystemLanguage() throws {
+        let english = try localizedInfoPlist("en")
+        XCTAssertEqual(english["CFBundleDisplayName"] as? String, "TimeTrace")
+        XCTAssertEqual(english["CFBundleName"] as? String, "TimeTrace")
+
+        let simplifiedChinese = try localizedInfoPlist("zh-Hans")
+        XCTAssertEqual(simplifiedChinese["CFBundleDisplayName"] as? String, "刻迹")
+        XCTAssertEqual(simplifiedChinese["CFBundleName"] as? String, "刻迹")
+    }
+
+    /// 没有匹配语言时回落到英文名，而不是回落到中文。
+    func testUnlocalizedDisplayNameFallsBackToEnglish() throws {
+        let info = try XCTUnwrap(Bundle.main.infoDictionary)
+        XCTAssertEqual(info["CFBundleDisplayName"] as? String, "TimeTrace")
+        XCTAssertEqual(info["CFBundleName"] as? String, "TimeTrace")
+        XCTAssertEqual(info["CFBundleDevelopmentRegion"] as? String, "en")
+    }
+
     /// 关于页显示的版本号来自包信息，不写死。
     func testAboutVersionTextComesFromBundleInfo() {
         XCTAssertEqual(AppVersion.text(info: ["CFBundleShortVersionString": "0.1.0", "CFBundleVersion": "2026091201"]),

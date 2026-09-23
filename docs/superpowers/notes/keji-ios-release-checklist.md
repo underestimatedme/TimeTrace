@@ -1,10 +1,13 @@
 # 刻迹 iOS · 上架前检查清单
 
-App：刻迹（KeJi）· bundle id `com.atlaspaces.timetrace` · 当前版本 `0.1.0 (2026092302)`
+App：刻迹 / TimeTrace（工程名仍为 KeJi）· bundle id `com.atlaspaces.timetrace` · 当前版本 `0.1.0 (2026092303)`
+
+主屏幕名称随系统语言：简体中文显示「刻迹」，其他语言显示「TimeTrace」（`ios/KeJi/Resources/{zh-Hans,en}.lproj/InfoPlist.strings`，
+`ReleaseReadinessTests` 锁定）。App Store Connect 里的名称要按语言分别填：zh-Hans「刻迹」，en-US「TimeTrace」。
 
 **推荐路线**：先 TestFlight 内部测试，真机跑通、和真实 Valley 联调过，再提交审核。
 
-**当前状态（2026-09-23 凌晨）**：build 2026092301 已上传，等处理。Valley 新后端已部署到生产（`release/timetrace-ai-workspace`，
+**当前状态（2026-09-24 凌晨）**：2026092301 与 2026092302 已上传；2026092303 加入了中英文主屏幕名称，待上传。Valley 新后端已部署到生产（`release/timetrace-ai-workspace`，
 用 `gh workflow run publish.yml -f deploy=true` 手动 dispatch；release 分支推送本身只出镜像不部署）。
 首次部署后发现所有非 UTC 时区的报告请求 422（alpine 镜像无 tzdata），已用 `time/tzdata` 嵌入 + 镜像装 tzdata 修复并重新部署。
 
@@ -16,10 +19,10 @@ App：刻迹（KeJi）· bundle id `com.atlaspaces.timetrace` · 当前版本 `0
       （提交历史里有 `align bundle identifier with App Store record`，应当已建好）
 - [x] 上传构建包：`0.1.0 (2026092301)` 已于 2026-09-23 00:24 由 `xcodebuild -exportArchive` 上传
       （`ExportOptions-AppStore.plist` 的 `destination=upload` 会直接上传，见 `ios/README.md`）。
-- [ ] **上传 `2026092302`**：含「全新安装时 AI 页拿不到额度」修复，归档在 `ios/build/KeJi.xcarchive`，
-      上传时 Xcode 报「Failed to Use Accounts: App Store Connect access for HZ788934TW is required」。
-      在 Xcode → Settings → Accounts 重新登录后，用 Organizer 上传该归档，或重跑 `ios/README.md` 里的 exportArchive 命令。
-      TestFlight 请测这个构建，不要测 2026092301
+- [x] 上传 `2026092302`：含「全新安装时 AI 页拿不到额度」修复。2026-09-24 在 Xcode 重新登录 Apple 账号后
+      用 `xcodebuild -exportArchive` 上传成功。不要测 2026092301
+- [ ] **上传 `2026092303`**：主屏幕名称本地化（中文「刻迹」/ 英文「TimeTrace」），其余与 2026092302 相同。
+      TestFlight 最终请测这个构建
 - [ ] 在 App Store Connect → TestFlight 等待处理完成，填写出口合规（无加密：选「否」），把构建加入内部测试组
 - [ ] 在 App Store Connect 提交审核
 
@@ -29,7 +32,7 @@ App：刻迹（KeJi）· bundle id `com.atlaspaces.timetrace` · 当前版本 `0
 - [x] `ExportOptions-AppStore.plist` 已存在
 - [x] 动态字体、VoiceOver 标签已补齐
 - [x] 打包命令见 `ios/README.md`「TestFlight archive」，Team ID 只在命令行传入，未写进 `project.yml`
-- [x] `CURRENT_PROJECT_VERSION` 已递增到 `2026092301`（下次上传前再递增）
+- [x] `CURRENT_PROJECT_VERSION` 已递增到 `2026092303`（下次上传前再递增）
 - [ ] 真机验证（玻璃模糊叠层的性能、深色主题）
 - [ ] 与真实 Valley 联调（派发 / 验收 / 额度）。后端已上线；游客会话下 bootstrap / quota / preferences /
       reset-signals / runners 已用 curl 验证返回 200。派发与验收需要一台绑定的 Mac 跑 Runner，尚未做
@@ -57,7 +60,7 @@ App：刻迹（KeJi）· bundle id `com.atlaspaces.timetrace` · 当前版本 `0
       App Store Connect 目前以 6.9" 为必需尺寸，其余尺寸可由它缩放；如需单独提供 6.5" 再补
 - [ ] 截图用的是示例数据（「刻迹用户」、示例项目），上传前确认你愿意用这些内容做宣传图
 - [ ] App 图标 1024×1024（`Assets.xcassets/AppIcon` 已有，提交时确认无透明通道）
-- [ ] 名称、副标题、关键词、描述、支持网址、隐私政策网址
+- [ ] 名称（zh-Hans「刻迹」、en-US「TimeTrace」）、副标题、关键词、描述、支持网址、隐私政策网址
 - [ ] 年龄分级问卷
 
 ## 五、审核备注要写清楚

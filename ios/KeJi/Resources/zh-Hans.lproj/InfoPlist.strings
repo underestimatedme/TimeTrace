@@ -1,0 +1,3 @@
+/* 主屏幕与系统弹窗中显示的 App 名称（简体中文）。 */
+"CFBundleDisplayName" = "刻迹";
+"CFBundleName" = "刻迹";

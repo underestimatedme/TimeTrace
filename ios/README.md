@@ -1,4 +1,4 @@
-# 刻迹 (KeJi) — iOS
+# 刻迹 / TimeTrace (KeJi) — iOS
 
 Native SwiftUI port of the `design/` prototype (iOS 17+, Swift 5 language mode, zero third-party packages).
 Spec: `docs/superpowers/specs/2026-09-04-keji-ios-design.md`.
@@ -99,6 +99,14 @@ HTTP tests intercept URLSession requests locally and do not contact production.
 `--ui-testing` when you want to preserve the simulator's normal app data.
 
 离线 UI 测试仍使用显式模拟模式；正常联网模式通过 Valley 绑定电脑、选择本地 workspace/CLI 并派发真实远程任务。自动测试不等同于真机蜂窝网、电脑休眠恢复或 24 小时稳定性验证。
+
+## App name
+
+The Home Screen name follows the system language: Simplified Chinese shows 「刻迹」, everything else shows
+`TimeTrace`. The strings live in `KeJi/Resources/zh-Hans.lproj/InfoPlist.strings` and
+`KeJi/Resources/en.lproj/InfoPlist.strings`; `project.yml` sets the unlocalized fallback to `TimeTrace` with
+`CFBundleDevelopmentRegion: en`. `ReleaseReadinessTests` fails if either file is missing from the bundle.
+The Xcode target, scheme and product stay `KeJi`, so CI paths and the bundle id do not change.
 
 ## TestFlight archive
 

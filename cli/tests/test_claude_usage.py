@@ -2,6 +2,7 @@ import io
 import json
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 from urllib.error import HTTPError
 
@@ -79,3 +80,28 @@ class ClaudeUsageTest(unittest.TestCase):
             self.assertIsNone(claude_usage.read_usage(self.creds(d, expires_ms=1),
                                                       opener=lambda r, timeout=0: called.append(1), now=10, keychain=lambda: None))
             self.assertEqual(called, [])
+
+
+class ClaudeAdapterQuotaTest(unittest.TestCase):
+    def test_adapter_read_limits_goes_through_the_usage_endpoint(self):
+        from keji.adapters.claude import ClaudeAdapter
+        from keji.billing import StaticBilling
+        body = {"five_hour": {"utilization": 41.0, "resets_at": "2026-09-25T01:20:00.128092+00:00"},
+                "seven_day": {"utilization": 60.0, "resets_at": "2026-09-25T20:00:00.128114+00:00"}}
+        adapter = ClaudeAdapter({}, billing=StaticBilling(True, "test"),
+                                credentials=lambda: {"accessToken": "tok", "expiresAt": 4102444800000})
+        with unittest.mock.patch("keji.adapters.claude_usage.urllib.request.urlopen",
+                                 lambda request, timeout=0: FakeResponse(json.dumps(body).encode())):
+            samples = adapter.read_limits()
+        self.assertEqual([(s.bucket_key, s.used_pct) for s in samples],
+                         [("claude:five_hour", 41.0), ("claude:seven_day", 60.0)])
+        self.assertTrue(adapter.capabilities()["can_read_quota"])
+
+    def test_utilization_is_always_a_percent(self):
+        # The live endpoint reports percent (41.0, 60.0 observed on 2026-09-25); a
+        # fraction-scaling heuristic would turn 0.5% into 50% and 1.0 into 1%.
+        self.assertEqual(claude_usage._percent(0.5), 0.5)
+        self.assertEqual(claude_usage._percent(1.0), 1.0)
+        self.assertEqual(claude_usage._percent(100), 100.0)
+        self.assertIsNone(claude_usage._percent("n/a"))
+

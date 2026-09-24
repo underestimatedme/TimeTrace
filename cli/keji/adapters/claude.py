@@ -152,8 +152,6 @@ class ClaudeAdapter(ToolAdapter):
             "can_enforce_zero_spend": self.billing.verdict().verified,
         })
 
-    def read_limits(self) -> Optional[List[Sample]]:
-        return None  # no on-demand channel; samples come from runs
 
     def start(self, prompt: str, cwd: str, session_id: str, log_file: str, cancel_event=None) -> RunResult:
         return self._run(build_cmd(self.cfg, prompt, session_id=session_id), cwd, log_file,

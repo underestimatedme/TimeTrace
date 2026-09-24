@@ -28,25 +28,26 @@ def _epoch(value: Any) -> Optional[int]:
 
 
 def _percent(value: Any) -> Optional[float]:
-    """Utilization as 0-100. A fraction in [0, 1] is scaled up."""
+    """Utilization as reported: the endpoint speaks percent (41.0 = 41 %,
+    observed live on 2026-09-25). No fraction heuristic — it would turn a
+    0.5 % reading into 50 % and an exhausted 1.0 into 1 %."""
     try:
-        number = float(value)
+        return round(float(value), 2)
     except (TypeError, ValueError):
         return None
-    if 0 <= number <= 1 and not float(value).is_integer():
-        number *= 100
-    return round(number, 2)
 
 
-def read_usage(credentials_path: Path, opener: Callable = urllib.request.urlopen,
+def read_usage(credentials_path: Path, opener: Optional[Callable] = None,
                now: Optional[float] = None,
                keychain: Callable[[], Optional[str]] = tiers.keychain_secret) -> Optional[List[Sample]]:
     return usage_samples(tiers.claude_oauth(credentials_path, keychain), opener=opener, now=now)
 
 
-def usage_samples(oauth: Dict[str, Any], opener: Callable = urllib.request.urlopen,
+def usage_samples(oauth: Dict[str, Any], opener: Optional[Callable] = None,
                   now: Optional[float] = None) -> Optional[List[Sample]]:
-    """Samples for an already-loaded `claudeAiOauth` object (see tiers.claude_oauth)."""
+    """Samples for an already-loaded `claudeAiOauth` object (see tiers.claude_oauth).
+    `opener` is resolved at call time so tests can patch urllib."""
+    opener = opener or urllib.request.urlopen
     token = str((oauth or {}).get("accessToken") or "")
     if not token:
         return None

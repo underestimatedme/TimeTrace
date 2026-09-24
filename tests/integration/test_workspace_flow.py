@@ -124,7 +124,7 @@ class WorkspaceFlowTests(unittest.TestCase):
             "used_percent": used, "observed_at": stamp(now), "expires_at": stamp(now + timedelta(hours=1)),
             "reset_at": stamp(now + timedelta(hours=2)), "source": "runner", "confidence": "exact"}])
 
-    def create(self, runner=None, commitment=False):
+    def create(self, runner=None, commitment=False, not_before=None):
         runner = runner or self.runner
         task_id = uuid.uuid4().hex
         now = stamp()
@@ -144,10 +144,13 @@ class WorkspaceFlowTests(unittest.TestCase):
                 "plan_revisions": {plan["id"]: plan["revision"]}})
         task = next(t for t in self.api("GET", "/bootstrap")["state"]["tasks"] if t["id"] == task_id)
         revision = int(datetime.strptime(task["updated_at"].replace("Z", "+00:00"), "%Y-%m-%dT%H:%M:%S.%f%z").timestamp() * 1000)
-        job = self.api("POST", "/remote-jobs", {
+        body = {
             "task_id": task_id, "plan_id": plan["id"], "runner_id": runner["runner"]["id"],
             "workspace_id": "workspace", "tool_profile_id": "codex-default", "prompt": "integration instruction",
-            "idempotency_key": uuid.uuid4().hex, "expected_task_revision": revision})
+            "idempotency_key": uuid.uuid4().hex, "expected_task_revision": revision}
+        if not_before:
+            body["not_before"] = not_before
+        job = self.api("POST", "/remote-jobs", body)
         return plan, job
 
     def agent(self, adapter):
@@ -263,6 +266,36 @@ class WorkspaceFlowTests(unittest.TestCase):
                 _, job = self.create()
                 self.assertIsNone(self.cloud.claim(self.runner["access_token"]))
                 self.assertEqual(self.job(job)["status"], "queued")
+
+    def test_unknown_quota_still_dispatches(self):
+        # A runner that never uploaded a quota sample: its pool reads unknown,
+        # and unknown must not hold work back (spec 2026-09-25 §4.3).
+        other = self.pair("runner-three")
+        self.inventory(other)
+        _, job = self.create(runner=other)
+        agent = Agent(self.db, self.cloud, {"codex": ExternalAI("complete")}, self.home,
+                      lambda: other["access_token"], heartbeat_interval=.02)
+        outcome = agent.run_once()
+        self.assertTrue(outcome.startswith("job "), outcome)
+        self.assertEqual(self.job(job)["status"], "awaiting_review")
+
+    def test_not_before_holds_the_job_until_due(self):
+        due = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(minutes=5)
+        _, job = self.create(not_before=stamp(due))
+        self.assertEqual(job["not_before"], stamp(due))
+        self.assertEqual(self.agent(ExternalAI("complete")).run_once(), "idle")
+        self.assertEqual(self.job(job)["status"], "queued")
+
+    @unittest.expectedFailure  # until the CLI attaches output_tail (plan Task 13)
+    def test_completed_job_carries_output_tail(self):
+        class LoggingAI(ExternalAI):
+            def start(self, prompt, cwd, session_id, log_file, cancel_event):
+                Path(log_file).write_text("$ integration\n3 passed\n")
+                return super().start(prompt, cwd, session_id, log_file, cancel_event)
+
+        _, job = self.create()
+        self.agent(LoggingAI("complete")).run_once()
+        self.assertEqual(self.job(job).get("output_tail"), "$ integration\n3 passed\n")
 
     def test_multiple_runners_cannot_steal_or_double_claim(self):
         other = self.pair("runner-two")

@@ -511,6 +511,56 @@ class DefaultBindingTest(unittest.TestCase):
             self.assertEqual(payload["confidence"], "exact")
 
 
+class MaintenanceTest(unittest.TestCase):
+    class Reading(Adapter):
+        def read_limits(self):
+            return [Sample(bucket_key="codex:codex:primary", tool="codex", used_pct=42.0,
+                           reset_at=2000, window_mins=300, source="live")]
+
+    def test_maintain_throttles_quota_and_repushes_changed_inventory(self):
+        class Cloud(FakeCloud):
+            def __init__(self):
+                super().__init__()
+                self.inventories = []
+
+            def update_inventory(self, token, workspaces, tools):
+                self.inventories.append((workspaces, tools))
+                return {}
+
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "keji.db")
+            cloud = Cloud()
+            tools = [{"id": "codex-default", "status": "available"}]
+            agent = Agent(db, cloud, {"codex": self.Reading()}, Path(d), lambda: "t",
+                          inventory=lambda: ([], [dict(t) for t in tools]), quota_interval=300)
+            agent.maintain(now=1000.0, force=True)
+            agent.maintain(now=1100.0)            # within the interval: nothing
+            agent.maintain(now=1400.0)            # interval elapsed: report again
+            self.assertEqual(len(cloud.quota_posts), 2)
+            self.assertEqual(len(cloud.inventories), 1)  # unchanged inventory is not re-pushed
+            tools[0]["status"] = "unavailable"
+            agent.maintain(now=1800.0)
+            self.assertEqual(len(cloud.inventories), 2)
+
+    def test_successful_run_still_uploads_rate_limit_samples(self):
+        class SamplingAdapter(Adapter):
+            def start(self, prompt, cwd, session_id, log_file, cancel_event=None):
+                return RunResult(exit_code=0, ok=True, output="done", session_id="s",
+                                 samples=[Sample(bucket_key="claude:five_hour", tool="claude", used_pct=55.0,
+                                                 reset_at=None, window_mins=300)])
+
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "keji.db")
+            repo = Path(d) / "repo"
+            init_repo(repo)
+            db.upsert_workspace("ws1", "repo", str(repo), "main")
+            cloud = FakeCloud()
+            agent = Agent(db, cloud, {"codex": SamplingAdapter()}, Path(d), lambda: "t",
+                          prepare_workspace=lambda repo, task_id, home, base: (repo, "keji/test"))
+            self.assertEqual(agent.run_once(), "job j1 → awaiting_review")
+            self.assertEqual(cloud.quota_posts[0][1][0]["used_percent"], 55.0)
+
+
 class RecoveryFenceTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

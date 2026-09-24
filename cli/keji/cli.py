@@ -55,7 +55,7 @@ def _acquire_execution_lock(home: Path):
 
 
 def cmd_cloud_login(args: argparse.Namespace) -> int:
-    _, cfg, _ = _open(args)
+    home, cfg, db = _open(args)
     cloud = _cloud(cfg)
     auth = cloud.create_device_authorization(platform.node() or "Mac", "darwin", __version__)
     print("在刻迹 iPhone App 的「AI 工具 → 绑定电脑」中输入：%s" % auth["user_code"])
@@ -68,6 +68,16 @@ def cmd_cloud_login(args: argparse.Namespace) -> int:
             credentials["expires_at"] = int(time.time()) + int(credentials.get("expires_in") or 900)
             CredentialStore().save(credentials)
             print("已绑定：%s" % credentials["runner"]["name"])
+            # Report right away so the phone shows tools and quota within
+            # seconds of approving, instead of after the next agent start.
+            try:
+                adapters = _adapters(cfg)
+                token = credentials["access_token"]
+                cloud.update_inventory(token, _runner_workspaces(db), _runner_tools(cfg, adapters))
+                Agent(db, cloud, adapters, home, lambda: token).report_quota()
+                print("已上报工具清单与额度，手机上几秒内可见")
+            except Exception as exc:
+                print("绑定成功，但首次上报失败：%s（Runner 启动后会重试）" % exc.__class__.__name__)
             return 0
         if approval.get("status") == "expired":
             break
@@ -160,8 +170,10 @@ def cmd_agent_run(args: argparse.Namespace) -> int:
     cloud = _cloud(cfg)
     sessions = SessionManager(CredentialStore(), cloud)
     adapters = _adapters(cfg)
-    agent = Agent(db, cloud, adapters, home, sessions.token)
-    cloud.update_inventory(sessions.token(), _runner_workspaces(db), _runner_tools(cfg, adapters))
+    agent = Agent(db, cloud, adapters, home, sessions.token,
+                  inventory=lambda: (_runner_workspaces(db), _runner_tools(cfg, adapters)))
+    # Startup upkeep pushes the inventory once and reports quota right away.
+    agent.maintain(force=True)
     if args.once:
         print(agent.run_once())
         return 0

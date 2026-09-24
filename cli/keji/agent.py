@@ -43,13 +43,43 @@ class Agent:
                  access_token: Callable[[], str], prepare_workspace: Callable = worktree.ensure,
                  heartbeat_interval: float = 30,
                  zero_spend_verified: Callable[[Any, Dict[str, Any]], bool] = _capability_zero_spend,
-                 pool_binding: Callable[[str], Any] = _default_pool_binding):
+                 pool_binding: Callable[[str], Any] = _default_pool_binding,
+                 inventory: Callable[[], Any] = None, quota_interval: float = 300):
         self.db, self.cloud, self.adapters = db, cloud, adapters
         self.home, self.access_token = Path(home), access_token
         self.prepare_workspace = prepare_workspace
         self.heartbeat_interval = heartbeat_interval
         self._zero_spend = zero_spend_verified
         self._pool_binding = pool_binding
+        # Periodic upkeep: quota refresh at most every quota_interval seconds
+        # (forced after a run), and a re-push of the tool inventory when it
+        # changed (a tool logged out, a workspace was added).
+        self._inventory = inventory
+        self.quota_interval = quota_interval
+        self._last_quota = 0.0
+        self._last_inventory = None
+
+    def maintain(self, now: float = None, force: bool = False) -> None:
+        now = now if now is not None else time.time()
+        if not force and now - self._last_quota < self.quota_interval:
+            return
+        self._last_quota = now
+        try:
+            self.report_quota(now)
+        except Exception:
+            pass
+        if self._inventory is None:
+            return
+        try:
+            current = self._inventory()
+        except Exception:
+            return
+        if current != self._last_inventory:
+            try:
+                self.cloud.update_inventory(self.access_token(), *current)
+                self._last_inventory = current
+            except Exception:
+                pass
 
     def run_once(self) -> str:
         self.flush_outbox()
@@ -342,14 +372,16 @@ class Agent:
             self.db.update_remote_claim(job_id, "reported")
             return "job %s → failed" % job_id
 
+        # Every run may carry rate-limit readings; a successful run is the
+        # freshest evidence of remaining quota, so upload them all.
+        if result.samples:
+            self._post_samples(job["provider"], adapter, result.samples)
         if result.ok:
             self.db.delete_checkpoint(plan_key)
             event = {"seq": 2, "type": "completed", "message": "completed",
                      "result_summary": (result.output or "completed")[:1000]}
             outcome = "awaiting_review"
         elif result.blocked:
-            if result.samples:
-                self._post_samples(job["provider"], adapter, result.samples)
             try:
                 head, dirty_digest = worktree.snapshot(execution_path)
                 cp = Checkpoint(
@@ -374,6 +406,8 @@ class Agent:
         event["observed_at"] = observed_end
         self._report(claim, [event])
         self.db.update_remote_claim(job_id, "reported")
+        # A finished run changed the quota picture: refresh it right away.
+        self.maintain(force=True)
         return "job %s → %s" % (job_id, outcome)
 
     def run_forever(self, interval: int = 5, log: Callable[[str], None] = None) -> None:
@@ -394,11 +428,9 @@ class Agent:
                 elif outcome != "idle" and "deferred (" not in outcome:
                     manual_diagnostics.clear()
                 if outcome == "idle":
-                    # No work: refresh quota so parked plans recover promptly.
-                    try:
-                        self.report_quota()
-                    except Exception:
-                        pass
+                    # No work: periodic quota refresh keeps parked plans
+                    # recovering and the phone's cards fresh.
+                    self.maintain()
                     time.sleep(interval)
             except Exception:
                 time.sleep(backoff)

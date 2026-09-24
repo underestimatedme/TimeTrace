@@ -73,6 +73,44 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(payloads[0]["tools"][0]["plan_tier"], "max")
 
+    def test_cloud_login_reports_inventory_and_quota_right_after_pairing(self):
+        class Reading:
+            def capabilities(self):
+                return {"can_read_quota": True, "can_enforce_zero_spend": True}
+
+            def read_limits(self):
+                from keji.models import Sample
+                return [Sample(bucket_key="codex:codex:primary", tool="codex", used_pct=10.0, reset_at=None, window_mins=300)]
+
+            def plan_tier(self):
+                return "plus"
+
+        calls = []
+
+        def request(client, method, path, body=None, token=None):
+            calls.append((method, path, token))
+            if path == "/device-authorizations":
+                return {"user_code": "ABCD1234", "device_code": "dev", "expires_in": 600, "interval": 1}
+            if path == "/device-authorizations/token":
+                return {"status": "approved", "activation_code": "act"}
+            if path == "/device-authorizations/activate":
+                return {"access_token": "fresh-token", "refresh_token": "r", "expires_in": 900, "runner": {"id": "r1", "name": "Mac"}}
+            return {}
+
+        saved = {}
+        with patch("keji.cli._adapters", return_value={"codex": Reading()}), \
+             patch("keji.cli.CredentialStore.save", new=lambda self, creds: saved.update(creds)), \
+             patch("keji.cloud.CloudClient.request", new=request), \
+             patch("keji.cli.shutil.which", return_value="/test/codex"), \
+             patch("keji.cli.time.sleep", return_value=None):
+            code, out, err = self.run_cli("cloud", "login")
+        self.assertEqual(code, 0, err)
+        paths = [c[1] for c in calls]
+        self.assertIn("/runner/inventory", paths)
+        self.assertIn("/runner/quota/samples", paths)
+        self.assertTrue(all(c[2] == "fresh-token" for c in calls if c[1].startswith("/runner/")))
+        self.assertIn("已上报", out)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)

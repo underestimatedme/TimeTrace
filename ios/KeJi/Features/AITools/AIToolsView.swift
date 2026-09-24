@@ -6,6 +6,7 @@ struct AIToolsView: View {
     @Environment(AppStore.self) private var store
     @Environment(SyncEngine.self) private var sync
     @Environment(RemoteExecutionClient.self) private var remote
+    @Environment(AppRouter.self) private var router
     @State private var pairingCode = ""
     @State private var pairingMessage: String?
     @State private var pendingInspection: DeviceAuthorizationInspection?
@@ -39,8 +40,11 @@ struct AIToolsView: View {
 
             if !sync.isLoggedIn {
                 Card(borderColor: theme.accent.opacity(0.2)) {
-                    Text("请先在账号页登录，再绑定电脑。游客账号不能批准 Runner。")
+                    Text("请先登录账号，再绑定电脑。游客账号不能批准 Runner。")
                         .font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary)
+                    AppButton("去登录", variant: .accent, fullWidth: true) { router.push(.account) }
+                        .accessibilityIdentifier("pairing.login")
+                        .padding(.top, 10)
                 }
             } else {
                 Card(borderColor: theme.ai.opacity(0.25)) {
@@ -224,7 +228,7 @@ struct AIToolsView: View {
                 pendingInspection = try await remote.inspect(code: pairingCode)
                 pairingMessage = nil
             } catch {
-                pairingMessage = error.localizedDescription
+                pairingMessage = pairingErrorText(error)
             }
         }
     }
@@ -237,7 +241,7 @@ struct AIToolsView: View {
                 try await remote.approve(code: pairingCode)
                 pairingCode = ""
                 pairingMessage = "电脑已绑定，可以远程派发任务。"
-            } catch { pairingMessage = error.localizedDescription }
+            } catch { pairingMessage = pairingErrorText(error) }
         }
     }
 }

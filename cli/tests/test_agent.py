@@ -561,6 +561,44 @@ class MaintenanceTest(unittest.TestCase):
             self.assertEqual(cloud.quota_posts[0][1][0]["used_percent"], 55.0)
 
 
+class OutputTailTest(unittest.TestCase):
+    def test_completed_event_carries_output_tail(self):
+        class Writing(Adapter):
+            def start(self, prompt, cwd, session_id, log_file, cancel_event=None):
+                Path(log_file).write_text("step 1\nstep 2\n")
+                return RunResult(exit_code=0, ok=True, output="ok", session_id="s")
+
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "keji.db")
+            repo = Path(d) / "repo"
+            init_repo(repo)
+            db.upsert_workspace("ws1", "repo", str(repo), "main")
+            cloud = FakeCloud()
+            agent = Agent(db, cloud, {"codex": Writing()}, Path(d), lambda: "t",
+                          prepare_workspace=lambda repo, task_id, home, base: (repo, "keji/test"))
+            agent.run_once()
+            completed = [e for e in cloud.events if e["type"] == "completed"][0]
+            self.assertEqual(completed["output_tail"], "step 1\nstep 2\n")
+
+    def test_failed_event_carries_output_tail(self):
+        class Failing(Adapter):
+            def start(self, prompt, cwd, session_id, log_file, cancel_event=None):
+                Path(log_file).write_text("boom\n")
+                return RunResult(exit_code=2, ok=False, error="exit 2", session_id="s")
+
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "keji.db")
+            repo = Path(d) / "repo"
+            init_repo(repo)
+            db.upsert_workspace("ws1", "repo", str(repo), "main")
+            cloud = FakeCloud()
+            agent = Agent(db, cloud, {"codex": Failing()}, Path(d), lambda: "t",
+                          prepare_workspace=lambda repo, task_id, home, base: (repo, "keji/test"))
+            agent.run_once()
+            failed = [e for e in cloud.events if e["type"] == "failed"][0]
+            self.assertEqual(failed["output_tail"], "boom\n")
+
+
 class RecoveryFenceTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

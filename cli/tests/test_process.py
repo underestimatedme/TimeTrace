@@ -42,3 +42,24 @@ class ProcessTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TailTextTest(unittest.TestCase):
+    def test_tail_text_keeps_last_bytes_and_replaces_invalid_utf8(self):
+        from keji.process import tail_text
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "log"
+            p.write_bytes(b"first line\n" + b"x" * 9000 + b"\nlast \xff line\n")
+            tail = tail_text(p, limit=100)
+            self.assertLessEqual(len(tail.encode("utf-8")), 8192)
+            self.assertTrue(tail.endswith("last \ufffd line\n"))
+            self.assertNotIn("first line", tail)
+            self.assertEqual(tail_text(Path(d) / "missing", limit=100), "")
+
+    def test_tail_text_returns_whole_small_file(self):
+        from keji.process import tail_text
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "log"
+            p.write_text("step 1\nstep 2\n")
+            self.assertEqual(tail_text(p, limit=8000), "step 1\nstep 2\n")
+

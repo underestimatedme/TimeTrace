@@ -286,7 +286,6 @@ class WorkspaceFlowTests(unittest.TestCase):
         self.assertEqual(self.agent(ExternalAI("complete")).run_once(), "idle")
         self.assertEqual(self.job(job)["status"], "queued")
 
-    @unittest.expectedFailure  # until the CLI attaches output_tail (plan Task 13)
     def test_completed_job_carries_output_tail(self):
         class LoggingAI(ExternalAI):
             def start(self, prompt, cwd, session_id, log_file, cancel_event):

@@ -89,3 +89,21 @@ def _shell_quote(value: str) -> str:
     if not value or any(ch in value for ch in " \t\n\"'$`\\"):
         return "'" + value.replace("'", "'\\''") + "'"
     return value
+
+
+def tail_text(path, limit: int = 8000) -> str:
+    """Last `limit` bytes of a log as text; invalid UTF-8 is replaced, and a
+    partial first line is dropped so the tail starts at a line boundary.
+    Valley caps output_tail at 8192 bytes, so callers keep `limit` below that."""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, 2)
+            size = fh.tell()
+            fh.seek(max(0, size - limit))
+            data = fh.read()
+    except OSError:
+        return ""
+    if size > limit and b"\n" in data:
+        data = data.split(b"\n", 1)[1]
+    return data.decode("utf-8", errors="replace")
+

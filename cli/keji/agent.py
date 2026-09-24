@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict
 
 from keji.db import Database
 from keji import quota, worktree
+from keji.process import tail_text
 from keji.checkpoints import Checkpoint, checkpoint_problem
 from keji.dispatch import (DispatchDenied, DispatchGate, LockBusy, UnclearedOwner, adapter_capabilities,
                            adapter_zero_spend_verified, coding_slot_lock, deny_reason,
@@ -379,7 +380,8 @@ class Agent:
         if result.ok:
             self.db.delete_checkpoint(plan_key)
             event = {"seq": 2, "type": "completed", "message": "completed",
-                     "result_summary": (result.output or "completed")[:1000]}
+                     "result_summary": (result.output or "completed")[:1000],
+                     "output_tail": tail_text(log_file)}
             outcome = "awaiting_review"
         elif result.blocked:
             try:
@@ -402,7 +404,8 @@ class Agent:
         else:
             self.db.delete_checkpoint(plan_key)
             outcome = "failed"
-            event = {"seq": 2, "type": outcome, "message": (result.error or "exit %s" % result.exit_code)[:1000]}
+            event = {"seq": 2, "type": outcome, "message": (result.error or "exit %s" % result.exit_code)[:1000],
+                     "output_tail": tail_text(log_file)}
         event["observed_at"] = observed_end
         self._report(claim, [event])
         self.db.update_remote_claim(job_id, "reported")

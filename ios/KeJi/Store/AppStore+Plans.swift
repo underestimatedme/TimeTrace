@@ -114,7 +114,11 @@ extension AppStore {
             await refreshPlans(taskID: current.taskId)
             return true
         } catch {
-            recordPlanError(error, id: id)
+            if let api = error as? APIError, api.code == 42200, notBefore != nil {
+                planErrors[id] = scheduleRejectedText
+            } else {
+                recordPlanError(error, id: id)
+            }
             if let api = error as? APIError, (40900..<41000).contains(api.code) {
                 await refreshPlans(taskID: initial.taskId)
             }

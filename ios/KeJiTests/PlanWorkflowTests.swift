@@ -240,6 +240,16 @@ final class PlanWorkflowTests: XCTestCase {
         XCTAssertNotEqual(keys[0], keys[1])
     }
 
+    /// 服务端拒绝执行时刻（422）时，给的是能照着做的中文，不是 "invalid request"。
+    func testRejectedRunTimeExplainsTheWindow() async throws {
+        store.plans[0].status = .ready
+        PlanHTTPProtocol.handler = { _ in (422, Data(#"{"code":42200,"message":"invalid request"}"#.utf8)) }
+        let ok = await store.dispatchPlan(plan.id, runnerID: "r", workspaceID: "w", toolID: "t",
+                                          notBefore: Date().addingTimeInterval(-3600))
+        XCTAssertFalse(ok)
+        XCTAssertEqual(store.planErrors[plan.id], "执行时间必须在 2 分钟后、30 天内，请重新选择后再派发。")
+    }
+
     func testDispatchFailureHasNoJobAndNoSuccessfulStatus() async throws {
         store.plans[0].status = .ready
         PlanHTTPProtocol.handler = { _ in (429, Data(#"{"code":42900,"message":"quota exhausted"}"#.utf8)) }

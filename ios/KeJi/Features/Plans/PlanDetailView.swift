@@ -241,7 +241,7 @@ private struct PlanDispatchSheet: View {
     @State private var loading = true
     @State private var scheduled = false
     @State private var runAt = Date().addingTimeInterval(3600)
-    private var runners: [RunnerInventory] { store.planRunners.filter { $0.runner.status == "online" } }
+    private var runners: [RunnerInventory] { store.planRunners.online }
     private var runner: RunnerInventory? { runners.first { $0.id == runnerID } }
     private var workspaces: [RunnerWorkspace] { runner?.workspaces.filter(\.enabled) ?? [] }
     private var tools: [RunnerTool] { runner?.tools.filter { $0.status == "available" } ?? [] }

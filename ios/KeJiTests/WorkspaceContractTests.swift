@@ -95,6 +95,27 @@ final class WorkspaceContractTests: XCTestCase {
         XCTAssertEqual(job.displayLabel(now: now), "AI 执行中")
     }
 
+    /// 派发面板和新建任务共用一个「在线电脑」过滤：离线的 Mac 不能被选中。
+    func testOnlineRunnersFilterHidesOfflineMacs() throws {
+        let json = Data(#"""
+        [
+          {"runner":{"id":"r1","name":"Online","platform":"darwin","client_version":"0.5","status":"online","created_at":"2026-09-25T00:00:00Z","updated_at":"2026-09-25T00:00:00Z"},"workspaces":[],"tools":[]},
+          {"runner":{"id":"r2","name":"Sleeping","platform":"darwin","client_version":"0.5","status":"offline","created_at":"2026-09-25T00:00:00Z","updated_at":"2026-09-25T00:00:00Z"},"workspaces":[],"tools":[]}
+        ]
+        """#.utf8)
+        let inventories = try JSONCoding.decoder.decode([RunnerInventory].self, from: json)
+        XCTAssertEqual(inventories.online.map(\.id), ["r1"])
+    }
+
+    /// 定时执行的时间必须在 2 分钟后、30 天内，和 Valley 的校验一致。
+    func testScheduleWindowErrorMatchesServerRule() {
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        XCTAssertEqual(scheduleWindowError(now.addingTimeInterval(60), now: now), "执行时间至少要在 2 分钟后，请重新选择。")
+        XCTAssertNil(scheduleWindowError(now.addingTimeInterval(180), now: now))
+        XCTAssertNil(scheduleWindowError(now.addingTimeInterval(29 * 86400), now: now))
+        XCTAssertEqual(scheduleWindowError(now.addingTimeInterval(31 * 86400), now: now), "执行时间最多只能安排到 30 天内，请重新选择。")
+    }
+
     func testEndpointPaths() {
         XCTAssertEqual(Endpoint.accountQuota.path, "/quota")
         XCTAssertEqual(Endpoint.taskPlans(taskID: "t1").path, "/tasks/t1/plans")

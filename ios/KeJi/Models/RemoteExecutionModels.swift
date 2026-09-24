@@ -76,6 +76,11 @@ struct RunnerInventory: Codable, Identifiable, Equatable {
     var id: String { runner.id }
 }
 
+extension Array where Element == RunnerInventory {
+    /// 只有心跳在线的电脑才能被选为执行目标；派发面板和新建任务共用这一个口径。
+    var online: [RunnerInventory] { filter { $0.runner.status == "online" } }
+}
+
 struct RemoteJob: Codable, Identifiable, Equatable {
     var id: String
     var taskId: String

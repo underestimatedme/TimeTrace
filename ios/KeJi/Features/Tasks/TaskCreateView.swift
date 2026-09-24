@@ -24,8 +24,11 @@ struct TaskCreateView: View {
     @State private var runnerId = ""
     @State private var workspaceId = ""
     @State private var toolId = ""
+    @State private var scheduleError: String?
 
     private var projectGoals: [Goal] { store.goals.filter { $0.projectId == projectId } }
+    /// 只列心跳在线的电脑；合盖的 Mac 不能被选中。
+    private var onlineRunners: [RunnerInventory] { remote.runners.online }
     private var showsAI: Bool { executorType == .ai || executorType == .collaboration }
     private var canSave: Bool {
         guard !title.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
@@ -34,7 +37,7 @@ struct TaskCreateView: View {
         }
         return true
     }
-    private var selectedRunner: RunnerInventory? { remote.runners.first { $0.runner.id == runnerId } }
+    private var selectedRunner: RunnerInventory? { onlineRunners.first { $0.runner.id == runnerId } }
     private var availableTools: [RunnerTool] {
         selectedRunner?.tools.filter { $0.provider == aiProvider && $0.status == "available" } ?? []
     }
@@ -84,15 +87,15 @@ struct TaskCreateView: View {
                         AppSelect(options: CollaborationMode.allCases, selection: $collaborationMode) { $0.label }
                     }
                 }
-                if remote.runners.isEmpty {
+                if onlineRunners.isEmpty {
                     Card(borderColor: theme.ai.opacity(0.2)) {
-                        Text("还没有在线电脑。请先在「AI 工具管理」中绑定 Mac，并运行 keji agent。")
+                        Text("还没有在线电脑。请先在「你的 AI」中绑定 Mac，并运行 keji agent。")
                             .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
                     }
                 } else {
                     FormField(label: "执行电脑") {
-                        AppSelect(options: remote.runners.map(\.runner.id), selection: $runnerId) { id in
-                            remote.runners.first { $0.runner.id == id }?.runner.name ?? id
+                        AppSelect(options: onlineRunners.map(\.runner.id), selection: $runnerId) { id in
+                            onlineRunners.first { $0.runner.id == id }?.runner.name ?? id
                         }
                     }
                     if let selectedRunner {
@@ -134,6 +137,10 @@ struct TaskCreateView: View {
                     .accessibilityIdentifier("task.schedule")
                 Text("「安排时间」按「计划开始」的时刻派给 AI 执行；需要选 AI 来做并填好计划开始。")
                     .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
+                if let scheduleError {
+                    Text(scheduleError).font(Typo.sans(Typo.xs)).foregroundStyle(theme.danger)
+                        .accessibilityIdentifier("task.schedule.error")
+                }
             }
             .padding(.top, 8)
         }
@@ -168,6 +175,11 @@ struct TaskCreateView: View {
 
     private func save(_ action: SaveAction) {
         guard canSave else { return }
+        if action == .schedule, let start = scheduledStart, let problem = scheduleWindowError(start) {
+            scheduleError = problem   // 手机端先拦住，不建任务、不派发
+            return
+        }
+        scheduleError = nil
         let id = store.addTask(buildTask())
         switch action {
         case .start, .schedule:
@@ -195,7 +207,7 @@ struct TaskCreateView: View {
     }
 
     private func selectRemoteDefaults() {
-        if runnerId.isEmpty { runnerId = remote.runners.first?.runner.id ?? "" }
+        if !onlineRunners.contains(where: { $0.runner.id == runnerId }) { runnerId = onlineRunners.first?.runner.id ?? "" }
         selectRunnerDefaults()
     }
 

@@ -23,7 +23,8 @@ App：刻迹 / TimeTrace（工程名仍为 KeJi）· bundle id `com.atlaspaces.t
       用 `xcodebuild -exportArchive` 上传成功。不要测 2026092301
 - [x] 上传 `2026092303`：主屏幕名称本地化（中文「刻迹」/ 英文「TimeTrace」），其余与 2026092302 相同。
       2026-09-24 01:23 由 `xcodebuild -exportArchive` 上传成功。**TestFlight 请测这个构建**
-- [ ] 在 App Store Connect → TestFlight 等待处理完成，填写出口合规（无加密：选「否」），把构建加入内部测试组
+- [x] TestFlight：2026092303 已处理完成（VALID），内部组「诺乔测试群」自动收入了全部构建，3 位测试员。
+      状态用 `ios/scripts/asc_testflight.py status` 查（需要 `ASC_KEY_ID` / `ASC_ISSUER_ID` / `ASC_KEY_PATH` 环境变量）
 - [ ] 在 App Store Connect 提交审核
 
 ## 二、工程侧（已完成 / 待完成）

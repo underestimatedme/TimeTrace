@@ -123,8 +123,16 @@ xcodebuild -exportArchive -archivePath build/KeJi.xcarchive \
   -exportOptionsPlist ExportOptions-AppStore.plist -exportPath build/export -allowProvisioningUpdates
 ```
 
-Bump `CURRENT_PROJECT_VERSION` in `project.yml` before every upload, then upload `build/export/KeJi.ipa` with
-Transporter or Xcode Organizer using your own App Store Connect login.
+Bump `CURRENT_PROJECT_VERSION` in `project.yml` before every upload. `ExportOptions-AppStore.plist` has
+`destination=upload`, so the export step uploads straight to App Store Connect with the Apple ID signed in to Xcode.
+
+To check processing state and test groups, or add a build to a group, use `scripts/asc_testflight.py`
+with an App Store Connect API key passed through `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_KEY_PATH`:
+
+```sh
+python3 scripts/asc_testflight.py status
+python3 scripts/asc_testflight.py add-build 2026092303 <group name>
+```
 
 ## API base URL
 

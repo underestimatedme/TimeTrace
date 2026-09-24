@@ -32,12 +32,20 @@ extension QuotaWindow {
     var scopeLabel: String {
         switch scope {
         case "short", "five_hour", "primary": return "短时"
-        case "weekly", "week": return "本周"
+        case "weekly", "week", "seven_day", "secondary": return "本周"
         case "monthly", "month": return "本月"
         default: return scope
         }
     }
+
+    /// 「周三 14:00 重置」；没有重置时刻就没有这行。
+    func resetText(now: Date = Date()) -> String? {
+        resetAt.map { Format.resetMoment($0, now: now) + " 重置" }
+    }
 }
+
+private let shortScopes: Set<String> = ["short", "five_hour", "primary"]
+private let weeklyScopes: Set<String> = ["weekly", "week", "seven_day", "secondary"]
 
 /// 一个额度池在 AI 页上的呈现：短时窗口做主数值，周窗口做副行。
 /// 读数过期只说「待核验」，没有读数只说「未知」——都不画进度条。
@@ -45,6 +53,8 @@ struct ToolQuotaCard: Identifiable, Equatable {
     let id: String
     let name: String
     let capability: String
+    /// 「套餐 Max」/「套餐未知」，来自工具清单，不是猜的。
+    let tier: String
     let headline: String
     let meterPercent: Double?
     let detail: String
@@ -56,17 +66,19 @@ struct ToolQuotaCard: Identifiable, Equatable {
         name = ToolQuotaCard.toolName(provider: pool.provider, poolId: pool.poolId)
         capability = ToolQuotaCard.capability(provider: pool.provider)
         availability = availabilityLabel(pool.availability)
+        tier = pool.planTier.isEmpty ? "套餐未知" : "套餐 " + pool.planTier.prefix(1).uppercased() + pool.planTier.dropFirst()
 
-        let short = pool.windows.first { ["short", "five_hour", "primary"].contains($0.scope) }
-        let weekly = pool.windows.first { ["weekly", "week"].contains($0.scope) }
+        let short = pool.windows.first { shortScopes.contains($0.scope) }
+        let weekly = pool.windows.first { weeklyScopes.contains($0.scope) }
         let headlineWindow = short ?? pool.windows.first
         headline = headlineWindow?.displayLabel ?? "未知"
         meterPercent = headlineWindow.flatMap { $0.isFresh(now: now) ? $0.remainingPercent : nil }
 
         if let weekly, weekly.id != headlineWindow?.id {
-            if !weekly.isFresh(now: now) { detail = "周额度待核验" }
-            else if let remaining = weekly.remainingPercent { detail = "周额度剩余 \(Int(remaining.rounded()))%" }
-            else { detail = "周额度未知" }
+            let reset = weekly.resetText(now: now).map { " · " + $0 } ?? ""
+            if !weekly.isFresh(now: now) { detail = "周额度待核验" + reset }
+            else if let remaining = weekly.remainingPercent { detail = "周额度剩余 \(Int(remaining.rounded()))%" + reset }
+            else { detail = "周额度未知" + reset }
         } else {
             detail = "账号额度：\(availabilityLabel(pool.availability))"
         }

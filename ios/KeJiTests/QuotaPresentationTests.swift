@@ -36,6 +36,39 @@ final class QuotaPresentationTests: XCTestCase {
                     source: "runner", confidence: "exact")
     }
 
+    /// Claude 的 7 天窗与 Codex 的周窗（secondary）都归入「本周」。
+    func testScopeLabelsCoverClaudeAndCodexWindows() {
+        let now = Date()
+        XCTAssertEqual(win("p", "seven_day", used: 10, fresh: true, now: now).scopeLabel, "本周")
+        XCTAssertEqual(win("p", "secondary", used: 10, fresh: true, now: now).scopeLabel, "本周")
+        XCTAssertEqual(win("p", "five_hour", used: 10, fresh: true, now: now).scopeLabel, "短时")
+    }
+
+    /// 重置时刻用绝对时间：今天、一周内用星期、更远用日期。
+    func testResetMomentIsAbsolute() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone.current
+        let now = cal.date(from: DateComponents(year: 2026, month: 9, day: 25, hour: 9, minute: 0))!
+        XCTAssertEqual(Format.resetMoment(now.addingTimeInterval(5 * 3600), now: now), "今天 14:00")
+        XCTAssertEqual(Format.resetMoment(now.addingTimeInterval(2 * 86400 + 5 * 3600), now: now), "周日 14:00")
+        XCTAssertEqual(Format.resetMoment(now.addingTimeInterval(10 * 86400), now: now), "10月5日 09:00")
+    }
+
+    /// 卡片显示套餐等级，周额度副行带绝对重置时刻。
+    func testToolCardShowsTierAndWeeklyResetMoment() {
+        let now = Date()
+        var weekly = win("pool-claude", "seven_day", used: 45, fresh: true, now: now)
+        weekly.resetAt = now.addingTimeInterval(3600)
+        let pool = AccountQuotaPool(poolId: "pool-claude", provider: "claude", availability: "available",
+                                    windows: [win("pool-claude", "five_hour", used: 20, fresh: true, now: now), weekly], planTier: "max")
+        let card = ToolQuotaCard(pool: pool, now: now)
+        XCTAssertEqual(card.tier, "套餐 Max")
+        XCTAssertTrue(card.detail.hasPrefix("周额度剩余 55% · "), card.detail)
+        XCTAssertTrue(card.detail.hasSuffix(" 重置"), card.detail)
+        let unknown = ToolQuotaCard(pool: AccountQuotaPool(poolId: "p", provider: "codex", availability: "unknown", windows: []), now: now)
+        XCTAssertEqual(unknown.tier, "套餐未知")
+    }
+
     /// 工具卡片按真实额度池渲染：短时窗口做主数值，周窗口做副行。
     func testToolCardUsesShortWindowAsHeadlineAndWeeklyAsDetail() {
         let now = Date()
@@ -47,7 +80,7 @@ final class QuotaPresentationTests: XCTestCase {
         XCTAssertEqual(card.capability, "可派发 · 可恢复")
         XCTAssertEqual(card.headline, "80%")
         XCTAssertEqual(card.meterPercent, 80)
-        XCTAssertEqual(card.detail, "周额度剩余 55%")
+        XCTAssertTrue(card.detail.hasPrefix("周额度剩余 55%"), card.detail)   // followed by the reset moment
     }
 
     /// 读数过期只显示「待核验」，进度条不画，绝不显示成满额。

@@ -49,6 +49,16 @@ enum Format {
         return "\(m)m"
     }
 
+    private static let weekdayTimeFormatter = formatter("EEE HH:mm")
+    private static let dateTimeFormatter = formatter("M月d日 HH:mm")
+
+    /// 绝对重置时刻：今天 → 「今天 14:00」；7 天内 → 「周三 14:00」；更远 → 「9月27日 14:00」。
+    static func resetMoment(_ date: Date, now: Date = Date()) -> String {
+        if calendar.isDate(date, inSameDayAs: now) { return "今天 " + time(date) }
+        if date.timeIntervalSince(now) < 7 * 86400 { return weekdayTimeFormatter.string(from: date) }
+        return dateTimeFormatter.string(from: date)
+    }
+
     static func time(_ date: Date) -> String { timeFormatter.string(from: date) }
     static func date(_ date: Date) -> String { dateFormatter.string(from: date) }
     static func dateShort(_ date: Date) -> String { dateShortFormatter.string(from: date) }

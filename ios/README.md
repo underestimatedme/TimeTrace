@@ -126,6 +126,17 @@ xcodebuild -exportArchive -archivePath build/KeJi.xcarchive \
 Bump `CURRENT_PROJECT_VERSION` in `project.yml` before every upload. `ExportOptions-AppStore.plist` has
 `destination=upload`, so the export step uploads straight to App Store Connect with the Apple ID signed in to Xcode.
 
+If Xcode's App Store Connect session has expired (`exportArchive Failed to Use Accounts`), export a
+signed IPA and upload it with the API key instead; nothing in this path needs the Xcode login:
+
+```sh
+xcodebuild -exportArchive -archivePath build/KeJi.xcarchive \
+  -exportOptionsPlist ExportOptions-IPA.plist -exportPath build/export-ipa -allowProvisioningUpdates
+xcrun altool --upload-app -f build/export-ipa/TimeTrace.ipa -t ios --apiKey $ASC_KEY_ID --apiIssuer $ASC_ISSUER_ID
+```
+
+(`altool` looks for `AuthKey_<KEY_ID>.p8` under `~/.appstoreconnect/private_keys/`.)
+
 To check processing state and test groups, or add a build to a group, use `scripts/asc_testflight.py`
 with an App Store Connect API key passed through `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_KEY_PATH`:
 

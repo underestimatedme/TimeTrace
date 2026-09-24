@@ -13,8 +13,28 @@ struct QuotaWindow: Codable, Equatable, Identifiable {
     var expiresAt: Date
     var source: String
     var confidence: String
+    /// 服务端的完整窗口身份：同一 scope 下不同 limit / 时长的窗口不能撞 id。
+    var limitId: String = ""
+    var windowMins: Int = 0
 
-    var id: String { "\(poolId)|\(scope)|\(kind)" }
+    var id: String { "\(poolId)|\(limitId)|\(scope)|\(kind)|\(windowMins)" }
+}
+
+extension QuotaWindow {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        poolId = try c.decode(String.self, forKey: .poolId)
+        scope = try c.decode(String.self, forKey: .scope)
+        kind = try c.decode(String.self, forKey: .kind)
+        usedPercent = try c.decodeIfPresent(Double.self, forKey: .usedPercent)
+        resetAt = try c.decodeIfPresent(Date.self, forKey: .resetAt)
+        observedAt = try c.decode(Date.self, forKey: .observedAt)
+        expiresAt = try c.decode(Date.self, forKey: .expiresAt)
+        source = try c.decode(String.self, forKey: .source)
+        confidence = try c.decode(String.self, forKey: .confidence)
+        limitId = try c.decodeIfPresent(String.self, forKey: .limitId) ?? ""
+        windowMins = try c.decodeIfPresent(Int.self, forKey: .windowMins) ?? 0
+    }
 }
 
 struct AccountQuotaPool: Codable, Equatable, Identifiable {
@@ -23,20 +43,24 @@ struct AccountQuotaPool: Codable, Equatable, Identifiable {
     var provider: String = ""
     var availability: String   // available / blocked / unknown
     var windows: [QuotaWindow]
+    /// 该池所属工具登录账号的套餐等级；空表示未知。
+    var planTier: String = ""
 
     var id: String { poolId }
 
-    init(poolId: String, provider: String = "", availability: String, windows: [QuotaWindow]) {
+    init(poolId: String, provider: String = "", availability: String, windows: [QuotaWindow], planTier: String = "") {
         self.poolId = poolId; self.provider = provider; self.availability = availability; self.windows = windows
+        self.planTier = planTier
     }
 
-    /// `provider` 是后加的字段：旧快照里没有时按未知处理，不能整条解码失败。
+    /// `provider` / `plan_tier` 是后加的字段：旧快照里没有时按未知处理，不能整条解码失败。
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         poolId = try c.decode(String.self, forKey: .poolId)
         provider = try c.decodeIfPresent(String.self, forKey: .provider) ?? ""
         availability = try c.decodeIfPresent(String.self, forKey: .availability) ?? "unknown"
         windows = try c.decodeIfPresent([QuotaWindow].self, forKey: .windows) ?? []
+        planTier = try c.decodeIfPresent(String.self, forKey: .planTier) ?? ""
     }
 }
 

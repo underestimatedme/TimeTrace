@@ -43,6 +43,43 @@ final class WorkspaceContractTests: XCTestCase {
         XCTAssertTrue(empty.isEmpty)
     }
 
+    func testRunnerToolDecodesPlanTierAndToleratesItsAbsence() throws {
+        let with = Data(#"{"id":"claude-default","provider":"claude","version":"local","status":"available","plan_tier":"max","updated_at":"2026-09-25T00:00:00Z"}"#.utf8)
+        XCTAssertEqual(try JSONCoding.decoder.decode(RunnerTool.self, from: with).planTier, "max")
+        let without = Data(#"{"id":"codex-default","provider":"codex","version":"local","status":"available","updated_at":"2026-09-25T00:00:00Z"}"#.utf8)
+        XCTAssertEqual(try JSONCoding.decoder.decode(RunnerTool.self, from: without).planTier, "")
+    }
+
+    func testRemoteJobDecodesNotBeforeAndOutputTail() throws {
+        let json = Data(#"{"id":"j","task_id":"t","runner_id":"r","workspace_id":"w","tool_profile_id":"codex-default","status":"queued","revision":1,"not_before":"2026-09-27T14:00:00Z","output_tail":"3 passed\n","created_at":"2026-09-25T00:00:00Z","updated_at":"2026-09-25T00:00:00Z"}"#.utf8)
+        let job = try JSONCoding.decoder.decode(RemoteJob.self, from: json)
+        XCTAssertEqual(job.notBefore, Date(timeIntervalSince1970: 1790517600))
+        XCTAssertEqual(job.outputTail, "3 passed\n")
+    }
+
+    func testRemoteJobRequestEncodesNotBeforeInRFC3339() throws {
+        let request = RemoteJobRequest(taskId: "t", runnerId: "r", workspaceId: "w", toolProfileId: "codex-default",
+                                       prompt: "p", idempotencyKey: "k", expectedTaskRevision: 1, planId: "plan",
+                                       notBefore: Date(timeIntervalSince1970: 1790517600))
+        let body = String(decoding: try JSONCoding.encoder.encode(request), as: UTF8.self)
+        XCTAssertTrue(body.contains(#""not_before":"2026-09-27T14:00:00"#), body)
+        let immediate = RemoteJobRequest(taskId: "t", runnerId: "r", workspaceId: "w", toolProfileId: "codex-default",
+                                         prompt: "p", idempotencyKey: "k", expectedTaskRevision: 1, planId: "plan")
+        XCTAssertFalse(String(decoding: try JSONCoding.encoder.encode(immediate), as: UTF8.self).contains("not_before"))
+    }
+
+    func testQuotaWindowIdentityIncludesLimitAndWindow() throws {
+        let json = Data(#"""
+        {"pools":[{"pool_id":"p","provider":"codex","plan_tier":"plus","availability":"available","windows":[
+          {"pool_id":"p","scope":"primary","kind":"codex","limit_id":"codex","window_mins":300,"used_percent":10,"observed_at":"2026-09-25T00:00:00Z","expires_at":"2026-09-25T05:00:00Z","source":"runner","confidence":"exact"},
+          {"pool_id":"p","scope":"primary","kind":"codex","limit_id":"codex-mini","window_mins":300,"used_percent":20,"observed_at":"2026-09-25T00:00:00Z","expires_at":"2026-09-25T05:00:00Z","source":"runner","confidence":"exact"}]}],
+          "observed_at":"2026-09-25T00:00:00Z"}
+        """#.utf8)
+        let quota = try JSONCoding.decoder.decode(AccountQuota.self, from: json)
+        XCTAssertEqual(quota.pools[0].planTier, "plus")
+        XCTAssertEqual(Set(quota.pools[0].windows.map(\.id)).count, 2)
+    }
+
     func testEndpointPaths() {
         XCTAssertEqual(Endpoint.accountQuota.path, "/quota")
         XCTAssertEqual(Endpoint.taskPlans(taskID: "t1").path, "/tasks/t1/plans")

@@ -51,7 +51,22 @@ struct RunnerTool: Codable, Identifiable, Equatable {
     var provider: AIProvider
     var version: String
     var status: String
+    /// 工具登录账号的套餐等级（如 max / plus），仅用于显示；缺省为空。
+    var planTier: String = ""
     var updatedAt: Date
+}
+
+extension RunnerTool {
+    /// `plan_tier` 是后加的字段：老服务端不返回时按空处理，不能整条解码失败。
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        provider = try c.decode(AIProvider.self, forKey: .provider)
+        version = try c.decode(String.self, forKey: .version)
+        status = try c.decode(String.self, forKey: .status)
+        planTier = try c.decodeIfPresent(String.self, forKey: .planTier) ?? ""
+        updatedAt = try c.decode(Date.self, forKey: .updatedAt)
+    }
 }
 
 struct RunnerInventory: Codable, Identifiable, Equatable {
@@ -74,6 +89,10 @@ struct RemoteJob: Codable, Identifiable, Equatable {
     var createdAt: Date
     var updatedAt: Date
     var planId: String? = nil
+    /// 用户指定的执行时刻；nil 表示尽快执行。
+    var notBefore: Date? = nil
+    /// Runner 随终态事件回传的最后 ≤ 8 KB 输出。
+    var outputTail: String? = nil
 }
 
 struct DeviceApprovalRequest: Encodable { var userCode: String }
@@ -101,4 +120,5 @@ struct RemoteJobRequest: Encodable {
     var idempotencyKey: String
     var expectedTaskRevision: Int64
     var planId: String? = nil
+    var notBefore: Date? = nil
 }

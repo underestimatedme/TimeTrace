@@ -490,6 +490,27 @@ class AgentTest(unittest.TestCase):
                 held.release()
 
 
+class DefaultBindingTest(unittest.TestCase):
+    def test_default_binding_is_authoritative_and_matches_registered_tool_id(self):
+        from keji.agent import _default_pool_binding
+        self.assertEqual(_default_pool_binding("codex"), ("pool-codex", "codex-default", True))
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "keji.db")
+            cloud = FakeCloud()
+
+            class Reading(Adapter):
+                def read_limits(self):
+                    return [Sample(bucket_key="codex:codex:primary", tool="codex", used_pct=42.0,
+                                   reset_at=2000, window_mins=300, source="live")]
+
+            agent = Agent(db, cloud, {"codex": Reading()}, Path(d), lambda: "t")
+            agent.report_quota(now=1000.0)
+            payload = cloud.quota_posts[0][1][0]
+            self.assertEqual(payload["profile_id"], "codex-default")
+            self.assertIs(payload["pool_authoritative"], True)
+            self.assertEqual(payload["confidence"], "exact")
+
+
 class RecoveryFenceTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

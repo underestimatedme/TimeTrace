@@ -18,8 +18,10 @@ from keji.dispatch import (DispatchDenied, DispatchGate, LockBusy, UnclearedOwne
 
 
 def _default_pool_binding(provider: str):
-    """Display-only grouping. It does not identify an authenticated account."""
-    return "pool-" + provider, provider + "-personal"
+    """The pool a registered tool draws from. keji reads quota through the same
+    login the tool executes with, so the reading identifies that pool: the
+    profile id must equal the inventory tool id (`<provider>-default`)."""
+    return "pool-" + provider, provider + "-default", True
 
 
 def _capability_zero_spend(adapter: Any, job: Dict[str, Any]) -> bool:

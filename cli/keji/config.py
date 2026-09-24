@@ -25,12 +25,17 @@ DEFAULTS: Dict[str, Any] = {
         ],
         "model": None,
         "extra_args": [],
+        # Where Claude Code keeps its OAuth login; None = ~/.claude/.credentials.json,
+        # falling back to the macOS Keychain item Claude Code uses.
+        "credentials_path": None,
     },
     "codex": {
         "bin": "codex",
         "sandbox": "workspace-write",
         "model": None,
         "extra_args": [],
+        # Where Codex keeps its login; None = ~/.codex/auth.json.
+        "auth_path": None,
     },
 }
 

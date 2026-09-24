@@ -12,12 +12,14 @@ cli/探针验证记录-2026-09-02.md):
 - `codex exec resume <thread_id> --json <prompt>` continues a thread.
 """
 import json
+from pathlib import Path
 import os
 import subprocess
 import threading
 from typing import Any, Dict, List, Optional
 
 from keji.adapters.base import SAFETY_RULES, ToolAdapter, run_streaming
+from keji import tiers
 from keji.models import CODEX, RunResult, Sample
 from keji.billing import billing_env_keys, codex_verifier, sanitized_env
 from keji.quota import merge_capabilities
@@ -179,6 +181,10 @@ class CodexAdapter(ToolAdapter):
     def read_limits(self) -> Optional[List[Sample]]:
         resp = app_server_request(self.cfg.get("bin", "codex"), "account/rateLimits/read")
         return parse_rate_limits(resp)
+
+    def plan_tier(self) -> Optional[str]:
+        path = self.cfg.get("auth_path") or Path.home() / ".codex" / "auth.json"
+        return tiers.codex_plan_tier(Path(path))
 
     def start(self, prompt: str, cwd: str, session_id: str, log_file: str, cancel_event=None) -> RunResult:
         cmd = build_cmd(self.cfg, prompt, cwd, last_msg_file=log_file + ".last.md")

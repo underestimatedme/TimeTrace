@@ -9,10 +9,12 @@ cli/探针验证记录-2026-09-02.md):
 - there is NO on-demand quota query, so read_limits() returns None.
 """
 import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from keji.adapters.base import SAFETY_RULES, ToolAdapter, run_streaming
 from keji.billing import billing_env_keys, claude_verifier
+from keji import tiers
 from keji.models import CLAUDE, RunResult, Sample
 from keji.quota import merge_capabilities
 
@@ -120,6 +122,12 @@ class ClaudeAdapter(ToolAdapter):
         # login with the first-party provider, and no API-key path may exist in
         # the environment or settings. Tests inject a StaticBilling.
         self.billing = billing or claude_verifier(cfg)
+
+    def credentials_path(self) -> Path:
+        return Path(self.cfg.get("credentials_path") or Path.home() / ".claude" / ".credentials.json")
+
+    def plan_tier(self) -> Optional[str]:
+        return tiers.claude_plan_tier(self.credentials_path())
 
     def capabilities(self) -> Dict[str, bool]:
         # Implemented surface: records runs, dispatches headless, resumes the

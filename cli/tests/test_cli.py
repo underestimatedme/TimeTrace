@@ -49,6 +49,30 @@ class CliTest(unittest.TestCase):
                 self.assertEqual(len(payloads), 1)
                 self.assertIs(payloads[0]["tools"][0].get("can_enforce_zero_spend"), expected)
 
+    def test_inventory_uploads_plan_tier(self):
+        class TierAdapter:
+            def capabilities(self):
+                return {"can_enforce_zero_spend": True}
+
+            def plan_tier(self):
+                return "max"
+
+        payloads = []
+
+        def request(client, method, path, body=None, token=None):
+            if path == "/runner/inventory":
+                payloads.append(json.loads(json.dumps(body)))
+            return {}
+
+        with patch("keji.cli._adapters", return_value={"claude": TierAdapter()}), \
+             patch("keji.cli.SessionManager.token", return_value="t"), \
+             patch("keji.cloud.CloudClient.request", new=request), \
+             patch("keji.cli.Agent.run_once", return_value="idle"), \
+             patch("keji.cli.shutil.which", return_value="/test/claude"):
+            code, _, err = self.run_cli("agent", "run", "--once")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(payloads[0]["tools"][0]["plan_tier"], "max")
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)

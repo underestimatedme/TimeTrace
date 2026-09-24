@@ -130,6 +130,27 @@ def cmd_workspace_remove(args: argparse.Namespace) -> int:
     return 0
 
 
+def _runner_workspaces(db: Database) -> list:
+    return [{"id": row["id"], "name": row["name"], "default_branch": row["default_branch"]}
+            for row in db.list_workspaces()]
+
+
+def _runner_tools(cfg: Dict[str, Any], adapters: Dict[str, Any]) -> list:
+    """Inventory entry per adapter. `plan_tier` is display only; the zero-spend
+    flag is the adapter's verified capability, never inferred from a binary."""
+    tools = []
+    for name, adapter in adapters.items():
+        binary = str(cfg.get(name, {}).get("bin", name))
+        tier = adapter.plan_tier() if hasattr(adapter, "plan_tier") else None
+        tools.append({
+            "id": name + "-default", "provider": name, "version": "local",
+            "can_enforce_zero_spend": adapter_capabilities(adapter).get("can_enforce_zero_spend") is True,
+            "status": "available" if shutil.which(binary) else "unavailable",
+            "plan_tier": tier or "",
+        })
+    return tools
+
+
 def cmd_agent_run(args: argparse.Namespace) -> int:
     home, cfg, db = _open(args)
     lock_file = _acquire_execution_lock(home)
@@ -140,13 +161,7 @@ def cmd_agent_run(args: argparse.Namespace) -> int:
     sessions = SessionManager(CredentialStore(), cloud)
     adapters = _adapters(cfg)
     agent = Agent(db, cloud, adapters, home, sessions.token)
-    inventory = [{"id": row["id"], "name": row["name"], "default_branch": row["default_branch"]}
-                 for row in db.list_workspaces()]
-    tools = [{"id": name + "-default", "provider": name, "version": "local",
-              "can_enforce_zero_spend": adapter_capabilities(adapter).get("can_enforce_zero_spend") is True,
-              "status": "available" if shutil.which(str(cfg.get(name, {}).get("bin", name))) else "unavailable"}
-             for name, adapter in adapters.items()]
-    cloud.update_inventory(sessions.token(), inventory, tools)
+    cloud.update_inventory(sessions.token(), _runner_workspaces(db), _runner_tools(cfg, adapters))
     if args.once:
         print(agent.run_once())
         return 0

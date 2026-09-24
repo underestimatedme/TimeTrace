@@ -9,12 +9,14 @@ cli/探针验证记录-2026-09-02.md):
 - there is NO on-demand quota query, so read_limits() returns None.
 """
 import json
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from keji.adapters.base import SAFETY_RULES, ToolAdapter, run_streaming
 from keji.billing import billing_env_keys, claude_verifier
 from keji import tiers
+from keji.adapters import claude_usage
 from keji.models import CLAUDE, RunResult, Sample
 from keji.quota import merge_capabilities
 
@@ -116,8 +118,11 @@ class ClaudeAdapter(ToolAdapter):
     name = CLAUDE
     adapter_version = "claude-code/0.4"
 
-    def __init__(self, cfg: Dict[str, Any], billing=None):
+    def __init__(self, cfg: Dict[str, Any], billing=None, credentials=None):
         self.cfg = cfg
+        # The local OAuth login (file, else Keychain). Tests inject a stub so
+        # they never touch the developer's real login.
+        self._credentials = credentials or (lambda: tiers.claude_oauth(self.credentials_path()))
         # Real check: `claude auth status` must report a claude.ai subscription
         # login with the first-party provider, and no API-key path may exist in
         # the environment or settings. Tests inject a StaticBilling.
@@ -129,13 +134,19 @@ class ClaudeAdapter(ToolAdapter):
     def plan_tier(self) -> Optional[str]:
         return tiers.claude_plan_tier(self.credentials_path())
 
+    def read_limits(self) -> Optional[List[Sample]]:
+        """On-demand read through the OAuth usage endpoint; None when the local
+        login is missing, expired, or the endpoint refuses."""
+        return claude_usage.usage_samples(self._credentials(), now=time.time())
+
     def capabilities(self) -> Dict[str, bool]:
-        # Implemented surface: records runs, dispatches headless, resumes the
-        # original session via `--resume`. No on-demand quota read. Zero-spend
-        # comes only from the billing verdict; unverified keeps the gate closed.
+        # Implemented surface: records runs, reads quota on demand through the
+        # OAuth usage endpoint when a local login exists, dispatches headless,
+        # resumes the original session via `--resume`. Zero-spend comes only
+        # from the billing verdict; unverified keeps the gate closed.
         return merge_capabilities({
             "can_record": True,
-            "can_read_quota": False,
+            "can_read_quota": bool((self._credentials() or {}).get("accessToken")),
             "can_dispatch": True,
             "can_resume": True,
             "can_enforce_zero_spend": self.billing.verdict().verified,

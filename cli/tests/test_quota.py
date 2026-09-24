@@ -130,7 +130,8 @@ class AdapterCapabilityTest(unittest.TestCase):
             self.assertFalse(caps["can_enforce_zero_spend"])
             self.assertTrue(adapter.adapter_version)
 
-        self.assertFalse(ClaudeAdapter({}, billing=unverified).capabilities()["can_read_quota"])
+        # No local login: nothing to read. (Injected so the test never sees the developer's real login.)
+        self.assertFalse(ClaudeAdapter({}, billing=unverified, credentials=lambda: {}).capabilities()["can_read_quota"])
         self.assertTrue(CodexAdapter({}, billing=unverified).capabilities()["can_read_quota"])
 
 

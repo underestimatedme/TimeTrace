@@ -9,9 +9,23 @@ struct ProjectsView: View {
     var body: some View {
         SubPageScaffold(title: "项目与目标", action: { createButton }) {
             if store.projects.isEmpty {
-                MissingPlaceholder(text: "暂无项目")
+                emptyState
             }
             VStack(spacing: 12) { ForEach(store.projects) { projectCard($0) } }
+        }
+    }
+
+    /// 全新安装时没有项目：说明第一条任务会自动建好默认项目，并直接给出入口。
+    private var emptyState: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("还没有项目").font(Typo.sans(Glass.cardTitle, weight: .semibold)).foregroundStyle(theme.text)
+                Text("新建第一条任务，刻迹会为它建好默认项目；之后可以在任务里挑选或整理项目与目标。")
+                    .font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary).lineSpacing(3)
+                AppButton("新建第一条任务", icon: "plus", variant: .accent, fullWidth: true) { router.push(.taskCreate) }
+                    .accessibilityIdentifier("projects.empty.create")
+                    .padding(.top, 4)
+            }
         }
     }
 

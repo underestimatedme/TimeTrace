@@ -36,16 +36,19 @@ struct SubPageScaffold<Content: View, Action: View>: View {
     private var header: some View {
         ZStack {
             HStack {
-                Button { router.pop() } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.left").font(.system(size: 17, weight: .regular))
-                            .accessibilityHidden(true)
-                        Text("返回").font(Typo.sans(Typo.sm))
+                // 一级标签页（导航栈为空）没有上级可返回，不画按钮；否则 pop 是空操作，按钮成了摆设。
+                if !router.path.isEmpty {
+                    Button { router.pop() } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.left").font(.system(size: 17, weight: .regular))
+                                .accessibilityHidden(true)
+                            Text("返回").font(Typo.sans(Typo.sm))
+                        }
+                        .foregroundStyle(theme.textSecondary)
                     }
-                    .foregroundStyle(theme.textSecondary)
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("subpage.back")
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("subpage.back")
                 Spacer()
                 action().frame(minWidth: 60, alignment: .trailing)
             }

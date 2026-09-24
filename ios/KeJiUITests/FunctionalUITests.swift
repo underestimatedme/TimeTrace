@@ -9,10 +9,13 @@ final class FunctionalUITests: XCTestCase {
         app = XCUIApplication()
     }
 
-    private func launch(_ route: String, sample: Bool = true) {
+    private func launch(_ route: String, sample: Bool = true, reset: Bool = false) {
         app.terminate()
+        // 上一个实例退到 inactive 时会落盘一次；等它真正退出，避免它把刚清掉的状态文件又写回来。
+        _ = app.wait(for: .notRunning, timeout: 10)
         app.launchArguments = ["--ui-testing", "--offline", "--screen", route]
         if sample { app.launchArguments.append("--sample-data") }
+        if reset { app.launchArguments.append("--reset-state") }
         app.launch()
     }
 
@@ -159,6 +162,26 @@ final class FunctionalUITests: XCTestCase {
             capture("route-\(route.replacingOccurrences(of: "/", with: "-"))")
         }
     }
+    /// 一级标签页没有可返回的上级，不显示「返回」；全新安装的空状态要给出新建入口。
+    func testTabRootsHideBackAndEmptyStatesOfferCreate() {
+        launch("projects", sample: false, reset: true)
+        XCTAssertTrue(app.staticTexts["项目与目标"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["subpage.back"].exists, "tab root must not show a dead back button")
+        tap("projects.empty.create")
+        XCTAssertTrue(app.staticTexts["新建任务"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["subpage.back"].exists, "pushed page keeps its back button")
+        tap("subpage.back")
+        XCTAssertTrue(app.staticTexts["项目与目标"].waitForExistence(timeout: 5))
+
+        launch("ai-tools")
+        XCTAssertTrue(app.staticTexts["你的 AI"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["subpage.back"].exists)
+
+        launch("today", sample: false, reset: true)
+        tap("today.empty.create")
+        XCTAssertTrue(app.staticTexts["新建任务"].waitForExistence(timeout: 5))
+    }
+
     /// 无障碍：底部入口和主要图标按钮必须能被读出名字，动态字体放大后仍可点。
     func testTabsAndIconButtonsAreReadableByVoiceOver() {
         launch("today")

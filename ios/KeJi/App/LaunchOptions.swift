@@ -7,12 +7,14 @@ import Foundation
 ///                          appearance | account | onboarding | splash
 ///   --theme <name>         claude | codex | cursor | light
 ///   --offline              disable networking entirely
+///   --reset-state          wipe persisted local state before launch (fresh-install scenarios in UI tests)
 ///   --api-base-url <url>   override API base URL
 struct LaunchOptions {
     var sampleData = false
     var screen: String?
     var theme: ThemeName?
     var offline = false
+    var resetState = false
     var apiBaseURL: URL?
     var uiTesting = false
     var workspaceFixture = false
@@ -29,6 +31,7 @@ struct LaunchOptions {
             switch arg {
             case "--sample-data": sampleData = true
             case "--offline": offline = true
+            case "--reset-state": resetState = true
             case "--ui-testing": uiTesting = true; offline = true
             case "--workspace-fixture": workspaceFixture = true; sampleData = true; uiTesting = true; offline = true
             case "--screen": screen = value(); i += 1

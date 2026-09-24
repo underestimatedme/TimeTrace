@@ -47,7 +47,13 @@ struct TodayView: View {
 
             SectionTitle("接下来")
             if upcoming.isEmpty {
-                Card { centered("今天暂无计划任务") }
+                Card {
+                    centered("今天暂无计划任务")
+                    AppButton("新建任务", icon: "plus", variant: .secondary, size: .sm, fullWidth: true) {
+                        router.push(.taskCreate)
+                    }
+                    .accessibilityIdentifier("today.empty.create")
+                }
             } else {
                 VStack(spacing: 0) { ForEach(upcoming.prefix(5)) { upcomingRow($0) } }
             }

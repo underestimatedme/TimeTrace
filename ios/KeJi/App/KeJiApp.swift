@@ -41,6 +41,7 @@ final class AppEnvironment {
         self.router = router
         self.stateStore = stateStore
 
+        if options.resetState { stateStore.clear() }
         if options.workspaceFixture {
             store.resetToWorkspaceFixture()
         } else if options.sampleData {

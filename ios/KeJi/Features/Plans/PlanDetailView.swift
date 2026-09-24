@@ -106,9 +106,24 @@ struct PlanDetailView: View {
         if let job = store.planJobs[plan.id] {
             Text("执行记录：\(job.displayLabel(now: store.now))").font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary)
                 .accessibilityIdentifier("plan.job.status")
-            if let summary = job.resultSummary {
-                Text(summary).font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary).padding(.bottom, 12)
+            if let summary = job.resultSummary, !summary.isEmpty {
+                Text(summary).font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary)
             }
+            // 电脑回传的最后 8 KB 输出；完整日志留在电脑上。
+            if let tail = job.outputTail, !tail.isEmpty {
+                DisclosureGroup("查看输出（最后 8 KB）") {
+                    ScrollView([.horizontal, .vertical]) {
+                        Text(tail).font(Typo.mono(Typo.xs)).foregroundStyle(theme.textSecondary)
+                            .textSelection(.enabled).padding(8)
+                            .accessibilityIdentifier("plan.job.output.text")
+                    }
+                    .frame(maxHeight: 240)
+                    .background(theme.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .font(Typo.sans(Typo.xs))
+                .accessibilityIdentifier("plan.job.output")
+            }
+            Spacer().frame(height: 12)
         }
         VStack(spacing: 8) {
             if let executorBlocker {

@@ -1,4 +1,11 @@
 #!/bin/sh
 # keji launcher: runs the package from the repo checkout without installation.
-HERE="$(cd "$(dirname "$0")/.." && pwd)"
+# Resolves symlinks so `ln -s .../bin/keji /opt/homebrew/bin/keji` works.
+SELF="$0"
+while [ -L "$SELF" ]; do
+    DIR="$(cd "$(dirname "$SELF")" && pwd)"
+    SELF="$(readlink "$SELF")"
+    case "$SELF" in /*) ;; *) SELF="$DIR/$SELF" ;; esac
+done
+HERE="$(cd "$(dirname "$SELF")/.." && pwd)"
 PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m keji "$@"

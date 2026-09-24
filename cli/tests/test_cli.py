@@ -111,6 +111,17 @@ class CliTest(unittest.TestCase):
         self.assertTrue(all(c[2] == "fresh-token" for c in calls if c[1].startswith("/runner/")))
         self.assertIn("已上报", out)
 
+    def test_launcher_works_through_a_symlink_from_any_directory(self):
+        # README installs `bin/keji` with `ln -s` into a PATH directory; the
+        # launcher must resolve that link back to the checkout.
+        launcher = Path(__file__).resolve().parents[1] / "bin" / "keji"
+        with tempfile.TemporaryDirectory() as d:
+            link = Path(d) / "keji"
+            link.symlink_to(launcher)
+            result = subprocess.run([str(link), "--version"], cwd=d, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.startswith("keji "), result.stdout)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)

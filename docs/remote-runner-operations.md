@@ -33,8 +33,10 @@ keji agent install
 
 ## 运行状态
 
-- 电脑在线：Agent 每 5 秒领取一次任务。
-- 电脑休眠/关机：任务停留在 Valley 队列；不会转到云端执行。
+- 电脑在线：Agent 每 5 秒领取一次任务；每次领取轮询就是一次心跳，Valley 按最近 2 分钟内有无心跳实时判定在线，手机上的「在线 / 离线」与派发闸门用同一口径。
+- 额度与工具清单上报时机：`keji cloud login` 成功后立即一次；`keji agent run` 启动时；空闲时每 5 分钟；每个任务结束后；被限流时；`--once` 模式也会上报。工具登录状态变化（例如退出登录）会在下一次上报时重推清单。
+- 采集来源：Codex 走 `codex app-server` 的额度接口；Claude Code 用本机 OAuth 登录调用其 `/usage` 命令所用的用量接口（凭据来自 `~/.claude/.credentials.json`，macOS 上通常在钥匙串项「Claude Code-credentials」）。套餐等级来自各自的本地登录信息，只上报等级字符串。
+- 电脑休眠/关机：任务停留在 Valley 队列；不会转到云端执行。**定时任务**（手机上指定了执行时刻）在到点时若电脑在睡眠，会在唤醒后执行，不会丢；需要准点执行时，用 `caffeinate -dims` 保持唤醒，或 `sudo pmset -a sleep 0`（接电源时可用 `sudo pmset -c sleep 0`）。
 - Keychain 锁定、Claude/Codex 退出登录或额度耗尽：Runner 应上报等待/失败状态，由手机明确展示。
 - 零付费核验：每次派发前 Runner 实测工具是订阅登录（Claude `auth status`、Codex `login status`）且环境/配置里没有 API key 路径；
   不通过就以 `billing_unverified` 拒绝派发，`keji agent doctor` 可查看原因。启动工具时所有计费相关环境变量都被剔除。见 `cli/README.md`「零付费核验」。

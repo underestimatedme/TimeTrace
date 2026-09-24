@@ -80,6 +80,21 @@ final class WorkspaceContractTests: XCTestCase {
         XCTAssertEqual(Set(quota.pools[0].windows.map(\.id)).count, 2)
     }
 
+    /// 排队且尚未到执行时刻 → 「已安排 · 时刻」；到点或别的状态 → 原文案。
+    func testScheduledQueuedJobReadsAsPlanned() {
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        var job = RemoteJob(id: "j", taskId: "t", runnerId: "r", workspaceId: "w", toolProfileId: "codex-default",
+                            status: .queued, revision: 1, resultSummary: nil, prompt: nil, createdAt: now, updatedAt: now)
+        XCTAssertEqual(job.displayLabel(now: now), "云端排队")
+        job.notBefore = now.addingTimeInterval(3600)
+        XCTAssertEqual(job.displayLabel(now: now), "已安排 · " + Format.resetMoment(now.addingTimeInterval(3600), now: now))
+        job.notBefore = now.addingTimeInterval(-60)
+        XCTAssertEqual(job.displayLabel(now: now), "云端排队")
+        job.status = .running
+        job.notBefore = now.addingTimeInterval(3600)
+        XCTAssertEqual(job.displayLabel(now: now), "AI 执行中")
+    }
+
     func testEndpointPaths() {
         XCTAssertEqual(Endpoint.accountQuota.path, "/quota")
         XCTAssertEqual(Endpoint.taskPlans(taskID: "t1").path, "/tasks/t1/plans")

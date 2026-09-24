@@ -104,7 +104,8 @@ struct PlanDetailView: View {
             .accessibilityIdentifier("plan.policy.note")
 
         if let job = store.planJobs[plan.id] {
-            Text("执行记录：\(job.status.label)").font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary)
+            Text("执行记录：\(job.displayLabel(now: store.now))").font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary)
+                .accessibilityIdentifier("plan.job.status")
             if let summary = job.resultSummary {
                 Text(summary).font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary).padding(.bottom, 12)
             }
@@ -223,6 +224,8 @@ private struct PlanDispatchSheet: View {
     @State private var workspaceID = ""
     @State private var toolID = ""
     @State private var loading = true
+    @State private var scheduled = false
+    @State private var runAt = Date().addingTimeInterval(3600)
     private var runners: [RunnerInventory] { store.planRunners.filter { $0.runner.status == "online" } }
     private var runner: RunnerInventory? { runners.first { $0.id == runnerID } }
     private var workspaces: [RunnerWorkspace] { runner?.workspaces.filter(\.enabled) ?? [] }
@@ -242,10 +245,22 @@ private struct PlanDispatchSheet: View {
                     ForEach(tools) { Text($0.provider.label + " · " + $0.version).tag($0.id) }
                 }
                 if !loading && runners.isEmpty { Text("没有可用电脑，请先连接执行器后重试。") }
+                Section("执行时间") {
+                    Toggle("指定时间执行", isOn: $scheduled).accessibilityIdentifier("plan.dispatch.schedule")
+                    if scheduled {
+                        DatePicker("开始于", selection: $runAt,
+                                   in: Date().addingTimeInterval(120)...Date().addingTimeInterval(30 * 86400),
+                                   displayedComponents: [.date, .hourAndMinute])
+                            .accessibilityIdentifier("plan.dispatch.runAt")
+                        Text("到点后由电脑领取执行；那时额度不足会先等待，不会转为付费。")
+                            .font(Typo.sans(Typo.xs)).foregroundStyle(.secondary)
+                    }
+                }
                 if let error = store.planErrors[planID] { Text(error) }
                 Button("确认派发") {
                     Task {
-                        if await store.dispatchPlan(planID, runnerID: runnerID, workspaceID: workspaceID, toolID: toolID) { dismiss() }
+                        if await store.dispatchPlan(planID, runnerID: runnerID, workspaceID: workspaceID, toolID: toolID,
+                                                    notBefore: scheduled ? runAt : nil) { dismiss() }
                     }
                 }.disabled(loading || runnerID.isEmpty || workspaceID.isEmpty || toolID.isEmpty || store.planBusy.contains(planID))
                     .accessibilityIdentifier("plan.dispatch.confirm")

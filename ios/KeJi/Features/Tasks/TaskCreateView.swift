@@ -129,7 +129,11 @@ struct TaskCreateView: View {
             VStack(spacing: 8) {
                 AppButton("保存任务", variant: .accent, fullWidth: true, disabled: !canSave) { save(.save) }
                 AppButton("保存并开始", variant: .secondary, fullWidth: true, disabled: !canSave) { save(.start) }
-                AppButton("保存并安排时间", variant: .ghost, fullWidth: true, disabled: !canSave) { save(.schedule) }
+                AppButton("保存并安排时间", variant: .ghost, fullWidth: true,
+                          disabled: !canSave || scheduledStart == nil || executorType != .ai || appEnv.options.offline) { save(.schedule) }
+                    .accessibilityIdentifier("task.schedule")
+                Text("「安排时间」按「计划开始」的时刻派给 AI 执行；需要选 AI 来做并填好计划开始。")
+                    .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
             }
             .padding(.top, 8)
         }
@@ -166,15 +170,18 @@ struct TaskCreateView: View {
         guard canSave else { return }
         let id = store.addTask(buildTask())
         switch action {
-        case .start:
+        case .start, .schedule:
             router.go(.projects)
             if executorType == .ai {
                 router.push(.taskDetail(id))
                 if !appEnv.options.offline {
+                    // 「安排时间」= 同一条派发，只是带上「计划开始」作为执行时刻。
+                    let notBefore = action == .schedule ? scheduledStart : nil
                     _Concurrency.Task {
                         if let plan = await store.prepareTaskPlan(id) {
                             router.push(.plan(plan.id))
-                            await store.dispatchPlan(plan.id, runnerID: runnerId, workspaceID: workspaceId, toolID: toolId)
+                            await store.dispatchPlan(plan.id, runnerID: runnerId, workspaceID: workspaceId, toolID: toolId,
+                                                     notBefore: notBefore)
                         }
                     }
                 }
@@ -182,7 +189,7 @@ struct TaskCreateView: View {
                 store.startFocus(id)
                 router.push(.focus(id))
             }
-        case .save, .schedule:
+        case .save:
             router.go(.projects)
         }
     }

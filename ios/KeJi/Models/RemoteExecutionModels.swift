@@ -93,6 +93,14 @@ struct RemoteJob: Codable, Identifiable, Equatable {
     var notBefore: Date? = nil
     /// Runner 随终态事件回传的最后 ≤ 8 KB 输出。
     var outputTail: String? = nil
+
+    /// 排队且还没到用户指定的时刻 → 「已安排 · 周六 14:00」；其余照服务端状态。
+    func displayLabel(now: Date = Date()) -> String {
+        if status == .queued, let notBefore, notBefore > now {
+            return "已安排 · " + Format.resetMoment(notBefore, now: now)
+        }
+        return status.label
+    }
 }
 
 struct DeviceApprovalRequest: Encodable { var userCode: String }

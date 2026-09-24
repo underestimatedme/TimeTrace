@@ -198,6 +198,48 @@ final class PlanWorkflowTests: XCTestCase {
         XCTAssertEqual(reloaded.planJobs[plan.id]?.id, "job-1")
     }
 
+    /// 派发可以带执行时刻：请求体里有 RFC 3339 的 not_before，幂等键也随之不同。
+    func testScheduledDispatchSendsNotBeforeAndChangesIdempotencyKey() async throws {
+        store.plans[0].status = .ready
+        var job = RemoteJob(id: "job-2", taskId: plan.taskId, runnerId: "r", workspaceId: "w", toolProfileId: "t",
+                            status: .queued, revision: 1, resultSummary: nil, prompt: nil, createdAt: Date(), updatedAt: Date(), planId: plan.id)
+        job.notBefore = Date(timeIntervalSince1970: 1_790_517_600)
+        let reply = try response(job)
+        var current = plan!
+        current.status = .queued
+        let plans = try response([current])
+        var keys: [String?] = []
+        PlanHTTPProtocol.handler = { request in
+            if request.httpMethod == "POST" {
+                let body = try Self.body(request)
+                XCTAssertTrue((body["not_before"] as? String ?? "").hasPrefix("2026-09-27T14:00:00"), "\(body)")
+                keys.append(body["idempotency_key"] as? String)
+                return (201, reply)
+            }
+            return (200, plans)
+        }
+        let ok = await store.dispatchPlan(plan.id, runnerID: "r", workspaceID: "w", toolID: "t",
+                                          notBefore: Date(timeIntervalSince1970: 1_790_517_600))
+        XCTAssertTrue(ok)
+        XCTAssertEqual(store.planJobs[plan.id]?.notBefore, Date(timeIntervalSince1970: 1_790_517_600))
+
+        // Same plan, no time: a different request, so a different key.
+        store.plans[0].status = .ready
+        store.planJobs = [:]
+        PlanHTTPProtocol.handler = { request in
+            if request.httpMethod == "POST" {
+                let body = try Self.body(request)
+                XCTAssertNil(body["not_before"])
+                keys.append(body["idempotency_key"] as? String)
+                return (201, reply)
+            }
+            return (200, plans)
+        }
+        _ = await store.dispatchPlan(plan.id, runnerID: "r", workspaceID: "w", toolID: "t")
+        XCTAssertEqual(keys.count, 2)
+        XCTAssertNotEqual(keys[0], keys[1])
+    }
+
     func testDispatchFailureHasNoJobAndNoSuccessfulStatus() async throws {
         store.plans[0].status = .ready
         PlanHTTPProtocol.handler = { _ in (429, Data(#"{"code":42900,"message":"quota exhausted"}"#.utf8)) }

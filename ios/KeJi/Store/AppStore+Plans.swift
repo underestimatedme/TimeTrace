@@ -79,8 +79,10 @@ extension AppStore {
         await refreshPlans(taskID: plan.taskId)
     }
 
+    /// `notBefore`：用户选定的执行时刻，nil 为尽快执行；它参与幂等键，改时间就是一次新的派发。
     @discardableResult
-    func dispatchPlan(_ id: String, runnerID: String, workspaceID: String, toolID: String) async -> Bool {
+    func dispatchPlan(_ id: String, runnerID: String, workspaceID: String, toolID: String,
+                      notBefore: Date? = nil) async -> Bool {
         if let reason = planDispatchUnavailableReason(id) { planErrors[id] = reason; return false }
         guard !planBusy.contains(id), let initial = plan(id), canDispatchPlan(initial, allPlans: plans),
               !id.hasPrefix("draft-") else { return false }
@@ -95,14 +97,16 @@ extension AppStore {
                   !runnerID.isEmpty, !workspaceID.isEmpty, !toolID.isEmpty else {
                 throw APIError(code: 42200, message: "请刷新 Plan 并选择可用电脑、工作区及工具。")
             }
-            let identity = [id, String(current.revision), runnerID, workspaceID, toolID].joined(separator: "|")
+            let identity = [id, String(current.revision), runnerID, workspaceID, toolID,
+                            notBefore.map { String(Int($0.timeIntervalSince1970)) } ?? "now"].joined(separator: "|")
             let key = SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
             var instructions = [current.title]
             if !task.description.isEmpty { instructions.append(task.description) }
             if !current.criteria.isEmpty { instructions.append("验收项：\n" + current.criteria.map { "- " + $0 }.joined(separator: "\n")) }
             let request = RemoteJobRequest(taskId: task.id, runnerId: runnerID, workspaceId: workspaceID,
                 toolProfileId: toolID, prompt: instructions.joined(separator: "\n\n"),
-                idempotencyKey: "ios-" + key, expectedTaskRevision: Int64(task.updatedAt.timeIntervalSince1970 * 1000), planId: id)
+                idempotencyKey: "ios-" + key, expectedTaskRevision: Int64(task.updatedAt.timeIntervalSince1970 * 1000), planId: id,
+                notBefore: notBefore)
             let job = try await workspaceClient.dispatch(request)
             planJobs[id] = job
             planErrors[id] = nil

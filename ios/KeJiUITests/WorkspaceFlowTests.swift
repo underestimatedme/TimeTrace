@@ -222,7 +222,23 @@ final class WorkspaceFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["执行中"].waitForExistence(timeout: 10))
     }
 
-    private func createAndDispatch(scenario: String, humanOnly: Bool = false, saveAndStart: Bool = false) {
+    /// 定时派发：面板里打开「指定时间执行」，派发后执行记录先显示「已安排 · 时刻」，
+    /// fixture 到点后推进到待确认，并带上电脑回传的输出尾巴。
+    func testScheduledDispatchShowsPlannedTimeAndCompletedJobShowsOutput() {
+        createAndDispatch(scenario: "schedule", schedule: true)
+        let planned = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "执行记录：已安排 · ")).firstMatch
+        XCTAssertTrue(planned.waitForExistence(timeout: 10), app.debugDescription)
+        capture("plan-scheduled")
+        XCTAssertTrue(app.staticTexts["执行记录：结果待确认"].waitForExistence(timeout: 20))
+        let disclosure = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "查看输出（最后 8 KB）")).firstMatch
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
+        disclosure.tap()
+        let output = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "3 passed")).firstMatch
+        XCTAssertTrue(output.waitForExistence(timeout: 5))
+        capture("plan-output-tail")
+    }
+
+    private func createAndDispatch(scenario: String, humanOnly: Bool = false, saveAndStart: Bool = false, schedule: Bool = false) {
         app.terminate()
         app.launchArguments = ["--workspace-fixture", "--online-ui-testing", "--api-base-url",
                                "http://127.0.0.1:18768/\(scenario)-\(UUID().uuidString)", "--screen", "tasks/new"]
@@ -249,6 +265,17 @@ final class WorkspaceFlowTests: XCTestCase {
         plan.tap()
         if humanOnly { return }
         tap("plan.dispatch", timeout: 10)
+        if schedule {
+            let toggle = app.switches["plan.dispatch.schedule"].firstMatch
+            XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+            // A Form row's centre is the label; the control sits at the trailing edge.
+            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+            XCTAssertTrue(app.datePickers["plan.dispatch.runAt"].firstMatch.waitForExistence(timeout: 5)
+                          || app.otherElements["plan.dispatch.runAt"].firstMatch.waitForExistence(timeout: 1),
+                          "schedule toggle did not switch on: \(toggle.value ?? "nil")")
+            tap("plan.dispatch.confirm")
+            return
+        }
         tap("plan.dispatch.confirm")
         XCTAssertTrue(app.staticTexts["执行中"].waitForExistence(timeout: 10))
     }

@@ -131,16 +131,24 @@ class Handler(BaseHTTPRequestHandler):
             assert task["executor_type"] in ["ai", "collaboration"], task
             assert body.get("expected_task_revision", 0) > 0, body
             data = dict(body, id="job-ui", status="queued", revision=1, created_at=NOW, updated_at=NOW)
+            if body.get("not_before"):
+                data["not_before"] = body["not_before"]   # echoed back like Valley does
             state["jobs"]["job-ui"] = data
             state["dispatch_time"] = time.monotonic()
             state["plans"][body["plan_id"]].update(status="queued", revision=2)
         elif path == "/remote-jobs/job-ui":
             data = state["jobs"]["job-ui"]
+            elapsed = time.monotonic() - state["dispatch_time"]
             if data["status"] not in ["completed", "cancelled"]:
-                status_name = "running" if time.monotonic() - state["dispatch_time"] < 5 else "awaiting_review"
-                data.update(status=status_name, result_summary="本地测试执行完成", revision=3)
-                plan = state["plans"][data["plan_id"]]
-                plan.update(status=status_name, revision=max(plan["revision"], 3))
+                if data.get("not_before") and elapsed < 4:
+                    pass   # scheduled: stays queued with not_before until "due"
+                else:
+                    status_name = "running" if elapsed < 5 else "awaiting_review"
+                    data.update(status=status_name, result_summary="本地测试执行完成", revision=3)
+                    if status_name == "awaiting_review":
+                        data["output_tail"] = "$ pytest\n3 passed\n"
+                    plan = state["plans"][data["plan_id"]]
+                    plan.update(status=status_name, revision=max(plan["revision"], 3))
         elif path.startswith("/plans/") and path.endswith("/accept"):
             data = state["plans"][path.split("/")[2]]
             assert body.get("evidence_ids") == ["job-ui"], body

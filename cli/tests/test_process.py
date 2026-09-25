@@ -20,6 +20,22 @@ class ProcessTest(unittest.TestCase):
                               d, str(Path(d) / "run.log"), cancel_event=cancelled)
             self.assertFalse(marker.exists())
 
+    def test_secret_named_environment_never_reaches_the_model_process(self):
+        # The runner may be started from a shell holding deploy credentials;
+        # the model's tool calls must not be able to read (and echo) them.
+        from unittest.mock import patch
+        leak = {"GITHUB_TOKEN": "g", "AWS_SECRET_ACCESS_KEY": "a", "AWS_SESSION_TOKEN": "s",
+                "DB_PASSWORD": "p", "STRIPE_API_KEY": "k", "ALIBABA_CLOUD_ACCESS_KEY_SECRET": "x",
+                "GOOGLE_APPLICATION_CREDENTIALS": "/c.json", "NPM_TOKEN": "n"}
+        keep = {"KEJI_KEEP_ME": "1", "PATH": os.environ.get("PATH", ""), "SSH_AUTH_SOCK": "/tmp/agent"}
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, dict(leak, **keep)):
+            code, lines = run_streaming([sys.executable, "-c", "import os, json; print(json.dumps(sorted(os.environ)))"],
+                                        d, str(Path(d) / "run.log"), timeout=10)
+        import json
+        names = set(json.loads(lines[-1]))
+        self.assertFalse(names & set(leak), names & set(leak))
+        self.assertTrue(set(keep) <= names)
+
     def test_drains_stderr_without_deadlock(self):
         with tempfile.TemporaryDirectory() as d:
             log = str(Path(d) / "run.log")

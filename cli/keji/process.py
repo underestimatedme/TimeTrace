@@ -1,5 +1,6 @@
 """Safe subprocess streaming for long-running local AI tools."""
 import os
+import re
 import signal
 import subprocess
 import threading
@@ -10,6 +11,10 @@ from keji.dispatch import enforce_spawn_authority
 
 MAX_CAPTURED_LINES = 10_000
 MAX_LOG_BYTES = 10 * 1024 * 1024
+# Environment variables whose names say "credential" are removed from the AI
+# tool's environment: nothing the tool or `git commit` needs, and the model's
+# shell commands could otherwise read and echo them into uploaded output.
+SECRET_ENV_NAME = re.compile(r"(?i)(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY|CREDENTIAL)")
 
 
 def run_streaming(
@@ -22,7 +27,7 @@ def run_streaming(
     lines: List[str] = []
     run_env = dict(os.environ)
     for key in list(run_env):
-        if key.startswith("CLAUDE") or key in set(drop_env or ()):
+        if key.startswith("CLAUDE") or key in set(drop_env or ()) or SECRET_ENV_NAME.search(key):
             run_env.pop(key, None)
     if env:
         run_env.update(env)

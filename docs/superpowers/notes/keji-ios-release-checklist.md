@@ -42,9 +42,8 @@ App：刻迹 / TimeTrace（工程名仍为 KeJi）· bundle id `com.atlaspaces.t
 - [x] 动态字体、VoiceOver 标签已补齐
 - [x] 打包命令见 `ios/README.md`「TestFlight archive」，Team ID 只在命令行传入，未写进 `project.yml`
 - [x] `CURRENT_PROJECT_VERSION` 已递增到 `2026092504`（下次上传前再递增）
-- [ ] 真机验证（玻璃模糊叠层的性能、深色主题）
-- [ ] 与真实 Valley 联调（派发 / 验收 / 额度）。后端已上线；游客会话下 bootstrap / quota / preferences /
-      reset-signals / runners 已用 curl 验证返回 200。派发与验收需要一台绑定的 Mac 跑 Runner，尚未做
+- [x] 真机验证：0.1 核心流程五步中 1/2/3/5 通过，第 4 步定时触发通过、执行需在规则修复后再跑一次（见 `2026-09-25-keji-0-1-acceptance.md`）
+- [x] 与真实 Valley 联调：2026-09-25 真机配对、Codex / Claude Code 派发、验收、定时触发、离线感知均已在生产环境跑通
 
 ## 三、App 隐私问卷（App Store Connect → App 隐私）
 

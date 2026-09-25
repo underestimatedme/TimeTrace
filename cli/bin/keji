@@ -8,4 +8,5 @@ while [ -L "$SELF" ]; do
     case "$SELF" in /*) ;; *) SELF="$DIR/$SELF" ;; esac
 done
 HERE="$(cd "$(dirname "$SELF")/.." && pwd)"
-PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m keji "$@"
+# Unbuffered so the pairing code from `keji cloud login` appears at once, even when piped to a log.
+PYTHONUNBUFFERED=1 PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m keji "$@"

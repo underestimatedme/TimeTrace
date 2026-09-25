@@ -22,6 +22,14 @@ keji agent install                  # 安装并启动登录用户的 LaunchAgent
 
 Runner refresh token 存在 macOS 登录 Keychain（service `com.atlaspaces.keji.runner`）；access token 15 分钟轮换。每个远程任务仍进入独立 worktree，且 push 被禁用。电脑关机、休眠或未登录时，Valley 只保留排队任务，不会在云端接管本地代码或账号。
 
+## 远程任务的产出在哪里
+
+每个手机派发的任务都在 `~/.keji/worktrees/<id>/` 里的独立分支（`keji/<id>`）上执行并提交；主仓库的工作区不动，也不会推送。
+验收通过后要不要合并回主分支，目前需要你在电脑上自己 `git merge keji/<id>`（0.1 不做自动合并）。
+Codex 的 workspace-write 沙箱会额外放行主仓库的 `.git`（`--add-dir`），否则 worktree 里无法 `git commit`。
+
+`keji agent doctor` 会打印每个工具的套餐等级和实时额度，和手机「你的 AI」页应显示的一致，用来现场对照。
+
 ## 安装
 
 ```sh

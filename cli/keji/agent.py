@@ -21,6 +21,7 @@ from keji.dispatch import (DispatchDenied, DispatchGate, LockBusy, UnclearedOwne
 
 
 OUTPUT_TAIL_BYTES = 8000  # Valley accepts up to 8192
+OUTBOX_RETENTION_SECONDS = 7 * 24 * 3600  # acknowledged events kept for diagnosis
 
 
 def _default_pool_binding(provider: str):
@@ -142,7 +143,8 @@ class Agent:
             self.db.update_remote_claim(job_id, "reported")
             return "job %s → rejected (tool unavailable)" % job_id
         self.home.joinpath("logs").mkdir(parents=True, exist_ok=True)
-        log_file = str(self.home / "logs" / ("remote-%s.log" % job_id))
+        # The job id comes from the server: keep it from naming a path.
+        log_file = str(self.home / "logs" / ("remote-%s.log" % re.sub(r"[^A-Za-z0-9_-]", "_", str(job_id))))
 
         plan_key = job.get("plan_id") or job_id
         deadline = self._deadline(claim)
@@ -593,3 +595,5 @@ class Agent:
             self.cloud.append_events(self.access_token(), job, attempt, epoch,
                                      [row["payload"] for row in rows])
             self.db.mark_remote_events_sent([row["id"] for row in rows])
+        if batches:
+            self.db.prune_sent_remote_events(time.time() - OUTBOX_RETENTION_SECONDS)

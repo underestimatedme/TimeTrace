@@ -16,6 +16,20 @@ class DatabaseTest(unittest.TestCase):
         self.db.close()
         self.tmp.cleanup()
 
+    def test_sent_outbox_rows_are_pruned_after_the_retention_window(self):
+        # Output tails are not kept on disk longer than needed for retries.
+        self.db.queue_remote_event("j", "a", 1, {"seq": 1, "output_tail": "old"}, now=100)
+        self.db.queue_remote_event("j", "a", 1, {"seq": 2, "output_tail": "recent"}, now=100)
+        self.db.queue_remote_event("j", "a", 1, {"seq": 3, "output_tail": "unsent"}, now=100)
+        rows = self.db.pending_remote_events()
+        self.db.mark_remote_events_sent([rows[0]["id"]], now=1000)
+        self.db.mark_remote_events_sent([rows[1]["id"]], now=5000)
+        self.assertEqual(self.db.prune_sent_remote_events(before=2000), 1)
+        payloads = [r[0] for r in self.db.conn.execute("SELECT payload FROM remote_outbox").fetchall()]
+        self.assertEqual(len(payloads), 2)
+        self.assertFalse(any("old" in p for p in payloads))
+        self.assertEqual([r["seq"] for r in self.db.pending_remote_events()], [3])
+
     def test_add_task_states(self):
         a = self.db.add_task("first", "/repo")
         b = self.db.add_task("second", "/repo", depends_on=a)

@@ -640,6 +640,32 @@ class OutputTailTest(unittest.TestCase):
         failed = [e for e in cloud.events if e["type"] == "failed"][0]
         self.assertNotIn("abcdefghijklmnop0123456789", failed["message"])
 
+    def test_server_supplied_job_id_cannot_steer_the_log_path(self):
+        seen = {}
+
+        class Recording(Adapter):
+            def start(self, prompt, cwd, session_id, log_file, cancel_event=None):
+                seen["log"] = log_file
+                return RunResult(exit_code=0, ok=True, output="ok", session_id="s")
+
+        class OddCloud(FakeCloud):
+            def claim(self, token):
+                claim = super().claim(token)
+                claim["job"]["id"] = "../../evil/x"
+                return claim
+
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        db = Database(Path(d) / "keji.db")
+        repo = Path(d) / "repo"
+        init_repo(repo)
+        db.upsert_workspace("ws1", "repo", str(repo), "main")
+        agent = Agent(db, OddCloud(), {"codex": Recording()}, Path(d), lambda: "t",
+                      prepare_workspace=lambda repo, task_id, home, base: (repo, "keji/test"))
+        agent.run_once()
+        self.assertEqual(Path(seen["log"]).parent, Path(d) / "logs")
+        self.assertNotIn("..", Path(seen["log"]).name)
+
     def test_output_tail_can_be_switched_off(self):
         class Writing(Adapter):
             def start(self, prompt, cwd, session_id, log_file, cancel_event=None):

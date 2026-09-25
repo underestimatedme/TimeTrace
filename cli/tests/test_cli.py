@@ -274,6 +274,19 @@ class CliTest(unittest.TestCase):
                 self.assertEqual(code, 0, err)
                 self.assertIs(seen.get("upload_output_tail"), expected)
 
+    def test_launch_agent_plist_is_valid_even_with_xml_characters_in_paths(self):
+        import plistlib
+        calls = []
+        user_home = Path(self.tmp.name) / "R&D <home>"
+        destination = cli.install_launch_agent(user_home, run=lambda cmd, **kw: calls.append(cmd))
+        doc = plistlib.loads(destination.read_bytes())
+        self.assertEqual(doc["Label"], "com.keji.run")
+        self.assertEqual(doc["ProgramArguments"][1:], ["agent", "run"])
+        self.assertTrue(doc["ProgramArguments"][0].endswith("/bin/keji"))
+        self.assertEqual(doc["EnvironmentVariables"]["KEJI_HOME"], str(user_home / ".keji"))
+        self.assertEqual(destination, user_home / "Library" / "LaunchAgents" / "com.keji.run.plist")
+        self.assertEqual([c[:2] for c in calls], [["launchctl", "unload"], ["launchctl", "load"]])
+
     def test_add_then_ls(self):
         code, out, _ = self.run_cli("add", "fix things", "--repo", str(self.repo), "--tool", "claude",
                                     "--priority", "2")

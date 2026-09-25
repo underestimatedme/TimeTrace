@@ -192,6 +192,12 @@ class Database:
         self.conn.execute("UPDATE remote_outbox SET sent_at=? WHERE id IN (" + placeholders + ")",
                           [now or _now()] + list(event_ids))
 
+    def prune_sent_remote_events(self, before: int) -> int:
+        """Delete acknowledged events sent before `before` (epoch seconds).
+        Unsent rows are kept whatever their age: they still need delivery."""
+        cursor = self.conn.execute("DELETE FROM remote_outbox WHERE sent_at IS NOT NULL AND sent_at < ?", (int(before),))
+        return cursor.rowcount
+
     # ---- checkpoints ------------------------------------------------------
     def mark_plan_started(self, plan_id: str, job_id: str, attempt_id: str) -> None:
         """A durable tombstone: deleting a checkpoint must never grant a fresh

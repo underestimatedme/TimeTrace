@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import platform
+import plistlib
 import shutil
 import subprocess
 import sys
@@ -13,6 +14,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
+from xml.sax.saxutils import escape as xml_escape
 
 from keji import __version__, config, limits, qr, quota, render, scheduler, worktree
 from keji.agent import Agent
@@ -286,15 +288,26 @@ def _print_tool_quota(adapter) -> None:
         print("  额度: %s 剩余 %d%%%s" % (label, round(100 - s.used_pct), reset))
 
 
-def cmd_agent_install(args: argparse.Namespace) -> int:
+def install_launch_agent(user_home: Optional[Path] = None, run=subprocess.run) -> Path:
+    """Render launchd/com.keji.run.plist for this checkout and (re)load it."""
+    user_home = Path(user_home or Path.home())
     template = Path(__file__).resolve().parents[1] / "launchd" / "com.keji.run.plist"
-    destination = Path.home() / "Library" / "LaunchAgents" / "com.keji.run.plist"
+    destination = user_home / "Library" / "LaunchAgents" / "com.keji.run.plist"
     keji_bin = Path(__file__).resolve().parents[1] / "bin" / "keji"
-    rendered = template.read_text(encoding="utf-8").replace("__KEJI_BIN__", str(keji_bin)).replace("__HOME__", str(Path.home()))
+    # Paths are XML-escaped: a home such as "R&D" must not break the plist.
+    rendered = (template.read_text(encoding="utf-8")
+                .replace("__KEJI_BIN__", xml_escape(str(keji_bin)))
+                .replace("__HOME__", xml_escape(str(user_home))))
+    plistlib.loads(rendered.encode("utf-8"))  # refuse to install a broken file
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(rendered, encoding="utf-8")
-    subprocess.run(["launchctl", "unload", str(destination)], check=False, capture_output=True)
-    subprocess.run(["launchctl", "load", str(destination)], check=True)
+    run(["launchctl", "unload", str(destination)], check=False, capture_output=True)
+    run(["launchctl", "load", str(destination)], check=True)
+    return destination
+
+
+def cmd_agent_install(args: argparse.Namespace) -> int:
+    destination = install_launch_agent()
     print("Runner 已安装并启动：%s" % destination)
     return 0
 

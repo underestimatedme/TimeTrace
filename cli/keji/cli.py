@@ -57,12 +57,12 @@ def _acquire_execution_lock(home: Path):
     return lock_file
 
 
-def _pair_link(user_code: str, name: str) -> str:
-    """The keji://pair link shown as a QR code. Only the short user code and a
-    display name — never the device code or any token. The name is dropped
-    when it would not fit a version-6 QR code."""
+def _pair_link(user_code: str, name: str, expires_at: Optional[int] = None) -> str:
+    """The keji://pair link shown as a QR code. Only the short user code, a
+    display name and its expiry — never the device code or any token. The name
+    is dropped when it would not fit a version-6 QR code."""
     base = "keji://pair?code=%s" % quote(user_code, safe="")
-    tail = "&platform=darwin&v=1"
+    tail = ("&exp=%d" % expires_at if expires_at else "") + "&platform=darwin&v=1"
     with_name = "%s&name=%s%s" % (base, quote(name, safe=""), tail)
     try:
         qr.encode(with_name)
@@ -80,18 +80,36 @@ def _print_pair_qr(link: str, out=print) -> None:
         out("\x1b[97;40m%s\x1b[0m" % line if colour else line)
 
 
-def pair_computer(cfg: Dict[str, Any], db: Database, home: Path, out=print) -> int:
+def pair_computer(cfg: Dict[str, Any], db: Database, home: Path, out=print, max_rounds: int = 5) -> int:
     """Device-code pairing with the phone (QR code or typed code). Stores the
     runner credentials in the Keychain and reports inventory and quota."""
     cloud = _cloud(cfg)
     name = platform.node() or "Mac"
-    auth = cloud.create_device_authorization(name, "darwin", __version__)
-    out("用刻迹 iPhone App 的「你的 AI → 扫码绑定」扫描下方二维码（或用相机扫描）：")
-    out()
-    _print_pair_qr(_pair_link(auth["user_code"], name), out)
-    out()
-    out("扫不了码时，在「你的 AI → 绑定电脑」中输入：%s" % auth["user_code"])
-    out("授权码 %d 分钟内有效，正在等待确认…" % max(1, int(auth["expires_in"]) // 60))
+    for round_no in range(max_rounds):
+        auth = cloud.create_device_authorization(name, "darwin", __version__)
+        if round_no:
+            out()
+            out("上一个二维码已过期，已生成新的二维码：")
+        else:
+            out("用刻迹 iPhone App 的「你的 AI → 扫码绑定」扫描下方二维码（或用相机扫描）：")
+        out()
+        expires_in = int(auth["expires_in"])
+        _print_pair_qr(_pair_link(auth["user_code"], name, int(time.time()) + expires_in), out)
+        out()
+        out("扫不了码时，在「你的 AI → 绑定电脑」中输入：%s" % auth["user_code"])
+        out("授权码 %d 分钟内有效，正在等待确认…" % max(1, expires_in // 60))
+        result = _await_pairing(cloud, auth, cfg, db, home, out)
+        if result is not None:
+            return result
+    if out is print:
+        print("多次过期仍未完成绑定，请重新运行命令", file=sys.stderr)
+    else:
+        out("多次过期仍未完成绑定，请重新运行命令")
+    return 1
+
+
+def _await_pairing(cloud, auth, cfg, db, home, out) -> Optional[int]:
+    """Poll one authorization. Returns 0 once bound, None when it expired."""
     deadline = time.time() + int(auth["expires_in"])
     while time.time() < deadline:
         approval = cloud.poll_device_authorization(auth["device_code"])
@@ -112,13 +130,9 @@ def pair_computer(cfg: Dict[str, Any], db: Database, home: Path, out=print) -> i
                 out("绑定成功，但首次上报失败：%s（Runner 启动后会重试）" % exc.__class__.__name__)
             return 0
         if approval.get("status") == "expired":
-            break
+            return None
         time.sleep(max(1, int(auth.get("interval") or 5)))
-    if out is print:
-        print("配对已过期，请重新运行命令", file=sys.stderr)
-    else:
-        out("配对已过期，请重新运行命令")
-    return 1
+    return None
 
 
 def cmd_cloud_login(args: argparse.Namespace) -> int:

@@ -121,12 +121,20 @@ class CliTest(unittest.TestCase):
 
         with patch("keji.cloud.CloudClient.request", new=request), \
              patch("keji.cli.platform.node", return_value="Joey 的 Mac"), \
-             patch("keji.cli.time.sleep", return_value=None):
+             patch("keji.cli.time.sleep", return_value=None), \
+             patch("keji.cli.time.time", return_value=1790000000):
             code, out, _ = self.run_cli("cloud", "login")
-        self.assertEqual(code, 1)  # expired in this fake
+        self.assertEqual(code, 1)  # every code expires in this fake
         self.assertIn("ABCD1234", out)
         self.assertNotIn("secret-device-code", out)
-        qr_lines = [line for line in out.splitlines() if line and set(line) <= set("█▀▄ ")]
+        # Every expired round prints a fresh QR; decode the first block only.
+        qr_lines = []
+        for line in out.splitlines():
+            if line and set(line) <= set("█▀▄ "):
+                qr_lines.append(line)
+            elif qr_lines:
+                break
+        self.assertIn("上一个二维码已过期，已生成新的二维码", out)
         self.assertGreater(len(qr_lines), 10)
         # Unpack the half blocks (light drawn, dark blank) and strip the border.
         rows = []
@@ -141,7 +149,31 @@ class CliTest(unittest.TestCase):
         size = len(rows)
         matrix = [row[left:left + size] for row in rows]
         text, _, _ = decode(matrix)
-        self.assertEqual(text, "keji://pair?code=ABCD1234&name=Joey%20%E7%9A%84%20Mac&platform=darwin&v=1")
+        self.assertEqual(text, "keji://pair?code=ABCD1234&name=Joey%20%E7%9A%84%20Mac&exp=1790000600&platform=darwin&v=1")
+
+    def test_expired_code_is_replaced_automatically_until_approved(self):
+        issued = []
+
+        def request(client, method, path, body=None, token=None):
+            if path == "/device-authorizations":
+                code = "CODE%04d" % (len(issued) + 1)
+                issued.append(code)
+                return {"user_code": code, "device_code": "dev-%d" % len(issued), "expires_in": 120, "interval": 1}
+            if path == "/device-authorizations/token":
+                return {"status": "approved", "activation_code": "act"} if body["device_code"] == "dev-2" else {"status": "expired"}
+            if path == "/device-authorizations/activate":
+                return {"access_token": "t", "refresh_token": "r", "expires_in": 900, "runner": {"id": "r1", "name": "Mac"}}
+            return {}
+
+        with patch("keji.cloud.CloudClient.request", new=request), \
+             patch("keji.cli.CredentialStore.save", new=lambda self, creds: None), \
+             patch("keji.cli._adapters", return_value={}), \
+             patch("keji.cli.time.sleep", return_value=None):
+            code, out, _ = self.run_cli("cloud", "login")
+        self.assertEqual(code, 0)
+        self.assertEqual(issued, ["CODE0001", "CODE0002"])
+        self.assertIn("已过期，已生成新的二维码", out)
+        self.assertIn("2 分钟内有效", out)
 
     def test_pair_link_drops_the_name_when_it_would_not_fit_the_qr(self):
         link = cli._pair_link("ABCD1234", "很长的名字" * 20)

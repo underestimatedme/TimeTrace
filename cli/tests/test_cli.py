@@ -251,6 +251,29 @@ class CliTest(unittest.TestCase):
             code = cli.main(list(argv))
         return code, out.getvalue(), err.getvalue()
 
+    def test_agent_run_passes_the_output_tail_switch_to_the_agent(self):
+        for stored, expected in ((None, True), (False, False)):
+            with self.subTest(stored=stored):
+                self.home.mkdir(parents=True, exist_ok=True)
+                doc = {} if stored is None else {"upload_output_tail": stored}
+                (self.home / "config.json").write_text(json.dumps(doc))
+                seen = {}
+
+                class FakeAgent:
+                    def __init__(self, *args, **kwargs):
+                        seen.update(kwargs)
+
+                    def maintain(self, force=False):
+                        pass
+
+                    def run_once(self):
+                        return "idle"
+
+                with patch("keji.cli.Agent", FakeAgent), patch("keji.cli._adapters", return_value={}):
+                    code, _, err = self.run_cli("agent", "run", "--once")
+                self.assertEqual(code, 0, err)
+                self.assertIs(seen.get("upload_output_tail"), expected)
+
     def test_add_then_ls(self):
         code, out, _ = self.run_cli("add", "fix things", "--repo", str(self.repo), "--tool", "claude",
                                     "--priority", "2")

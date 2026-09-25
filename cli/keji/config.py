@@ -14,6 +14,10 @@ DEFAULTS: Dict[str, Any] = {
     "circuit_window_mins": 300,
     "allowed_repos": [],
     "hook_max_tasks": 5,
+    # Send the last ~8 KB of a remote run's log (secrets redacted) with the
+    # completed/failed event so the phone can show what happened. false keeps
+    # all run output on this computer.
+    "upload_output_tail": True,
     "claude": {
         "bin": "claude",
         "permission_mode": "acceptEdits",
@@ -73,3 +77,70 @@ def load(home_dir: Path = None) -> Dict[str, Any]:
 def ensure_dirs(home_dir: Path) -> None:
     for sub in ("", "logs", "inbox", "inbox/done", "inbox/rejected", "worktrees"):
         (home_dir / sub).mkdir(parents=True, exist_ok=True)
+    # Prompts, run logs, the outbox and worktrees live below: owner only.
+    os.chmod(home_dir, 0o700)
+
+
+# ---- `keji config get|set` -------------------------------------------------
+_TRUE = ("1", "true", "yes", "on")
+_FALSE = ("0", "false", "no", "off")
+
+
+def scalar_keys() -> Dict[str, Any]:
+    """Top-level keys that `keji config set` may write, with their defaults."""
+    return {key: value for key, value in DEFAULTS.items()
+            if isinstance(value, (bool, int, str))}
+
+
+def parse_value(key: str, raw: str) -> Any:
+    keys = scalar_keys()
+    if key not in keys:
+        raise ValueError("unknown or non-scalar key: %s (settable: %s)" % (key, ", ".join(sorted(keys))))
+    default = keys[key]
+    text = str(raw).strip()
+    if isinstance(default, bool):
+        if text.lower() in _TRUE:
+            return True
+        if text.lower() in _FALSE:
+            return False
+        raise ValueError("%s expects true or false, got %r" % (key, raw))
+    if isinstance(default, int):
+        try:
+            value = int(text)
+        except ValueError:
+            raise ValueError("%s expects a whole number, got %r" % (key, raw)) from None
+        if value < 0:
+            raise ValueError("%s must not be negative" % key)
+        return value
+    if key == "cloud_base_url":
+        from keji.cloud import check_base_url  # local: cloud must not import config
+        return check_base_url(text)
+    return text
+
+
+def format_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return "" if value is None else str(value)
+
+
+def set_value(home_dir: Path, key: str, raw: str) -> Any:
+    """Validate and write one top-level key into config.json (atomic, 0600)."""
+    value = parse_value(key, raw)
+    path = Path(home_dir) / "config.json"
+    doc: Dict[str, Any] = {}
+    if path.exists():
+        with open(path, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+        if not isinstance(doc, dict):
+            raise ValueError("config.json must contain a JSON object")
+    doc[key] = value
+    Path(home_dir).mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(".config.json.tmp")
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, ensure_ascii=False, indent=2)
+        fh.write("\n")
+    os.chmod(str(tmp), 0o600)
+    os.replace(str(tmp), str(path))
+    return value

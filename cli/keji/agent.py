@@ -13,10 +13,14 @@ from keji.cloud import CloudError
 from keji.db import Database
 from keji import quota, worktree
 from keji.process import tail_text
+from keji.redact import redact
 from keji.checkpoints import Checkpoint, checkpoint_problem
 from keji.dispatch import (DispatchDenied, DispatchGate, LockBusy, UnclearedOwner, adapter_capabilities,
                            adapter_zero_spend_verified, coding_slot_lock, deny_reason,
                            enforce_spawn_authority, spawn_authority, workspace_lock)
+
+
+OUTPUT_TAIL_BYTES = 8000  # Valley accepts up to 8192
 
 
 def _default_pool_binding(provider: str):
@@ -47,8 +51,11 @@ class Agent:
                  zero_spend_verified: Callable[[Any, Dict[str, Any]], bool] = _capability_zero_spend,
                  pool_binding: Callable[[str], Any] = _default_pool_binding,
                  inventory: Callable[[], Any] = None, quota_interval: float = 300,
-                 log: Callable[[str], None] = None, on_revoked: Callable[[], None] = None):
+                 log: Callable[[str], None] = None, on_revoked: Callable[[], None] = None,
+                 upload_output_tail: bool = True):
         self.db, self.cloud, self.adapters = db, cloud, adapters
+        # config `upload_output_tail`: false keeps run logs on this computer.
+        self.upload_output_tail = upload_output_tail
         self.home, self.access_token = Path(home), access_token
         self.prepare_workspace = prepare_workspace
         self.heartbeat_interval = heartbeat_interval
@@ -407,7 +414,7 @@ class Agent:
         if result.ok:
             self.db.delete_checkpoint(plan_key)
             event = {"seq": 2, "type": "completed", "message": "completed",
-                     "result_summary": (result.output or "completed")[:1000],
+                     "result_summary": redact(result.output or "completed")[:1000],
                      "output_tail": tail_text(log_file)}
             outcome = "awaiting_review"
         elif result.blocked:
@@ -429,11 +436,11 @@ class Agent:
             except Exception as exc:
                 return self._blocked(claim, plan_key, "checkpoint capture failed: %s" % exc, checkpoint, seq=2, observed_at=observed_end)
             outcome = "waiting_quota"
-            event = {"seq": 2, "type": outcome, "message": (result.error or "quota blocked")[:1000]}
+            event = {"seq": 2, "type": outcome, "message": redact(result.error or "quota blocked")[:1000]}
         else:
             self.db.delete_checkpoint(plan_key)
             outcome = "failed"
-            event = {"seq": 2, "type": outcome, "message": (result.error or "exit %s" % result.exit_code)[:1000],
+            event = {"seq": 2, "type": outcome, "message": redact(result.error or "exit %s" % result.exit_code)[:1000],
                      "output_tail": tail_text(log_file)}
         event["observed_at"] = observed_end
         self._report(claim, [event])
@@ -482,7 +489,7 @@ class Agent:
         for event in events:
             # Stamp the phase when observed, before durable enqueue. flush_outbox
             # replays this payload unchanged even after restart/network delay.
-            event = dict(event)
+            event = self._outbound(event)
             event.setdefault("observed_at", self._observed_now())
             self.db.queue_remote_event(claim["job"]["id"], claim["attempt_id"], claim["lease_epoch"], event)
         if not flush:
@@ -491,6 +498,26 @@ class Agent:
             self.flush_outbox()
         except Exception:
             pass
+
+    def _outbound(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """The only shape of an event that may leave this computer: secrets
+        masked in every free-text field, and no output tail when the user
+        switched uploads off. Applied before the durable enqueue, so the
+        outbox never stores what could not be sent."""
+        event = dict(event)
+        if not self.upload_output_tail:
+            event.pop("output_tail", None)
+        for key in ("message", "result_summary", "output_tail"):
+            if isinstance(event.get(key), str):
+                event[key] = redact(event[key])
+        tail = event.get("output_tail")
+        if isinstance(tail, str):
+            # Masks can be longer than what they hide; keep Valley's bound.
+            while len(tail.encode("utf-8")) > OUTPUT_TAIL_BYTES:
+                cut = tail.find("\n")
+                tail = tail[cut + 1:] if 0 <= cut < len(tail) - 1 else tail[len(tail) // 4 + 1:]
+            event["output_tail"] = tail
+        return event
 
     def _post_samples(self, provider: str, adapter: Any, samples: list, now: float = None) -> int:
         """Map local vendor readings to de-identified Valley samples and post

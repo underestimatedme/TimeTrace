@@ -599,6 +599,72 @@ class OutputTailTest(unittest.TestCase):
             self.assertEqual(failed["output_tail"], "boom\n")
 
 
+    def run_with(self, adapter, **agent_kwargs):
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        db = Database(Path(d) / "keji.db")
+        repo = Path(d) / "repo"
+        init_repo(repo)
+        db.upsert_workspace("ws1", "repo", str(repo), "main")
+        cloud = FakeCloud()
+        agent = Agent(db, cloud, {"codex": adapter}, Path(d), lambda: "t",
+                      prepare_workspace=lambda repo, task_id, home, base: (repo, "keji/test"), **agent_kwargs)
+        agent.run_once()
+        return cloud, db
+
+    def test_secrets_are_redacted_before_they_are_queued_or_uploaded(self):
+        secret = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+
+        class Leaky(Adapter):
+            def start(self, prompt, cwd, session_id, log_file, cancel_event=None):
+                Path(log_file).write_text("cat .env\nGITHUB_TOKEN=%s\nAPI_KEY=abc123def456\n" % secret)
+                return RunResult(exit_code=0, ok=True, output="used token %s" % secret, session_id="s")
+
+        cloud, db = self.run_with(Leaky())
+        completed = [e for e in cloud.events if e["type"] == "completed"][0]
+        self.assertNotIn(secret, json.dumps(cloud.events))
+        self.assertNotIn("abc123def456", completed["output_tail"])
+        self.assertIn("REDACTED", completed["output_tail"])
+        self.assertIn("REDACTED", completed["result_summary"])
+        stored = db.conn.execute("SELECT payload FROM remote_outbox").fetchall()
+        self.assertTrue(stored)
+        self.assertFalse(any(secret in row[0] for row in stored))
+
+    def test_failure_message_is_redacted(self):
+        class Failing(Adapter):
+            def start(self, prompt, cwd, session_id, log_file, cancel_event=None):
+                return RunResult(exit_code=1, ok=False, error="auth failed for Bearer abcdefghijklmnop0123456789",
+                                 session_id="s")
+
+        cloud, _ = self.run_with(Failing())
+        failed = [e for e in cloud.events if e["type"] == "failed"][0]
+        self.assertNotIn("abcdefghijklmnop0123456789", failed["message"])
+
+    def test_output_tail_can_be_switched_off(self):
+        class Writing(Adapter):
+            def start(self, prompt, cwd, session_id, log_file, cancel_event=None):
+                Path(log_file).write_text("private build output\n")
+                return RunResult(exit_code=0, ok=True, output="ok", session_id="s")
+
+        cloud, db = self.run_with(Writing(), upload_output_tail=False)
+        completed = [e for e in cloud.events if e["type"] == "completed"][0]
+        self.assertNotIn("output_tail", completed)
+        stored = db.conn.execute("SELECT payload FROM remote_outbox").fetchall()
+        self.assertFalse(any("private build output" in row[0] for row in stored))
+
+    def test_redacted_tail_stays_inside_the_upload_bound(self):
+        class Dense(Adapter):
+            def start(self, prompt, cwd, session_id, log_file, cancel_event=None):
+                # Short secrets grow when masked; the tail must still fit 8000 bytes.
+                Path(log_file).write_text("".join("pw%04d password=abc12%04d\n" % (i, i) for i in range(2000)))
+                return RunResult(exit_code=0, ok=True, output="ok", session_id="s")
+
+        cloud, _ = self.run_with(Dense())
+        completed = [e for e in cloud.events if e["type"] == "completed"][0]
+        self.assertLessEqual(len(completed["output_tail"].encode("utf-8")), 8000)
+        self.assertIn("password=[REDACTED]", completed["output_tail"])
+
+
 class MaintenanceLoggingTest(unittest.TestCase):
     def test_maintain_reports_counts_and_failures_to_the_log(self):
         class Cloud(FakeCloud):

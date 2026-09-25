@@ -222,7 +222,8 @@ def cmd_agent_run(args: argparse.Namespace) -> int:
 
     agent = Agent(db, cloud, adapters, home, token,
                   inventory=lambda: (_runner_workspaces(db), _runner_tools(cfg, adapters)),
-                  log=_log, on_revoked=revoked)
+                  log=_log, on_revoked=revoked,
+                  upload_output_tail=bool(cfg.get("upload_output_tail", True)))
     # Startup upkeep pushes the inventory once and reports quota right away.
     agent.maintain(force=True)
     if args.once:
@@ -295,6 +296,29 @@ def cmd_agent_install(args: argparse.Namespace) -> int:
     subprocess.run(["launchctl", "unload", str(destination)], check=False, capture_output=True)
     subprocess.run(["launchctl", "load", str(destination)], check=True)
     print("Runner 已安装并启动：%s" % destination)
+    return 0
+
+
+def cmd_config(args: argparse.Namespace) -> int:
+    home = config.home()
+    try:
+        if args.config_cmd == "list":
+            cfg = config.load(home)
+            for key in sorted(config.scalar_keys()):
+                print("%s = %s" % (key, config.format_value(cfg.get(key))))
+            return 0
+        if args.config_cmd == "get":
+            if args.key not in config.scalar_keys():
+                config.parse_value(args.key, "")  # raises with the list of keys
+            print(config.format_value(config.load(home).get(args.key)))
+            return 0
+        value = config.set_value(home, args.key, args.value)
+    except ValueError as exc:
+        print("error: %s" % exc, file=sys.stderr)
+        return 2
+    print("%s = %s  (%s)" % (args.key, config.format_value(value), home / "config.json"))
+    if args.key in ("cloud_base_url", "upload_output_tail", "interval_sec"):
+        print("restart the Runner to apply: launchctl kickstart -k gui/%d/com.keji.run" % os.getuid())
     return 0
 
 
@@ -609,6 +633,17 @@ def build_parser() -> argparse.ArgumentParser:
     wr = workspace_sub.add_parser("remove")
     wr.add_argument("id")
     wr.set_defaults(fn=cmd_workspace_remove)
+
+    conf = sub.add_parser("config", help="read or change ~/.keji/config.json")
+    conf_sub = conf.add_subparsers(dest="config_cmd", required=True)
+    conf_sub.add_parser("list", help="show every settable key").set_defaults(fn=cmd_config)
+    cg = conf_sub.add_parser("get", help="print a key's effective value")
+    cg.add_argument("key")
+    cg.set_defaults(fn=cmd_config)
+    cs = conf_sub.add_parser("set", help="write a top-level scalar key")
+    cs.add_argument("key")
+    cs.add_argument("value")
+    cs.set_defaults(fn=cmd_config)
 
     agent = sub.add_parser("agent", help="run the Valley-connected local executor")
     agent_sub = agent.add_subparsers(dest="agent_cmd", required=True)

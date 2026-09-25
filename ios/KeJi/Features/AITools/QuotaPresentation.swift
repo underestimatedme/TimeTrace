@@ -29,12 +29,30 @@ extension QuotaWindow {
 
     var displayLabel: String { quotaLabel(remaining: remainingPercent, fresh: isFresh()) }
 
-    var scopeLabel: String {
+    enum Bucket { case short, weekly, monthly, other }
+
+    /// 窗口按时长归类；厂商的槽位名（primary / secondary）不说明窗口长短，
+    /// Codex 的 prolite 套餐就只有一个放在 primary 里的 7 天窗。
+    var bucket: Bucket {
+        if windowMins > 0 {
+            if windowMins <= 300 { return .short }
+            if windowMins <= 7 * 24 * 60 { return .weekly }
+            return .monthly
+        }
         switch scope {
-        case "short", "five_hour", "primary": return "短时"
-        case "weekly", "week", "seven_day", "secondary": return "本周"
-        case "monthly", "month": return "本月"
-        default: return scope
+        case "short", "five_hour", "primary": return .short
+        case "weekly", "week", "seven_day", "secondary": return .weekly
+        case "monthly", "month": return .monthly
+        default: return .other
+        }
+    }
+
+    var scopeLabel: String {
+        switch bucket {
+        case .short: return "短时"
+        case .weekly: return "本周"
+        case .monthly: return "本月"
+        case .other: return scope
         }
     }
 
@@ -42,10 +60,12 @@ extension QuotaWindow {
     func resetText(now: Date = Date()) -> String? {
         resetAt.map { Format.resetMoment($0, now: now) + " 重置" }
     }
-}
 
-private let shortScopes: Set<String> = ["short", "five_hour", "primary"]
-private let weeklyScopes: Set<String> = ["weekly", "week", "seven_day", "secondary"]
+    /// 与工具同名的主限额（如 `codex:codex`）优先于备用限额（如 `codex:base_model_inference`）。
+    func isMainLimit(of provider: String) -> Bool {
+        limitId.isEmpty || limitId == provider || limitId == "\(provider):\(provider)" || limitId.hasSuffix(":\(provider)")
+    }
+}
 
 /// 一个额度池在 AI 页上的呈现：短时窗口做主数值，周窗口做副行。
 /// 读数过期只说「待核验」，没有读数只说「未知」——都不画进度条。
@@ -68,9 +88,11 @@ struct ToolQuotaCard: Identifiable, Equatable {
         availability = availabilityLabel(pool.availability)
         tier = pool.planTier.isEmpty ? "套餐未知" : "套餐 " + pool.planTier.prefix(1).uppercased() + pool.planTier.dropFirst()
 
-        let short = pool.windows.first { shortScopes.contains($0.scope) }
-        let weekly = pool.windows.first { weeklyScopes.contains($0.scope) }
-        let headlineWindow = short ?? pool.windows.first
+        // 同一类窗口有多条时先取主限额。
+        let ordered = pool.windows.sorted { $0.isMainLimit(of: pool.provider) && !$1.isMainLimit(of: pool.provider) }
+        let short = ordered.first { $0.bucket == .short }
+        let weekly = ordered.first { $0.bucket == .weekly }
+        let headlineWindow = short ?? weekly ?? ordered.first
         headline = headlineWindow?.displayLabel ?? "未知"
         meterPercent = headlineWindow.flatMap { $0.isFresh(now: now) ? $0.remainingPercent : nil }
 
@@ -83,8 +105,9 @@ struct ToolQuotaCard: Identifiable, Equatable {
             detail = "账号额度：\(availabilityLabel(pool.availability))"
         }
 
-        if let observed = headlineWindow?.observedAt {
-            footnote = "\(headlineWindow?.scopeLabel ?? "")窗口 · \(Format.time(observed)) 更新"
+        if let headlineWindow {
+            let reset = headlineWindow.resetText(now: now).map { $0 + " · " } ?? ""
+            footnote = "\(headlineWindow.scopeLabel)窗口 · \(reset)\(Format.time(headlineWindow.observedAt)) 更新"
         } else {
             footnote = "尚无采样"
         }

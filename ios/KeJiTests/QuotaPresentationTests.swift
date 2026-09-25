@@ -54,6 +54,37 @@ final class QuotaPresentationTests: XCTestCase {
         XCTAssertEqual(Format.resetMoment(now.addingTimeInterval(10 * 86400), now: now), "10月5日 09:00")
     }
 
+    /// 窗口按时长分类：Codex 只有一个 10080 分钟的 primary 窗时，它就是本周窗，
+    /// 主数值用它，脚注带它的重置时刻。
+    func testSingleWeeklyPrimaryWindowIsTreatedAsWeekly() {
+        let now = Date()
+        var weekly = win("pool-codex", "primary", used: 11, fresh: true, now: now)
+        weekly.windowMins = 10080
+        weekly.resetAt = now.addingTimeInterval(5 * 86400)
+        XCTAssertEqual(weekly.scopeLabel, "本周")
+        let card = ToolQuotaCard(pool: AccountQuotaPool(poolId: "pool-codex", provider: "codex", availability: "available",
+                                                        windows: [weekly], planTier: "prolite"), now: now)
+        XCTAssertEqual(card.headline, "89%")
+        XCTAssertTrue(card.footnote.hasPrefix("本周窗口 · "), card.footnote)
+        XCTAssertTrue(card.footnote.contains(" 重置 · "), card.footnote)
+        XCTAssertEqual(card.tier, "套餐 Prolite")
+    }
+
+    /// 同一 scope 下有多个限额时，优先显示与工具同名的主限额，不显示备用限额。
+    func testWeeklyLinePrefersTheToolsMainLimit() {
+        let now = Date()
+        var reserve = win("pool-codex", "weekly", used: 0, fresh: true, now: now)
+        reserve.limitId = "codex:base_model_inference"; reserve.windowMins = 10080
+        var main = win("pool-codex", "weekly", used: 40, fresh: true, now: now)
+        main.limitId = "codex:codex"; main.windowMins = 10080
+        var short = win("pool-codex", "short", used: 20, fresh: true, now: now)
+        short.limitId = "codex:codex"; short.windowMins = 300
+        let card = ToolQuotaCard(pool: AccountQuotaPool(poolId: "pool-codex", provider: "codex", availability: "available",
+                                                        windows: [reserve, main, short]), now: now)
+        XCTAssertEqual(card.headline, "80%")
+        XCTAssertTrue(card.detail.hasPrefix("周额度剩余 60%"), card.detail)
+    }
+
     /// 卡片显示套餐等级，周额度副行带绝对重置时刻。
     func testToolCardShowsTierAndWeeklyResetMoment() {
         let now = Date()

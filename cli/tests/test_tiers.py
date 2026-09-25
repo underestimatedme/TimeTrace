@@ -46,3 +46,25 @@ class TierTest(unittest.TestCase):
             p = Path(d) / ".credentials.json"
             p.write_text(json.dumps({"claudeAiOauth": {"accessToken": "sk-ant-secret", "subscriptionType": " Max "}}))
             self.assertEqual(tiers.claude_plan_tier(p), "max")
+
+
+class AccountKeyTest(unittest.TestCase):
+    def test_codex_account_key_is_an_opaque_digest(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "auth.json"
+            p.write_text(json.dumps({"tokens": {"account_id": "aece85c3-d92e-4f53"}}))
+            key = tiers.codex_account_key(p)
+            self.assertEqual(len(key), 8)
+            self.assertNotIn("aece", key)
+            self.assertEqual(key, tiers.codex_account_key(p))
+            self.assertIsNone(tiers.codex_account_key(Path(d) / "none.json"))
+
+    def test_claude_account_key_from_claude_json(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / ".claude.json"
+            p.write_text(json.dumps({"oauthAccount": {"accountUuid": "u-1", "emailAddress": "a@b.c"}}))
+            self.assertEqual(len(tiers.claude_account_key(p)), 8)
+            other = Path(d) / "other.json"
+            other.write_text(json.dumps({"oauthAccount": {"accountUuid": "u-2"}}))
+            self.assertNotEqual(tiers.claude_account_key(p), tiers.claude_account_key(other))
+

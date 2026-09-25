@@ -169,6 +169,22 @@ class CliTest(unittest.TestCase):
         self.assertIn("短时 剩余 49%", out)
         self.assertIn("本周 剩余 27%", out)
 
+    def test_cloud_logout_revokes_on_the_server_before_forgetting(self):
+        calls, deleted = [], []
+
+        def request(client, method, path, body=None, token=None):
+            calls.append((method, path, token))
+            return {}
+
+        with patch("keji.cli.CredentialStore.load", return_value={"refresh_token": "r", "runner": {"id": "r1"}}), \
+             patch("keji.cli.CredentialStore.delete", new=lambda self: deleted.append(True)), \
+             patch("keji.cli.SessionManager.token", return_value="live-token"), \
+             patch("keji.cloud.CloudClient.request", new=request):
+            code, out, err = self.run_cli("cloud", "logout")
+        self.assertEqual(code, 0, err)
+        self.assertIn(("POST", "/runner/revoke", "live-token"), calls)
+        self.assertEqual(deleted, [True])
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)

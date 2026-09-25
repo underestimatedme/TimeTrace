@@ -134,6 +134,9 @@ class ClaudeAdapter(ToolAdapter):
     def plan_tier(self) -> Optional[str]:
         return tiers.claude_plan_tier(self.credentials_path())
 
+    def account_key(self) -> Optional[str]:
+        return tiers.claude_account_key(Path(self.cfg.get("claude_json_path") or Path.home() / ".claude.json"))
+
     def read_limits(self) -> Optional[List[Sample]]:
         """On-demand read through the OAuth usage endpoint; None when the local
         login is missing, expired, or the endpoint refuses."""

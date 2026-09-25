@@ -4,6 +4,7 @@ Only the tier string leaves this module. Tokens are parsed for one claim and
 discarded; nothing here logs, returns, or raises with credential material.
 """
 import base64
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -77,3 +78,29 @@ def codex_plan_tier(auth_path: Path) -> Optional[str]:
 def claude_plan_tier(credentials_path: Path, keychain: Callable[[], Optional[str]] = keychain_secret) -> Optional[str]:
     """`subscriptionType` from Claude Code's credentials (file, then Keychain)."""
     return _clean(claude_oauth(credentials_path, keychain).get("subscriptionType"))
+
+
+def _digest(value: Any) -> Optional[str]:
+    text = str(value or "").strip()
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:8] if text else None
+
+
+def codex_account_key(auth_path: Path) -> Optional[str]:
+    """Opaque 8-hex digest of the ChatGPT account the Codex login uses. Two
+    computers on one account share a quota pool; different accounts do not."""
+    tokens = _load(auth_path).get("tokens") or {}
+    if not isinstance(tokens, dict):
+        return None
+    account = tokens.get("account_id")
+    if not account:
+        claims = _jwt_claims(str(tokens.get("id_token") or ""))
+        auth = claims.get("https://api.openai.com/auth") or {}
+        account = auth.get("chatgpt_account_id") if isinstance(auth, dict) else None
+    return _digest(account)
+
+
+def claude_account_key(claude_json: Path) -> Optional[str]:
+    """Opaque digest of the Claude account (`oauthAccount.accountUuid` in ~/.claude.json)."""
+    account = _load(claude_json).get("oauthAccount") or {}
+    return _digest(account.get("accountUuid")) if isinstance(account, dict) else None
+

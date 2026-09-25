@@ -187,9 +187,14 @@ class CodexAdapter(ToolAdapter):
         resp = app_server_request(self.cfg.get("bin", "codex"), "account/rateLimits/read")
         return parse_rate_limits(resp)
 
+    def _auth_path(self) -> Path:
+        return Path(self.cfg.get("auth_path") or Path.home() / ".codex" / "auth.json")
+
     def plan_tier(self) -> Optional[str]:
-        path = self.cfg.get("auth_path") or Path.home() / ".codex" / "auth.json"
-        return tiers.codex_plan_tier(Path(path))
+        return tiers.codex_plan_tier(self._auth_path())
+
+    def account_key(self) -> Optional[str]:
+        return tiers.codex_account_key(self._auth_path())
 
     @staticmethod
     def _writable_extras(cwd: str) -> List[str]:

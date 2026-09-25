@@ -97,7 +97,16 @@ def cmd_cloud_status(args: argparse.Namespace) -> int:
 
 
 def cmd_cloud_logout(args: argparse.Namespace) -> int:
-    CredentialStore().delete()
+    _, cfg, _ = _open(args)
+    store = CredentialStore()
+    if store.load():
+        cloud = _cloud(cfg)
+        try:
+            cloud.request("POST", "/runner/revoke", None, SessionManager(store, cloud).token())
+            print("已在刻迹账号中解绑这台电脑")
+        except Exception as exc:
+            print("服务端解绑失败（%s），请在手机「设备与授权」里再解绑一次" % exc.__class__.__name__)
+    store.delete()
     print("本机 Runner 凭据已从 Keychain 删除")
     return 0
 
@@ -168,10 +177,23 @@ def cmd_agent_run(args: argparse.Namespace) -> int:
         print("error: another keji agent is already running", file=sys.stderr)
         return 1
     cloud = _cloud(cfg)
-    sessions = SessionManager(CredentialStore(), cloud)
+    state = {"sessions": SessionManager(CredentialStore(), cloud)}
     adapters = _adapters(cfg)
-    agent = Agent(db, cloud, adapters, home, sessions.token,
-                  inventory=lambda: (_runner_workspaces(db), _runner_tools(cfg, adapters)))
+
+    def token() -> str:
+        # Reload after an unbind so a later `keji cloud login` is picked up
+        # without restarting the LaunchAgent.
+        if getattr(state["sessions"], "credentials", "loaded") is None:
+            state["sessions"] = SessionManager(CredentialStore(), cloud)
+        return state["sessions"].token()
+
+    def revoked() -> None:
+        CredentialStore().delete()
+        state["sessions"].credentials = None
+
+    agent = Agent(db, cloud, adapters, home, token,
+                  inventory=lambda: (_runner_workspaces(db), _runner_tools(cfg, adapters)),
+                  log=_log, on_revoked=revoked)
     # Startup upkeep pushes the inventory once and reports quota right away.
     agent.maintain(force=True)
     if args.once:

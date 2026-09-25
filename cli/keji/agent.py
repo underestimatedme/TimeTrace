@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pathlib import Path
 from typing import Any, Callable, Dict
 
+from keji.cloud import CloudError
 from keji.db import Database
 from keji import quota, worktree
 from keji.process import tail_text
@@ -46,7 +47,7 @@ class Agent:
                  zero_spend_verified: Callable[[Any, Dict[str, Any]], bool] = _capability_zero_spend,
                  pool_binding: Callable[[str], Any] = _default_pool_binding,
                  inventory: Callable[[], Any] = None, quota_interval: float = 300,
-                 log: Callable[[str], None] = None):
+                 log: Callable[[str], None] = None, on_revoked: Callable[[], None] = None):
         self.db, self.cloud, self.adapters = db, cloud, adapters
         self.home, self.access_token = Path(home), access_token
         self.prepare_workspace = prepare_workspace
@@ -63,6 +64,9 @@ class Agent:
         # One line per upkeep round so a silent None from an adapter is visible
         # in daemon.log; never includes tokens or exception text with paths.
         self.log = log or (lambda message: None)
+        # Called once when Valley says this computer's binding was revoked
+        # (unbound from the phone): the caller forgets the local credentials.
+        self._on_revoked = on_revoked or (lambda: None)
 
     def maintain(self, now: float = None, force: bool = False) -> None:
         now = now if now is not None else time.time()
@@ -90,9 +94,20 @@ class Agent:
                 self.log("inventory push failed: %s" % exc.__class__.__name__)
 
     def run_once(self) -> str:
-        self.flush_outbox()
-        token = self.access_token()
-        claim = self.cloud.claim(token)
+        try:
+            self.flush_outbox()
+            token = self.access_token()
+            claim = self.cloud.claim(token)
+        except CloudError as exc:
+            if exc.status == 401:
+                self._on_revoked()
+                self.log("此电脑已在手机上解绑（或授权失效）；本机凭据已清除。重新运行 `keji cloud login` 即可再次绑定。")
+                return "revoked"
+            raise
+        except RuntimeError as exc:
+            if "not paired" in str(exc):
+                return "unpaired"
+            raise
         if not claim:
             return "idle"
         job = claim["job"]
@@ -429,6 +444,11 @@ class Agent:
             try:
                 outcome = self.run_once()
                 backoff = interval
+                if outcome in ("revoked", "unpaired"):
+                    # Wait for `keji cloud login`; the access_token callable
+                    # picks up new credentials without restarting the service.
+                    time.sleep(60)
+                    continue
                 if "; manual recovery required " in outcome:
                     # Job IDs may change on every claim; deduplicate the actual
                     # lock diagnostic so a persistent fence is visible once.
@@ -473,6 +493,16 @@ class Agent:
         now = now if now is not None else time.time()
         binding = self._pool_binding(provider)
         pool_id, profile_id = binding[:2]
+        # One pool per tool account: the same account on two computers is one
+        # card, two accounts are two. The key is an opaque digest.
+        key = None
+        if hasattr(adapter, "account_key"):
+            try:
+                key = adapter.account_key()
+            except Exception:
+                key = None
+        if key and pool_id == "pool-" + provider:
+            pool_id = "%s-%s" % (pool_id, key)
         # Two-field legacy/display bindings remain non-authoritative. Only an
         # explicitly verified third flag can identify the authenticated pool.
         authoritative = len(binding) == 3 and binding[2] is True

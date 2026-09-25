@@ -620,6 +620,42 @@ class MaintenanceLoggingTest(unittest.TestCase):
         self.assertFalse(any("valley unreachable" in l and "t" == l for l in lines))
 
 
+class AccountPoolTest(unittest.TestCase):
+    def test_pool_id_follows_the_tool_account(self):
+        class Keyed(Adapter):
+            def account_key(self):
+                return "ab12cd34"
+
+            def read_limits(self):
+                return [Sample(bucket_key="codex:codex:primary", tool="codex", used_pct=5.0, reset_at=2000, window_mins=10080)]
+
+        with tempfile.TemporaryDirectory() as d:
+            cloud = FakeCloud()
+            Agent(Database(Path(d) / "keji.db"), cloud, {"codex": Keyed()}, Path(d), lambda: "t").report_quota(now=1000.0)
+            self.assertEqual(cloud.quota_posts[0][1][0]["pool_id"], "pool-codex-ab12cd34")
+            self.assertEqual(cloud.quota_posts[0][1][0]["profile_id"], "codex-default")
+
+
+class RevokedRunnerTest(unittest.TestCase):
+    def test_revoked_credentials_are_cleared_and_the_loop_waits_for_repairing(self):
+        from keji.cloud import CloudError
+        cleared, lines = [], []
+
+        class Cloud(FakeCloud):
+            def claim(self, token):
+                raise CloudError("authentication required", 401, 40100)
+
+        def token():
+            raise CloudError("authentication required", 401, 40100)
+
+        with tempfile.TemporaryDirectory() as d:
+            agent = Agent(Database(Path(d) / "keji.db"), Cloud(), {}, Path(d), token,
+                          on_revoked=lambda: cleared.append(True), log=lines.append)
+            self.assertEqual(agent.run_once(), "revoked")
+        self.assertEqual(cleared, [True])
+        self.assertTrue(any("解绑" in l for l in lines), lines)
+
+
 class RecoveryFenceTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

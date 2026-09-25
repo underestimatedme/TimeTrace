@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from keji import tiers
+from keji.cloud import no_redirect_opener, read_bounded
 from keji.models import CLAUDE, Sample
 
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
@@ -65,7 +66,9 @@ def usage_samples(oauth: Dict[str, Any], opener: Optional[Callable] = None,
                   now: Optional[float] = None) -> Optional[List[Sample]]:
     """Samples for an already-loaded `claudeAiOauth` object (see tiers.claude_oauth).
     `opener` is resolved at call time so tests can patch urllib."""
-    opener = opener or urllib.request.urlopen
+    # No redirects: urllib would replay a normal Authorization header to
+    # wherever a 3xx points.
+    opener = opener or no_redirect_opener()
     token = str((oauth or {}).get("accessToken") or "")
     if not token:
         return None
@@ -77,13 +80,13 @@ def usage_samples(oauth: Dict[str, Any], opener: Optional[Callable] = None,
         except (TypeError, ValueError):
             pass
     request = urllib.request.Request(USAGE_URL)
-    request.add_header("Authorization", "Bearer " + token)
+    request.add_unredirected_header("Authorization", "Bearer " + token)
     request.add_header("anthropic-beta", "oauth-2025-04-20")
     request.add_header("Accept", "application/json")
     request.add_header("User-Agent", "keji-runner")
     try:
         with opener(request, timeout=15) as response:
-            doc = json.loads(response.read().decode("utf-8"))
+            doc = json.loads(read_bounded(response, 256 * 1024).decode("utf-8"))
     except (urllib.error.URLError, OSError, ValueError, AttributeError):
         return None
     samples: List[Sample] = []

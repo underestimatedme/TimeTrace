@@ -9,7 +9,7 @@ class Response:
         self.status = status
         self.body = json.dumps(body).encode()
 
-    def read(self):
+    def read(self, n=-1):
         return self.body
 
     def __enter__(self):
@@ -66,6 +66,82 @@ class CloudClientTest(unittest.TestCase):
         raw = seen[0].data.decode()
         for leak in ("secrettoken", "refresh", "@"):
             self.assertNotIn(leak, raw)
+
+
+class CloudTransportHardeningTest(unittest.TestCase):
+    def test_refuses_plain_http_except_loopback(self):
+        # Bearer and refresh tokens travel on every call.
+        for url in ("http://valley.example/api", "ftp://x", "file:///etc/passwd", "valley.example", ""):
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                CloudClient(url)
+        for url in ("https://valley.example/api/v1", "http://127.0.0.1:8080/api", "http://localhost:9/api",
+                    "http://[::1]:8080/api"):
+            with self.subTest(url=url):
+                CloudClient(url)
+
+    def test_oversized_response_is_rejected_without_reading_it_all(self):
+        class Huge:
+            status = 200
+            asked = []
+
+            def read(self, n=-1):
+                self.asked.append(n)
+                return b"x" * (n if n and n > 0 else 50 * 1024 * 1024)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        huge = Huge()
+        client = CloudClient("https://v", opener=lambda req, timeout: huge)
+        with self.assertRaises(CloudError):
+            client.request("GET", "/x")
+        self.assertTrue(huge.asked and all(0 < n <= 1024 * 1024 + 1 for n in huge.asked), huge.asked)
+
+    def test_path_parameters_from_the_server_are_escaped(self):
+        seen = []
+        client = CloudClient("https://v", opener=lambda req, timeout: (seen.append(req) or Response(200, {"code": 0, "data": {}})))
+        client.renew("token", "../../device-authorizations?x=1", 3)
+        self.assertTrue(seen[0].full_url.startswith("https://v/runner/attempts/"), seen[0].full_url)
+        self.assertNotIn("/../", seen[0].full_url)
+        self.assertNotIn("?", seen[0].full_url)
+
+    def test_default_client_does_not_follow_redirects_with_the_token(self):
+        import http.server
+        import threading
+        hits = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                hits.append((self.path, self.headers.get("Authorization")))
+                if self.path.startswith("/api"):
+                    self.send_response(307)
+                    self.send_header("Location", "http://127.0.0.1:%d/stolen" % self.server.server_port)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                body = json.dumps({"code": 0, "data": {}}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            client = CloudClient("http://127.0.0.1:%d/api" % server.server_port, timeout=5)
+            with self.assertRaises(CloudError):
+                client.request("POST", "/runner/jobs/claim", {"wait_seconds": 0}, token="secret-token")
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertEqual([h[0] for h in hits], ["/api/runner/jobs/claim"])
 
 
 if __name__ == "__main__":

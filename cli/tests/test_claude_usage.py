@@ -46,6 +46,27 @@ class ClaudeUsageTest(unittest.TestCase):
         self.assertTrue(all(s.source == "live" for s in samples))
         self.assertTrue(by_key["claude:five_hour"].is_representative)
 
+    def test_oversized_body_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            samples = claude_usage.read_usage(self.creds(d), opener=lambda r, timeout=0: FakeResponse(
+                b'{"five_hour": {"utilization": 1}' + b" " * (2 * 1024 * 1024) + b"}"),
+                                              now=1000, keychain=lambda: None)
+        self.assertIsNone(samples)
+
+    def test_default_opener_refuses_redirects_and_keeps_the_token_unredirected(self):
+        seen = {}
+
+        def opener(request, timeout=0):
+            seen["request"] = request
+            return FakeResponse(b"{}")
+
+        with unittest.mock.patch("keji.adapters.claude_usage.no_redirect_opener", return_value=opener):
+            with tempfile.TemporaryDirectory() as d:
+                claude_usage.read_usage(self.creds(d), now=1000, keychain=lambda: None)
+        request = seen["request"]
+        self.assertNotIn("Authorization", request.headers)
+        self.assertEqual(request.unredirected_hdrs.get("Authorization"), "Bearer tok-secret")
+
     def test_token_from_keychain_when_file_is_absent(self):
         secret = json.dumps({"claudeAiOauth": {"accessToken": "kc-secret", "expiresAt": 4102444800000}})
         seen = {}
@@ -90,8 +111,8 @@ class ClaudeAdapterQuotaTest(unittest.TestCase):
                 "seven_day": {"utilization": 60.0, "resets_at": "2026-09-25T20:00:00.128114+00:00"}}
         adapter = ClaudeAdapter({}, billing=StaticBilling(True, "test"),
                                 credentials=lambda: {"accessToken": "tok", "expiresAt": 4102444800000})
-        with unittest.mock.patch("keji.adapters.claude_usage.urllib.request.urlopen",
-                                 lambda request, timeout=0: FakeResponse(json.dumps(body).encode())):
+        with unittest.mock.patch("keji.adapters.claude_usage.no_redirect_opener",
+                                 lambda: (lambda request, timeout=0: FakeResponse(json.dumps(body).encode()))):
             samples = adapter.read_limits()
         self.assertEqual([(s.bucket_key, s.used_pct) for s in samples],
                          [("claude:five_hour", 41.0), ("claude:seven_day", 60.0)])

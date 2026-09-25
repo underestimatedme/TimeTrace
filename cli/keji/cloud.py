@@ -1,8 +1,18 @@
-"""Small Valley HTTP client using only the Python standard library."""
+"""Small Valley HTTP client using only the Python standard library.
+
+Transport rules: https only (plain http is accepted for loopback test
+servers), certificate verification by the default SSL context, no redirects
+(urllib would replay the Authorization header to the new location), a
+timeout on every call and a bounded response size."""
+import ipaddress
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any, Callable, Dict, Optional
+
+MAX_RESPONSE_BYTES = 1024 * 1024
+LOOPBACK_HOSTS = ("localhost",)
 
 
 class CloudError(RuntimeError):
@@ -12,10 +22,49 @@ class CloudError(RuntimeError):
         self.code = code
 
 
+class _RefuseRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, "redirect refused: %s" % msg, headers, fp)
+
+
+def no_redirect_opener() -> Callable:
+    """urlopen-compatible callable that treats any 3xx as an error."""
+    return urllib.request.build_opener(_RefuseRedirect()).open
+
+
+def read_bounded(stream: Any, limit: int = MAX_RESPONSE_BYTES) -> bytes:
+    """At most `limit` bytes; anything longer is an error, not a truncation."""
+    data = stream.read(limit + 1) if stream is not None else b""
+    if len(data or b"") > limit:
+        raise ValueError("response larger than %d bytes" % limit)
+    return data or b""
+
+
+def check_base_url(base_url: str) -> str:
+    parts = urllib.parse.urlsplit(base_url or "")
+    host = (parts.hostname or "").lower()
+    if not host:
+        raise ValueError("cloud_base_url must be an absolute https URL: %r" % base_url)
+    if parts.scheme == "https":
+        return base_url
+    if parts.scheme == "http":
+        try:
+            loopback = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            loopback = host in LOOPBACK_HOSTS
+        if loopback:
+            return base_url
+    raise ValueError("cloud_base_url must use https (plain http only for localhost): %r" % base_url)
+
+
+def _segment(value: Any) -> str:
+    return urllib.parse.quote(str(value), safe="")
+
+
 class CloudClient:
     def __init__(self, base_url: str, opener: Optional[Callable] = None, timeout: int = 30):
-        self.base_url = base_url.rstrip("/")
-        self.opener = opener or urllib.request.urlopen
+        self.base_url = check_base_url(base_url).rstrip("/")
+        self.opener = opener or no_redirect_opener()
         self.timeout = timeout
 
     def request(self, method: str, path: str, body: Optional[Dict[str, Any]] = None,
@@ -26,20 +75,29 @@ class CloudClient:
         if payload is not None:
             request.add_header("Content-Type", "application/json")
         if token:
-            request.add_header("Authorization", "Bearer " + token)
+            # Never replayed by urllib to a redirect target.
+            request.add_unredirected_header("Authorization", "Bearer " + token)
         try:
-            with self.opener(request, timeout=self.timeout) as response:
-                status, raw = response.status, response.read()
-        except urllib.error.HTTPError as exc:
-            status, raw = exc.code, exc.read()
+            try:
+                with self.opener(request, timeout=self.timeout) as response:
+                    status, raw = response.status, read_bounded(response)
+            except urllib.error.HTTPError as exc:
+                status, raw = exc.code, read_bounded(exc)
+        except ValueError as exc:
+            raise CloudError("oversized Valley response") from exc
         if status == 204:
             return None
+        if 300 <= status < 400:
+            raise CloudError("Valley redirect refused", status=status)
         try:
             envelope = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, ValueError) as exc:
             raise CloudError("invalid Valley response", status=status) from exc
+        if not isinstance(envelope, dict):
+            raise CloudError("invalid Valley response", status=status)
         if status >= 400 or envelope.get("code") != 0:
-            raise CloudError(envelope.get("message") or "Valley request failed", status, int(envelope.get("code") or 0))
+            raise CloudError(str(envelope.get("message") or "Valley request failed")[:300], status,
+                             _int(envelope.get("code")))
         return envelope.get("data")
 
     def create_device_authorization(self, name: str, platform: str, version: str) -> Dict[str, Any]:
@@ -72,11 +130,18 @@ class CloudClient:
         return self.request("POST", "/runner/jobs/claim", {"wait_seconds": 0}, token)
 
     def append_events(self, token: str, job_id: str, attempt_id: str, epoch: int, events: list) -> Dict[str, Any]:
-        return self.request("POST", "/runner/attempts/%s/events" % attempt_id, {
-			"job_id": job_id, "lease_epoch": epoch, "events": events,
+        return self.request("POST", "/runner/attempts/%s/events" % _segment(attempt_id), {
+            "job_id": job_id, "lease_epoch": epoch, "events": events,
         }, token)
 
     def renew(self, token: str, attempt_id: str, epoch: int) -> Dict[str, Any]:
-        return self.request("POST", "/runner/attempts/%s/renew" % attempt_id, {
+        return self.request("POST", "/runner/attempts/%s/renew" % _segment(attempt_id), {
             "lease_epoch": epoch,
         }, token)
+
+
+def _int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0

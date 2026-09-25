@@ -1,6 +1,6 @@
 # 刻迹 iOS · 上架前检查清单
 
-App：刻迹 / TimeTrace（工程名仍为 KeJi）· bundle id `com.atlaspaces.timetrace` · 当前版本 `0.1.0 (2026092502)`
+App：刻迹 / TimeTrace（工程名仍为 KeJi）· bundle id `com.atlaspaces.timetrace` · 当前版本 `0.1.0 (2026092503)`
 
 主屏幕名称随系统语言：简体中文显示「刻迹」，其他语言显示「TimeTrace」（`ios/KeJi/Resources/{zh-Hans,en}.lproj/InfoPlist.strings`，
 `ReleaseReadinessTests` 锁定）。App Store Connect 里的名称要按语言分别填：zh-Hans「刻迹」，en-US「TimeTrace」。
@@ -27,7 +27,9 @@ App：刻迹 / TimeTrace（工程名仍为 KeJi）· bundle id `com.atlaspaces.t
 - [x] 上传 `2026092501`：0.1 核心流程（配对错误可读、套餐与绝对重置时刻、派发带执行时间、执行记录带输出尾巴）。
       2026-09-25 02:58 用 `altool` + API 密钥上传成功（Xcode 账号会话又过期了，见 `ios/README.md`）。含审查前的两个缺陷，不要测
 - [x] 上传 `2026092502`：审查修复版（新建任务不再列出离线电脑；「安排时间」在手机上先校验 2 分钟～30 天；422 有中文提示）。
-      2026-09-25 03:3x 上传成功。**TestFlight 请测这个构建，并配合真机验收**
+      2026-09-25 03:3x 上传成功
+- [x] 上传 `2026092503`：真机验收中发现并修复——额度窗口按时长归类（Codex prolite 只有一个 7 天窗）、卡片脚注显示重置时刻、
+      同类窗口优先主限额、底部标签栏背景延伸到屏幕底边。2026-09-25 10:3x 上传成功。**TestFlight 请测这个构建**
 - [x] TestFlight：2026092303 已处理完成（VALID），内部组「诺乔测试群」自动收入了全部构建，3 位测试员。
       状态用 `ios/scripts/asc_testflight.py status` 查（需要 `ASC_KEY_ID` / `ASC_ISSUER_ID` / `ASC_KEY_PATH` 环境变量）
 - [ ] 在 App Store Connect 提交审核
@@ -38,7 +40,7 @@ App：刻迹 / TimeTrace（工程名仍为 KeJi）· bundle id `com.atlaspaces.t
 - [x] `ExportOptions-AppStore.plist` 已存在
 - [x] 动态字体、VoiceOver 标签已补齐
 - [x] 打包命令见 `ios/README.md`「TestFlight archive」，Team ID 只在命令行传入，未写进 `project.yml`
-- [x] `CURRENT_PROJECT_VERSION` 已递增到 `2026092502`（下次上传前再递增）
+- [x] `CURRENT_PROJECT_VERSION` 已递增到 `2026092503`（下次上传前再递增）
 - [ ] 真机验证（玻璃模糊叠层的性能、深色主题）
 - [ ] 与真实 Valley 联调（派发 / 验收 / 额度）。后端已上线；游客会话下 bootstrap / quota / preferences /
       reset-signals / runners 已用 curl 验证返回 200。派发与验收需要一台绑定的 Mac 跑 Runner，尚未做

@@ -105,5 +105,10 @@ def tail_text(path, limit: int = 8000) -> str:
         return ""
     if size > limit and b"\n" in data:
         data = data.split(b"\n", 1)[1]
-    return data.decode("utf-8", errors="replace")
+    text = data.decode("utf-8", errors="replace")
+    # Replacement characters are 3 bytes each; keep the encoded size inside
+    # the budget so Valley's 8192-byte bound can never reject the event.
+    while len(text.encode("utf-8")) > limit:
+        text = text[len(text) // 4 + 1:]
+    return text
 

@@ -599,6 +599,27 @@ class OutputTailTest(unittest.TestCase):
             self.assertEqual(failed["output_tail"], "boom\n")
 
 
+class MaintenanceLoggingTest(unittest.TestCase):
+    def test_maintain_reports_counts_and_failures_to_the_log(self):
+        class Cloud(FakeCloud):
+            def update_inventory(self, token, workspaces, tools):
+                raise OSError("valley unreachable")
+
+        class Reading(Adapter):
+            def read_limits(self):
+                return [Sample(bucket_key="codex:codex:primary", tool="codex", used_pct=42.0, reset_at=2000, window_mins=300)]
+
+        lines = []
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "keji.db")
+            agent = Agent(db, Cloud(), {"codex": Reading()}, Path(d), lambda: "t",
+                          inventory=lambda: ([], [{"id": "codex-default"}]), log=lines.append)
+            agent.maintain(now=1000.0, force=True)
+        self.assertTrue(any("quota" in l and "codex" in l and "1" in l for l in lines), lines)
+        self.assertTrue(any("inventory" in l and "OSError" in l for l in lines), lines)
+        self.assertFalse(any("valley unreachable" in l and "t" == l for l in lines))
+
+
 class RecoveryFenceTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

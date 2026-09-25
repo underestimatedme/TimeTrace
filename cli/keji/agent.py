@@ -45,7 +45,8 @@ class Agent:
                  heartbeat_interval: float = 30,
                  zero_spend_verified: Callable[[Any, Dict[str, Any]], bool] = _capability_zero_spend,
                  pool_binding: Callable[[str], Any] = _default_pool_binding,
-                 inventory: Callable[[], Any] = None, quota_interval: float = 300):
+                 inventory: Callable[[], Any] = None, quota_interval: float = 300,
+                 log: Callable[[str], None] = None):
         self.db, self.cloud, self.adapters = db, cloud, adapters
         self.home, self.access_token = Path(home), access_token
         self.prepare_workspace = prepare_workspace
@@ -59,6 +60,9 @@ class Agent:
         self.quota_interval = quota_interval
         self._last_quota = 0.0
         self._last_inventory = None
+        # One line per upkeep round so a silent None from an adapter is visible
+        # in daemon.log; never includes tokens or exception text with paths.
+        self.log = log or (lambda message: None)
 
     def maintain(self, now: float = None, force: bool = False) -> None:
         now = now if now is not None else time.time()
@@ -66,21 +70,24 @@ class Agent:
             return
         self._last_quota = now
         try:
-            self.report_quota(now)
-        except Exception:
-            pass
+            counts = self.report_quota_counts(now)
+            self.log("quota: " + ", ".join("%s %d" % (p, n) for p, n in counts.items()))
+        except Exception as exc:
+            self.log("quota report failed: %s" % exc.__class__.__name__)
         if self._inventory is None:
             return
         try:
             current = self._inventory()
-        except Exception:
+        except Exception as exc:
+            self.log("inventory build failed: %s" % exc.__class__.__name__)
             return
         if current != self._last_inventory:
             try:
                 self.cloud.update_inventory(self.access_token(), *current)
                 self._last_inventory = current
-            except Exception:
-                pass
+                self.log("inventory pushed: %d workspaces, %d tools" % (len(current[0]), len(current[1])))
+            except Exception as exc:
+                self.log("inventory push failed: %s" % exc.__class__.__name__)
 
     def run_once(self) -> str:
         self.flush_outbox()
@@ -415,6 +422,7 @@ class Agent:
 
     def run_forever(self, interval: int = 5, log: Callable[[str], None] = None) -> None:
         log = log or (lambda message: print(message, flush=True))
+        self.log = log
         backoff = interval
         manual_diagnostics = set()
         while True:
@@ -490,8 +498,12 @@ class Agent:
         """Read on-demand quota from adapters that support it and report it to
         Valley. This is what lets a parked (waiting_quota) Plan be re-queued when
         its pool recovers, without needing a run to discover it."""
+        return sum(self.report_quota_counts(now).values())
+
+    def report_quota_counts(self, now: float = None) -> Dict[str, int]:
+        """Samples posted per provider (0 when the adapter cannot read or failed)."""
         now = now if now is not None else time.time()
-        total = 0
+        counts: Dict[str, int] = {}
         for provider, adapter in self.adapters.items():
             caps = getattr(adapter, "capabilities", lambda: {})()
             if not caps.get("can_read_quota"):
@@ -499,9 +511,10 @@ class Agent:
             try:
                 samples = adapter.read_limits()
             except Exception:
+                counts[provider] = 0
                 continue
-            total += self._post_samples(provider, adapter, samples or [], now)
-        return total
+            counts[provider] = self._post_samples(provider, adapter, samples or [], now)
+        return counts
 
     def flush_outbox(self) -> None:
         batches = {}

@@ -122,6 +122,29 @@ class CliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(result.stdout.startswith("keji "), result.stdout)
 
+    def test_doctor_shows_plan_tier_and_live_quota(self):
+        from keji.models import Sample
+
+        class Rich:
+            def capabilities(self):
+                return {"can_read_quota": True, "can_enforce_zero_spend": True}
+
+            def capability_details(self):
+                return {"can_enforce_zero_spend": True, "auth_method": "chatgpt", "verified_at": 1000}
+
+            def plan_tier(self):
+                return "prolite"
+
+            def read_limits(self):
+                return [Sample(bucket_key="codex:codex:primary", tool="codex", used_pct=11.0, reset_at=4102444800, window_mins=10080)]
+
+        with patch("keji.cli._adapters", return_value={"codex": Rich()}), \
+             patch("keji.cli.shutil.which", return_value="/test/codex"), \
+             patch("keji.cli.CredentialStore.load", return_value=None):
+            code, out, err = self.run_cli("agent", "doctor")
+        self.assertIn("套餐: prolite", out)
+        self.assertIn("本周 剩余 89%", out)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)

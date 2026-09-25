@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from keji import __version__, config, limits, render, scheduler, worktree
+from keji import __version__, config, limits, quota, render, scheduler, worktree
 from keji.agent import Agent
 from keji.cloud import CloudClient
 from keji.credentials import CredentialStore, SessionManager
@@ -203,10 +203,34 @@ def cmd_agent_doctor(args: argparse.Namespace) -> int:
             print("  零付费核验: 通过（%s，%s）" % (details.get("auth_method"), _iso_local(details.get("verified_at"))))
         else:
             print("  零付费核验: 未通过（%s）→ 该工具不会被派发任务" % (details.get("unsupported_reason") or "unknown"))
+        if name in adapters:
+            _print_tool_quota(adapters[name])
     diagnostics = lock_diagnostics(home)
     for message in diagnostics:
         print("Execution lock: %s" % message)
     return 0 if paired and db.list_workspaces() and not diagnostics else 1
+
+
+def _print_tool_quota(adapter) -> None:
+    """Plan tier and a live quota read, exactly what the phone will show."""
+    tier = adapter.plan_tier() if hasattr(adapter, "plan_tier") else None
+    print("  套餐: %s" % (tier or "未知"))
+    caps = adapter.capabilities() if hasattr(adapter, "capabilities") else {}
+    if not caps.get("can_read_quota"):
+        print("  额度: 该工具没有主动读取通道")
+        return
+    try:
+        samples = adapter.read_limits() or []
+    except Exception as exc:
+        print("  额度: 读取失败（%s）" % exc.__class__.__name__)
+        return
+    if not samples:
+        print("  额度: 没有读到窗口")
+    for s in samples:
+        label = {"short": "短时", "weekly": "本周", "monthly": "本月"}.get(
+            quota.semantic_scope(s.bucket_key.rsplit(":", 1)[-1], s.window_mins), s.bucket_key.rsplit(":", 1)[-1])
+        reset = ("，%s 重置" % _iso_local(s.reset_at)) if s.reset_at else ""
+        print("  额度: %s 剩余 %d%%%s" % (label, round(100 - s.used_pct), reset))
 
 
 def cmd_agent_install(args: argparse.Namespace) -> int:

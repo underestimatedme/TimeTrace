@@ -63,3 +63,11 @@ class TailTextTest(unittest.TestCase):
             p.write_text("step 1\nstep 2\n")
             self.assertEqual(tail_text(p, limit=8000), "step 1\nstep 2\n")
 
+    def test_tail_text_stays_within_the_byte_budget_after_replacement(self):
+        from keji.process import tail_text
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "log"
+            p.write_bytes(b"\xff" * 9000)          # every byte becomes a 3-byte U+FFFD
+            tail = tail_text(p, limit=100)
+            self.assertLessEqual(len(tail.encode("utf-8")), 100)
+

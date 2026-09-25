@@ -78,7 +78,8 @@ class BuildCmdTest(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--disallowedTools") + 1], "Bash(git push*)")
         i = cmd.index("--allowedTools")
         self.assertEqual(cmd[i + 1:i + 3], ["Bash(git add:*)", "Bash(git commit:*)"])
-        self.assertEqual(cmd[i + 3], "--append-system-prompt")
+        # The variadic --allowedTools must be closed by another option.
+        self.assertTrue(cmd[i + 3].startswith("--"), cmd[i + 3])
 
     def test_no_allowed_tools_flag_when_empty(self):
         cmd = claude.build_cmd(dict(self.cfg, allowed_tools=[]), "x", session_id="abc")
@@ -93,6 +94,27 @@ class BuildCmdTest(unittest.TestCase):
         self.assertNotIn("--session-id", cmd)
         self.assertEqual(cmd[cmd.index("--model") + 1], "haiku")
         self.assertIn("--effort", cmd)
+
+
+    def test_prompt_that_looks_like_an_option_stays_a_prompt(self):
+        # A phone-supplied prompt is the last argv element. If it starts with
+        # "-", Claude's option parser would read e.g. --settings={hooks...}
+        # or --permission-mode=bypassPermissions as a flag.
+        for prompt in ("--settings={\"hooks\":{}}", "-p", "--permission-mode=bypassPermissions"):
+            with self.subTest(prompt=prompt):
+                cmd = claude.build_cmd(self.cfg, prompt, session_id="abc")
+                self.assertFalse(cmd[-1].startswith("-"))
+                self.assertEqual(cmd[-1].strip(), prompt)
+        self.assertEqual(claude.build_cmd(self.cfg, "normal", session_id="abc")[-1], "normal")
+
+    def test_project_settings_from_the_worktree_are_not_loaded(self):
+        # Worktree content (or a previous run's commit) could carry
+        # .claude/settings.json with hooks or a broad allow list; -p mode skips
+        # the trust dialog, so only the user's own settings are loaded.
+        cmd = claude.build_cmd(self.cfg, "x", session_id="abc")
+        self.assertEqual(cmd[cmd.index("--setting-sources") + 1], "user")
+        cmd = claude.build_cmd(dict(self.cfg, setting_sources="user,project"), "x", session_id="abc")
+        self.assertEqual(cmd[cmd.index("--setting-sources") + 1], "user,project")
 
 
 if __name__ == "__main__":

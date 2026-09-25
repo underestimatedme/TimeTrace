@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 DEFAULTS: Dict[str, Any] = {
-	"cloud_base_url": "https://apis.atlaspaces.com/timetrace/api/v1",
+    "cloud_base_url": "https://apis.atlaspaces.com/timetrace/api/v1",
     "interval_sec": 30,
     "jitter_sec": 300,
     "default_block_sleep_sec": 3600,
@@ -25,6 +25,9 @@ DEFAULTS: Dict[str, Any] = {
         ],
         "model": None,
         "extra_args": [],
+        # Setting sources Claude Code loads for unattended runs. "user" only:
+        # project settings live in the (model-writable) worktree.
+        "setting_sources": "user",
         # Where Claude Code keeps its OAuth login; None = ~/.claude/.credentials.json,
         # falling back to the macOS Keychain item Claude Code uses.
         "credentials_path": None,

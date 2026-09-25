@@ -39,10 +39,21 @@ def build_cmd(
         cmd += ["--allowedTools"] + allowed
     if cfg.get("model"):
         cmd += ["--model", cfg["model"]]
+    # Only the user's own settings: project/local settings come from worktree
+    # content, and -p mode skips the trust dialog that would guard them.
+    if cfg.get("setting_sources", "user"):
+        cmd += ["--setting-sources", str(cfg.get("setting_sources", "user"))]
     cmd += ["--append-system-prompt", SAFETY_RULES]
     cmd += list(cfg.get("extra_args") or [])
-    cmd += [prompt]
+    cmd += [safe_positional(prompt)]
     return cmd
+
+
+def safe_positional(prompt: str) -> str:
+    """The prompt is untrusted (it comes from the phone through Valley). A
+    leading "-" would make Claude's option parser read it as a flag such as
+    --settings or --permission-mode; a leading space keeps it positional."""
+    return " " + prompt if prompt.startswith("-") else prompt
 
 
 def parse_stream(lines: List[str]) -> RunResult:

@@ -50,6 +50,12 @@ enum TaskStatus: String, Codable, CaseIterable {
     case waitingExternal = "waiting_external"
     case paused, completed, failed, cancelled
 
+    /// 服务端曾写过 todo / in_progress；不认识的状态按「待开始」处理，绝不让整份同步失败。
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TaskStatus(rawValue: raw) ?? .ready
+    }
+
     var label: String {
         switch self {
         case .inbox: return "收件箱"

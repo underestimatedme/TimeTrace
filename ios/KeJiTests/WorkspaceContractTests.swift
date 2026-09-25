@@ -116,6 +116,14 @@ final class WorkspaceContractTests: XCTestCase {
         XCTAssertEqual(scheduleWindowError(now.addingTimeInterval(31 * 86400), now: now), "执行时间最多只能安排到 30 天内，请重新选择。")
     }
 
+    /// 服务端历史上写过 todo / in_progress；手机端遇到不认识的任务状态不能整份同步失败。
+    func testTaskStatusDecodesServerLegacyValues() throws {
+        XCTAssertEqual(try JSONCoding.decoder.decode(TaskStatus.self, from: Data(#""todo""#.utf8)), .ready)
+        XCTAssertEqual(try JSONCoding.decoder.decode(TaskStatus.self, from: Data(#""in_progress""#.utf8)), .ready)
+        XCTAssertEqual(try JSONCoding.decoder.decode(TaskStatus.self, from: Data(#""ai_queued""#.utf8)), .aiQueued)
+        XCTAssertEqual(try JSONCoding.decoder.decode(TaskStatus.self, from: Data(#""something_new""#.utf8)), .ready)
+    }
+
     func testEndpointPaths() {
         XCTAssertEqual(Endpoint.accountQuota.path, "/quota")
         XCTAssertEqual(Endpoint.taskPlans(taskID: "t1").path, "/tasks/t1/plans")

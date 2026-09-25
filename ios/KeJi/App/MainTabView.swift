@@ -19,6 +19,11 @@ struct MainTabView: View {
             }
             .id(router.tab)
             .transition(.opacity)
+            // AI 页自己记 ai_tools；其余主标签页在这里记一次页面浏览。
+            .task(id: router.tab) {
+                guard router.tab != .ai else { return }
+                UsageEvents.shared.record(.screenView, ["screen": .string(router.tab.rawValue)])
+            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
     }

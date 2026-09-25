@@ -104,7 +104,10 @@ struct AIToolsView: View {
         }
         .sheet(item: $selectedPool) { pool in poolDetail(pool) }
         .sheet(isPresented: $showScanner) {
-            PairingScannerView { link in router.openPairing(link) }
+            PairingScannerView { link in
+                UsageEvents.shared.record(.pairingStep, ["step": .string("scan"), "result": .string("ok")])
+                router.openPairing(link)
+            }
         }
         // keji://pair 链接或扫码：预填授权码，已登录就直接核对并弹出确认框。
         .onChange(of: router.pendingPairing, initial: true) { _, link in
@@ -122,13 +125,19 @@ struct AIToolsView: View {
         // guest session exists, and that first request fails. Re-run once the session arrives.
         .task(id: sync.user?.id) {
             await store.refreshWorkspaceQuota()
+            UsageEvents.shared.record(.quotaViewed, ["pools": .number(Double(store.accountQuota?.pools.count ?? 0)),
+                                                     "source": .string("ai_tools")])
             if sync.isLoggedIn { await remote.loadRunners() }
         }
+        .onAppear { UsageEvents.shared.record(.screenView, ["screen": .string("ai_tools")]) }
         .confirmationDialog("确认绑定这台电脑？", isPresented: Binding(
             get: { pendingInspection != nil }, set: { if !$0 { pendingInspection = nil } }
         ), titleVisibility: .visible) {
             Button("确认绑定") { confirmPairing() }
-            Button("取消", role: .cancel) { pendingInspection = nil }
+            Button("取消", role: .cancel) {
+                pendingInspection = nil
+                UsageEvents.shared.record(.pairingStep, ["step": .string("approve"), "result": .string("cancelled")])
+            }
         } message: {
             if let info = pendingInspection {
                 Text("\(info.deviceName) · \(info.platform) · v\(info.clientVersion)\n请求时间：\(Format.relative(info.requestedAt, now: Date()))\n权限：仅接收任务、运行本机已登记仓库、回报状态及取消进程")
@@ -255,8 +264,10 @@ struct AIToolsView: View {
             do {
                 pendingInspection = try await remote.inspect(code: pairingCode)
                 pairingMessage = nil
+                UsageEvents.shared.record(.pairingStep, ["step": .string("inspect"), "result": .string("ok")])
             } catch {
                 pairingMessage = pairingErrorText(error)
+                UsageEvents.shared.record(.pairingStep, ["step": .string("inspect"), "result": .string("error")])
             }
         }
     }
@@ -269,7 +280,11 @@ struct AIToolsView: View {
                 try await remote.approve(code: pairingCode)
                 pairingCode = ""
                 pairingMessage = "电脑已绑定，可以远程派发任务。"
-            } catch { pairingMessage = pairingErrorText(error) }
+                UsageEvents.shared.record(.pairingStep, ["step": .string("approve"), "result": .string("ok")])
+            } catch {
+                pairingMessage = pairingErrorText(error)
+                UsageEvents.shared.record(.pairingStep, ["step": .string("approve"), "result": .string("error")])
+            }
         }
     }
 }

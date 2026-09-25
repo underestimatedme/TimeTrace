@@ -14,7 +14,10 @@ struct KeJiApp: App {
                 .environment(environment)
                 // keji://pair?code=… ——电脑上 `keji cloud login` 打印的二维码用系统相机扫到后会走这里。
                 .onOpenURL { url in
-                    if let link = PairingLink.parse(url) { environment.router.openPairing(link) }
+                    if let link = PairingLink.parse(url) {
+                        UsageEvents.shared.record(.pairingStep, ["step": .string("link"), "result": .string("received")])
+                        environment.router.openPairing(link)
+                    }
                 }
         }
     }
@@ -71,6 +74,16 @@ final class AppEnvironment {
             }
             store.refreshPlanProjection = { [weak sync] in await sync?.pull() }
         }
+        UsageEvents.shared.configure(
+            fileURL: UsageEvents.defaultFileURL(uiTesting: options.uiTesting),
+            // 设备级开关，与账号无关；UI 测试用独立的 defaults，不碰真实设置。
+            defaults: (options.uiTesting ? UserDefaults(suiteName: "keji-ui-testing") : nil) ?? .standard,
+            offline: options.offline,
+            appVersion: AppEnvironment.appVersion
+        ) { [client] body in
+            _ = try await client.send(.usageEvents(body), as: UsageEventsReceipt.self)
+        }
+        UsageEvents.shared.record(.appOpen)
         store.onChange = { [weak self] in self?.scheduleSave() }
         if options.sampleData { scheduleSave() }
 
@@ -81,6 +94,14 @@ final class AppEnvironment {
         } else {
             router.phase = .splash
         }
+    }
+
+    /// 「0.2.0 (2026092601)」；只用于统计按版本拆分，不含设备或账号信息。
+    static var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        return String("\(version) (\(build))".prefix(32))
     }
 
     private func scheduleSave() {

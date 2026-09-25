@@ -4,6 +4,7 @@ import SwiftUI
 struct PrivacyView: View {
     @Environment(\.theme) private var theme
     @Environment(AppStore.self) private var store
+    @State private var usageStatsEnabled = UsageEvents.shared.isEnabled
 
     var body: some View {
         SubPageScaffold(title: "隐私") {
@@ -28,6 +29,26 @@ struct PrivacyView: View {
                 }
                 .tint(theme.accent)
                 .accessibilityIdentifier("privacy.diagnostics")
+            }
+            .padding(.bottom, 20)
+
+            SectionTitle("使用统计")
+            Card {
+                Toggle(isOn: Binding(
+                    get: { usageStatsEnabled },
+                    set: { value in
+                        usageStatsEnabled = value
+                        UsageEvents.shared.isEnabled = value
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("帮助改进刻迹（匿名使用统计）").font(Typo.sans(Typo.sm)).foregroundStyle(theme.text)
+                        Text("只记录打开了哪些页面、派发与配对是否成功这类操作；不含任务标题、提示词、代码、仓库路径或账号信息。关闭后立即停止并清空未上传的记录。")
+                            .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
+                    }
+                }
+                .tint(theme.accent)
+                .accessibilityIdentifier("privacy.usageStats")
             }
             .padding(.bottom, 20)
 

@@ -81,14 +81,19 @@ extension AppStore {
 
     /// `notBefore`：用户选定的执行时刻，nil 为尽快执行；它参与幂等键，改时间就是一次新的派发。
     @discardableResult
+    /// `source`：发起入口（plan / report），只用于匿名使用统计。
     func dispatchPlan(_ id: String, runnerID: String, workspaceID: String, toolID: String,
-                      notBefore: Date? = nil) async -> Bool {
+                      notBefore: Date? = nil, source: String = "plan", toolProvider: AIProvider? = nil) async -> Bool {
         if let reason = planDispatchUnavailableReason(id) { planErrors[id] = reason; return false }
         guard !planBusy.contains(id), let initial = plan(id), canDispatchPlan(initial, allPlans: plans),
               !id.hasPrefix("draft-") else { return false }
         guard let workspaceClient else { planErrors[id] = "离线：连接服务后才能派发。"; return false }
         planBusy.insert(id)
         defer { planBusy.remove(id) }
+        let tool = toolProvider?.rawValue
+            ?? planRunners.lazy.flatMap(\.tools).first { $0.id == toolID }?.provider.rawValue ?? "unknown"
+        var usage: [String: UsageValue] = ["tool": .string(tool), "scheduled": .bool(notBefore != nil), "source": .string(source)]
+        UsageEvents.shared.record(.dispatchStarted, usage)
         do {
             try await preparePlanDispatch?()
             if let reason = planDispatchUnavailableReason(id) { throw APIError(code: 42200, message: reason) }
@@ -111,9 +116,13 @@ extension AppStore {
             planJobs[id] = job
             planErrors[id] = nil
             commit()
+            UsageEvents.shared.record(.dispatchSucceeded, usage)
+            if notBefore != nil { UsageEvents.shared.record(.scheduleCreated, ["tool": .string(tool), "source": .string(source)]) }
             await refreshPlans(taskID: current.taskId)
             return true
         } catch {
+            usage["error_code"] = .number(Double((error as? APIError)?.code ?? -1))
+            UsageEvents.shared.record(.dispatchFailed, usage)
             if let api = error as? APIError, api.code == 42200, notBefore != nil {
                 planErrors[id] = scheduleRejectedText
             } else {
@@ -235,6 +244,9 @@ extension AppStore {
                                                               evidenceIDs: evidenceIDs, criteria: criteria)
             applyPlan(receipt)
             planErrors[id] = nil
+            if receipt.status == .accepted {
+                UsageEvents.shared.record(.planAccepted, ["criteria": .number(Double(criteria.count))])
+            }
             await refreshPlanProjection?()
             return receipt.status == .accepted
         } catch {

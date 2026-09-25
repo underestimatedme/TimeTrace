@@ -70,6 +70,10 @@ struct Endpoint {
         guard draft.isValid else { throw APIError(code: -8, message: "反馈请勿包含凭据、邮箱或环境信息，且不得超过 4000 字节。") }
         return Endpoint(method: .post, path: "/feedback", requiresAuth: true, body: FeedbackBody(draft: draft))
     }
+    /// 匿名使用统计：Valley 的 POST /events，一次最多 100 条。
+    static func usageEvents(_ body: UsageEventsBody) -> Endpoint {
+        Endpoint(method: .post, path: "/events", requiresAuth: true, body: body)
+    }
     static func taskPlans(taskID: String) -> Endpoint {
         Endpoint(method: .get, path: "/tasks/\(taskID)/plans", requiresAuth: true, body: nil)
     }

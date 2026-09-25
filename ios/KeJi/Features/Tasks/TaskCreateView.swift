@@ -193,7 +193,9 @@ struct TaskCreateView: View {
                         if let plan = await store.prepareTaskPlan(id) {
                             router.push(.plan(plan.id))
                             await store.dispatchPlan(plan.id, runnerID: runnerId, workspaceID: workspaceId, toolID: toolId,
-                                                     notBefore: notBefore)
+                                                     notBefore: notBefore, source: "task_create",
+                                                     toolProvider: onlineRunners.first { $0.id == runnerId }?
+                                                         .tools.first { $0.id == toolId }?.provider)
                         }
                     }
                 }

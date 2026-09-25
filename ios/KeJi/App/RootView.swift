@@ -42,7 +42,11 @@ struct RootView: View {
             case .active:
                 store.now = Date()
                 _Concurrency.Task { await sync.syncOnForeground() }
-            case .background, .inactive:
+                _Concurrency.Task { await UsageEvents.shared.flush() }
+            case .background:
+                appEnv.saveNow()
+                _Concurrency.Task { await UsageEvents.shared.flush() }
+            case .inactive:
                 appEnv.saveNow()
             @unknown default: break
             }

@@ -17,6 +17,7 @@ struct PlanDetailView: View {
         .task(id: scenePhase) {
             if scenePhase == .active { await store.monitorPlan(planId) }
         }
+        .onAppear { UsageEvents.shared.record(.screenView, ["screen": .string("plan_detail")]) }
         .sheet(item: $review) { draft in PlanAcceptanceSheet(draft: draft) }
         .sheet(isPresented: $showDispatch) {
             if let plan = store.plan(planId) { PlanDispatchSheet(planID: plan.id) }

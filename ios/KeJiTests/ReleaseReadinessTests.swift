@@ -39,6 +39,20 @@ final class ReleaseReadinessTests: XCTestCase {
         }
     }
 
+    /// 「帮助改进刻迹」的匿名使用统计：产品交互数据，关联到账号（按用户去重算漏斗），
+    /// 不用于追踪，用途是分析与改进功能。
+    func testPrivacyManifestDeclaresProductInteractionForAnalytics() throws {
+        let manifest = try privacyManifest()
+        let collected = try XCTUnwrap(manifest["NSPrivacyCollectedDataTypes"] as? [[String: Any]])
+        let interaction = try XCTUnwrap(collected.first {
+            $0["NSPrivacyCollectedDataType"] as? String == "NSPrivacyCollectedDataTypeProductInteraction"
+        }, "使用统计会上传页面浏览与操作结果，必须申报产品交互")
+        XCTAssertEqual(interaction["NSPrivacyCollectedDataTypeLinked"] as? Bool, true)
+        XCTAssertEqual(interaction["NSPrivacyCollectedDataTypeTracking"] as? Bool, false)
+        XCTAssertEqual(Set(interaction["NSPrivacyCollectedDataTypePurposes"] as? [String] ?? []),
+                       ["NSPrivacyCollectedDataTypePurposeAnalytics", "NSPrivacyCollectedDataTypePurposeAppFunctionality"])
+    }
+
     private func localizedInfoPlist(_ localization: String) throws -> [String: Any] {
         let url = try XCTUnwrap(Bundle.main.url(forResource: "InfoPlist", withExtension: "strings",
                                                 subdirectory: nil, localization: localization),

@@ -6,7 +6,9 @@
 - 探针实测：`探针验证记录-2026-09-02.md`
 - 设计：`../docs/superpowers/specs/2026-09-04-keji-cli-design.md`
 
-零依赖，Python 3.9+ 标准库。
+零依赖，Python 3.9+ 标准库。Apache-2.0 许可（见 `LICENSE`）；安全问题请按 `SECURITY.md` 私下报告。
+
+新机器上最快的路径：安装（见下）后运行 `keji setup`。
 
 ## 手机远程派发（Valley Runner）
 
@@ -28,18 +30,58 @@ Runner refresh token 存在 macOS 登录 Keychain（service `com.atlaspaces.keji
 
 每个手机派发的任务都在 `~/.keji/worktrees/<id>/` 里的独立分支（`keji/<id>`）上执行并提交；主仓库的工作区不动，也不会推送。
 验收通过后要不要合并回主分支，目前需要你在电脑上自己 `git merge keji/<id>`（0.1 不做自动合并）。
-Codex 的 workspace-write 沙箱会额外放行主仓库的 `.git`（`--add-dir`），否则 worktree 里无法 `git commit`。
+Codex 的 workspace-write 沙箱只额外放行提交所需的几处 git 元数据：本 worktree 的管理目录（`.git/worktrees/<id>`）、`.git/objects` 和分支 ref 所在目录（`refs/heads/keji`）。主仓库的 `.git/config`、hooks 和其他分支都不可写，沙箱内也没有网络。
 
 `keji agent doctor` 会打印每个工具的套餐等级和实时额度，和手机「你的 AI」页应显示的一致，用来现场对照。
 
 ## 安装
 
+两种方式，任选其一：
+
 ```sh
-ln -s "$(pwd)/bin/keji" /usr/local/bin/keji      # 或任何在 PATH 里的目录
+# 1) pipx：装成独立命令（需要 pipx；Python 3.9+）
+pipx install ./cli            # 在仓库根目录执行；升级用 pipx install --force ./cli
+keji --version
+
+# 2) 直接用源码：把启动脚本软链到 PATH 里（改代码立即生效）
+ln -s "$(pwd)/bin/keji" /usr/local/bin/keji      # 在 cli/ 目录执行；或任何在 PATH 里的目录
 keji --version
 ```
 
-数据目录默认 `~/.keji/`（可用环境变量 `KEJI_HOME` 覆盖）：`keji.db`、`config.json`、`logs/`、`inbox/`、`worktrees/`。
+数据目录默认 `~/.keji/`（可用环境变量 `KEJI_HOME` 覆盖，权限固定为 0700）：`keji.db`、`config.json`、`logs/`、`inbox/`、`worktrees/`。
+
+## 设置向导 `keji setup`
+
+一条命令走完首次配置，每一步都复用对应的子命令：
+
+1. 检查 `claude` / `codex` 是否安装、是否通过零付费核验（同 `keji agent doctor`）；
+2. 登记允许远程任务使用的 Git 仓库（同 `keji workspace add`，可登记多个，回车结束）；
+3. 与手机绑定：终端显示二维码，用 App「你的 AI → 扫码绑定」扫描（同 `keji cloud login`）；
+4. 安装并启动后台 Runner LaunchAgent（同 `keji agent install`）。
+
+脚本化安装可以用参数代替提问：
+
+```sh
+keji setup --repo ~/code/TimeTrace --yes            # 登记仓库、绑定、安装 LaunchAgent，全部取默认
+keji setup --repo ~/code/a --repo ~/code/b --no-pair --no-agent --yes
+```
+
+已绑定的电脑不会被 `--yes` 重新绑定；输入结束（EOF）视为跳过。
+
+## 隐私与数据流向
+
+```
+iPhone ──任务──▶ KeJi 云（Valley）◀──出站 HTTPS 轮询── keji agent（你的 Mac）──▶ claude / codex（本机登录）
+```
+
+- **离开本机的**：电脑名、登记仓库的文件夹名和默认分支名（不含绝对路径）、工具名/套餐等级/零付费核验结论、额度百分比与重置时间；
+  任务事件的状态、错误信息、模型最后一条回复的前 1000 字，以及（`upload_output_tail` 为 true 时）运行日志末尾最多 8000 字节。
+  所有文本在写入本地待发队列之前先做密钥脱敏（`keji/redact.py`：AWS/阿里云 AccessKey、GitHub/OpenAI/Anthropic/Slack/Google token、JWT、PEM 私钥、`xxx_TOKEN=…` 之类的赋值、Bearer 头、URL 里的密码）。
+- **额度读取**：Claude Code 的 OAuth access token 只发给 `https://api.anthropic.com/api/oauth/usage`（与 Claude Code 自己的 `/usage` 相同的调用）。
+- **从不离开本机的**：Claude/Codex 的登录凭据与 API key、仓库文件与 diff、任务分支（从不推送）、完整运行日志。
+- 不想上传任何运行输出：`keji config set upload_output_tail false`。脱敏是尽力而为，识别常见格式；仓库里有特殊格式的密钥时建议关掉。
+
+完整的威胁模型和审查结论见 `docs/SECURITY_REVIEW.md`，数据清单见 `SECURITY.md`。
 
 ## 用法
 
@@ -60,14 +102,15 @@ keji events [--type task_blocked]
 
 ## 守护进程
 
-前台：`keji run`。后台用 launchd：
+前台：`keji run`（本地队列）或 `keji agent run`（手机远程派发）。后台用 launchd：
 
 ```sh
-sed -e "s#__KEJI_BIN__#$(pwd)/bin/keji#g" -e "s#__HOME__#$HOME#g" \
-    launchd/com.keji.run.plist > ~/Library/LaunchAgents/com.keji.run.plist
-launchctl load ~/Library/LaunchAgents/com.keji.run.plist
+keji agent install              # 写入 ~/Library/LaunchAgents/com.keji.run.plist 并加载
 tail -f ~/.keji/daemon.log
+launchctl kickstart -k gui/$(id -u)/com.keji.run   # 改配置后重启
 ```
+
+`launchd/com.keji.run.plist` 是同样内容的模板，手工安装时把 `__KEJI_BIN__`、`__HOME__` 换成实际路径。
 
 ## 配置 `~/.keji/config.json`（都是可选项，下面是缺省值）
 
@@ -81,22 +124,59 @@ tail -f ~/.keji/daemon.log
   "circuit_window_mins": 300,
   "allowed_repos": [],
   "hook_max_tasks": 5,
+  "upload_output_tail": true,
   "claude": {"bin": "claude", "permission_mode": "acceptEdits",
              "allowed_tools": ["Bash(git add:*)", "Bash(git commit:*)", "Bash(git status:*)",
                                "Bash(git diff:*)", "Bash(git log:*)"],
+             "setting_sources": "user",
              "model": null, "extra_args": []},
   "codex":  {"bin": "codex",  "sandbox": "workspace-write", "model": null, "extra_args": []}
 }
 ```
 
+顶层的标量项可以直接用命令改（带类型校验，原子写入，文件权限 0600）：
+
+```sh
+keji config list                               # 所有可设置的项及当前生效值
+keji config get upload_output_tail
+keji config set upload_output_tail false       # 布尔：true/false、on/off、1/0、yes/no
+keji config set interval_sec 60
+```
+
+嵌套项（`claude`、`codex`）和列表（`allowed_repos`）请直接编辑 `config.json`。改完后重启 Runner 才会生效。
+
+| 项 | 缺省 | 说明 |
+| --- | --- | --- |
+| `cloud_base_url` | KeJi 云 | Valley API 地址；必须是 https（仅 localhost 允许 http） |
+| `upload_output_tail` | `true` | 任务结束时是否上传（脱敏后的）日志末尾 8000 字节 |
+| `interval_sec` | `30` | 本地队列守护进程的空闲轮询间隔 |
+| `jitter_sec` / `default_block_sleep_sec` | `300` / `3600` | 撞限额后的唤醒抖动 / 拿不到重置时间时的默认睡眠 |
+| `circuit_breaker_failures` / `circuit_window_mins` | `3` / `300` | 熔断：窗口内失败次数上限 |
+| `hook_max_tasks` | `5` | on_success 钩子一次最多生成的任务数 |
+| `claude.setting_sources` | `"user"` | 无人值守运行加载哪些 Claude 设置；缺省不加载 worktree 里的项目设置 |
+
 - `allowed_repos` 非空时，`keji add --repo` 必须落在其中某个目录之下。
 - `permission_mode` 决定 Claude 无头运行时能做什么。`acceptEdits` 允许改文件，命令只放行 `allowed_tools` 里的（缺省是本地 git 提交相关的几条）；要让它跑构建和测试，往 `allowed_tools` 加规则（如 `"Bash(npm test:*)"`）或把模式改成 `bypassPermissions`。这是你的决定，工具不替你做。
-- Codex 的 `sandbox` 对应 `codex exec -s`；`workspace-write` 只允许写 worktree 内的文件。
+- Codex 的 `sandbox` 对应 `codex exec -s`（续接时以 `-c sandbox_mode=…` 传入，续接不会退回到 `~/.codex/config.toml` 里更宽的模式）；`workspace-write` 只允许写 worktree 和提交所需的 git 元数据，且关闭网络。
+
+## 自托管
+
+`cloud_base_url` 可配置，缺省指向 KeJi 云（`https://apis.atlaspaces.com/timetrace/api/v1`）。服务端（Valley 的 `timetrace` 模块）不在本仓库中；如果你运行自己的兼容服务端：
+
+```sh
+keji config set cloud_base_url https://valley.example.com/timetrace/api/v1
+keji cloud login     # 重新绑定到新的服务端
+```
+
+客户端只接受 https（本机测试服务器可用 `http://127.0.0.1` / `http://localhost`），不跟随重定向，响应体上限 1 MiB。iOS App 需要指向同一个服务端。
 
 ## 安全约束
 
 - 每个任务在独立的 git worktree（`~/.keji/worktrees/<id>`，分支 `keji/<id>`）里运行，从不碰主工作区。
-- worktree 内所有远端的 pushurl 被改成 `no_push://blocked`，`git push` 立即失败；Claude 另加 `--disallowedTools "Bash(git push*)"`；两个工具的提示词都写明禁止 push、禁止改远端分支和 CI 配置。
+- worktree 内所有远端的 pushurl 被改成 `no_push://blocked`，`git push` 立即失败；Claude 另加 `--disallowedTools "Bash(git push*)"`，Codex 沙箱内无网络；两个工具的提示词都写明禁止 push、禁止改远端分支和 CI 配置（提示词只是提醒，真正的约束是权限模式和沙箱）。
+- Runner 在 worktree 里执行自己的 git 命令之前，会核对 `.git` 指针、`commondir` 和 `config.worktree` 仍是它创建时的样子，被改动就停下等人处理；这些 git 调用还会关闭 fsmonitor、hooks 和外部 diff。
+- 手机发来的提示词始终作为位置参数传给 Claude（以 `-` 开头也不会被当成选项）；Claude 只加载用户级设置，不加载 worktree 里的 `.claude/settings.json`。
+- 启动工具进程时，名字里含 TOKEN / SECRET / PASSWORD / API_KEY / ACCESS_KEY / CREDENTIAL 的环境变量一律剔除。
 - 熔断：默认 5 小时内 3 次失败就停止派工，直到窗口过去或你 `keji retry`。
 - v0.3 的 on_success 钩子只产出一份声明式 JSON 到 `~/.keji/inbox/`，由守护进程下一轮校验后入库；钩子生成的任务不能再生成任务。
 

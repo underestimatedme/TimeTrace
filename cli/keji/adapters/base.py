@@ -13,7 +13,9 @@ SAFETY_RULES = (
     "1. Never run `git push`, never touch remote branches, never modify CI configuration"
     " (.github/workflows, .gitlab-ci.yml, Jenkinsfile, etc.).\n"
     "2. Commit your work to the CURRENT branch only. Do not create, checkout or delete other branches.\n"
-    "3. Only read and write files inside the current working directory.\n"
+    "3. Only read and write files inside the current working directory. Committing is expected:"
+    " `git add` / `git commit` on this worktree are allowed even though its metadata lives in the"
+    " main repository's .git outside this directory.\n"
     "4. If the task is impossible or unsafe, stop and explain instead of improvising.\n"
 )
 

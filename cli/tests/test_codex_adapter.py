@@ -87,6 +87,16 @@ class BuildCmdTest(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("-m") + 1], "gpt-5.6")
 
 
+class SafetyRulesTest(unittest.TestCase):
+    def test_rules_allow_committing_in_a_linked_worktree(self):
+        # The model refused to commit because rule 3 read as "never touch
+        # anything outside cwd" while the worktree's git metadata lives in the
+        # main repository; the rule must carve that out explicitly.
+        self.assertIn("git add", SAFETY_RULES)
+        self.assertIn("commit", SAFETY_RULES)
+        self.assertIn(".git", SAFETY_RULES)
+
+
 class WorktreeWritableRootTest(unittest.TestCase):
     def test_build_cmd_adds_extra_writable_dirs(self):
         cmd = codex.build_cmd(BuildCmdTest.cfg, "do it", "/wt", add_dirs=["/repo/.git"])

@@ -71,26 +71,27 @@ def _pair_link(user_code: str, name: str) -> str:
         return base + tail
 
 
-def _print_pair_qr(link: str) -> None:
+def _print_pair_qr(link: str, out=print) -> None:
     lines = qr.render_half_blocks(qr.encode(link))
-    colour = sys.stdout.isatty()
+    colour = out is print and sys.stdout.isatty()
     for line in lines:
         # White on black whatever the terminal theme, so the phone sees dark
         # modules on a light background.
-        print("\x1b[97;40m%s\x1b[0m" % line if colour else line)
+        out("\x1b[97;40m%s\x1b[0m" % line if colour else line)
 
 
-def cmd_cloud_login(args: argparse.Namespace) -> int:
-    home, cfg, db = _open(args)
+def pair_computer(cfg: Dict[str, Any], db: Database, home: Path, out=print) -> int:
+    """Device-code pairing with the phone (QR code or typed code). Stores the
+    runner credentials in the Keychain and reports inventory and quota."""
     cloud = _cloud(cfg)
     name = platform.node() or "Mac"
     auth = cloud.create_device_authorization(name, "darwin", __version__)
-    print("用刻迹 iPhone App 的「你的 AI → 扫码绑定」扫描下方二维码（或用相机扫描）：")
-    print()
-    _print_pair_qr(_pair_link(auth["user_code"], name))
-    print()
-    print("扫不了码时，在「你的 AI → 绑定电脑」中输入：%s" % auth["user_code"])
-    print("授权码 %d 分钟内有效，正在等待确认…" % max(1, int(auth["expires_in"]) // 60))
+    out("用刻迹 iPhone App 的「你的 AI → 扫码绑定」扫描下方二维码（或用相机扫描）：")
+    out()
+    _print_pair_qr(_pair_link(auth["user_code"], name), out)
+    out()
+    out("扫不了码时，在「你的 AI → 绑定电脑」中输入：%s" % auth["user_code"])
+    out("授权码 %d 分钟内有效，正在等待确认…" % max(1, int(auth["expires_in"]) // 60))
     deadline = time.time() + int(auth["expires_in"])
     while time.time() < deadline:
         approval = cloud.poll_device_authorization(auth["device_code"])
@@ -98,7 +99,7 @@ def cmd_cloud_login(args: argparse.Namespace) -> int:
             credentials = cloud.activate(auth["device_code"], approval["activation_code"])
             credentials["expires_at"] = int(time.time()) + int(credentials.get("expires_in") or 900)
             CredentialStore().save(credentials)
-            print("已绑定：%s" % credentials["runner"]["name"])
+            out("已绑定：%s" % credentials["runner"]["name"])
             # Report right away so the phone shows tools and quota within
             # seconds of approving, instead of after the next agent start.
             try:
@@ -106,15 +107,23 @@ def cmd_cloud_login(args: argparse.Namespace) -> int:
                 token = credentials["access_token"]
                 cloud.update_inventory(token, _runner_workspaces(db), _runner_tools(cfg, adapters))
                 Agent(db, cloud, adapters, home, lambda: token).report_quota()
-                print("已上报工具清单与额度，手机上几秒内可见")
+                out("已上报工具清单与额度，手机上几秒内可见")
             except Exception as exc:
-                print("绑定成功，但首次上报失败：%s（Runner 启动后会重试）" % exc.__class__.__name__)
+                out("绑定成功，但首次上报失败：%s（Runner 启动后会重试）" % exc.__class__.__name__)
             return 0
         if approval.get("status") == "expired":
             break
         time.sleep(max(1, int(auth.get("interval") or 5)))
-    print("配对已过期，请重新运行命令", file=sys.stderr)
+    if out is print:
+        print("配对已过期，请重新运行命令", file=sys.stderr)
+    else:
+        out("配对已过期，请重新运行命令")
     return 1
+
+
+def cmd_cloud_login(args: argparse.Namespace) -> int:
+    home, cfg, db = _open(args)
+    return pair_computer(cfg, db, home)
 
 
 def cmd_cloud_status(args: argparse.Namespace) -> int:
@@ -146,17 +155,27 @@ def _workspace_id(path: str) -> str:
     return hashlib.sha256(path.encode("utf-8")).hexdigest()[:24]
 
 
-def cmd_workspace_add(args: argparse.Namespace) -> int:
-    _, _, db = _open(args)
-    path = str(Path(args.path).expanduser().resolve())
+def add_workspace(db: Database, path: str, workspace_id: Optional[str] = None,
+                  name: Optional[str] = None) -> Dict[str, str]:
+    """Register a git repository for remote tasks. Raises ValueError otherwise."""
+    path = str(Path(path).expanduser().resolve())
     if not worktree.is_git_repo(path):
-        print("error: workspace must be a git repository", file=sys.stderr)
-        return 2
+        raise ValueError("workspace must be a git repository: %s" % path)
     branch = subprocess.run(["git", "branch", "--show-current"], cwd=path, check=True,
                             capture_output=True, text=True).stdout.strip() or "HEAD"
-    workspace_id = args.id or _workspace_id(path)
-    db.upsert_workspace(workspace_id, args.name or Path(path).name, path, branch)
-    print("workspace %s added: %s" % (workspace_id, path))
+    workspace_id = workspace_id or _workspace_id(path)
+    db.upsert_workspace(workspace_id, name or Path(path).name, path, branch)
+    return {"id": workspace_id, "path": path, "default_branch": branch}
+
+
+def cmd_workspace_add(args: argparse.Namespace) -> int:
+    _, _, db = _open(args)
+    try:
+        added = add_workspace(db, args.path, args.id, args.name)
+    except ValueError:
+        print("error: workspace must be a git repository", file=sys.stderr)
+        return 2
+    print("workspace %s added: %s" % (added["id"], added["path"]))
     return 0
 
 
@@ -250,19 +269,31 @@ def cmd_agent_doctor(args: argparse.Namespace) -> int:
     print("工作区: %d" % len(db.list_workspaces()))
     adapters = _adapters(cfg)
     for name in TOOLS:
-        binary = str(cfg.get(name, {}).get("bin", name))
-        print("%s: %s" % (name, shutil.which(binary) or "未找到"))
-        details = adapters[name].capability_details() if name in adapters else {}
-        if details.get("can_enforce_zero_spend"):
-            print("  零付费核验: 通过（%s，%s）" % (details.get("auth_method"), _iso_local(details.get("verified_at"))))
-        else:
-            print("  零付费核验: 未通过（%s）→ 该工具不会被派发任务" % (details.get("unsupported_reason") or "unknown"))
+        lines, _ = _tool_check(name, cfg, adapters)
+        for line in lines:
+            print(line)
         if name in adapters:
             _print_tool_quota(adapters[name])
     diagnostics = lock_diagnostics(home)
     for message in diagnostics:
         print("Execution lock: %s" % message)
     return 0 if paired and db.list_workspaces() and not diagnostics else 1
+
+
+def _tool_check(name: str, cfg: Dict[str, Any], adapters: Dict[str, Any]):
+    """Binary location and zero-spend verdict of one tool: (lines, verified)."""
+    binary = str(cfg.get(name, {}).get("bin", name))
+    lines = ["%s: %s" % (name, shutil.which(binary) or "未找到")]
+    try:
+        details = adapters[name].capability_details() if name in adapters else {}
+    except Exception as exc:
+        details = {"unsupported_reason": "check_failed:" + exc.__class__.__name__}
+    verified = details.get("can_enforce_zero_spend") is True
+    if verified:
+        lines.append("  零付费核验: 通过（%s，%s）" % (details.get("auth_method"), _iso_local(details.get("verified_at"))))
+    else:
+        lines.append("  零付费核验: 未通过（%s）→ 该工具不会被派发任务" % (details.get("unsupported_reason") or "unknown"))
+    return lines, verified
 
 
 def _print_tool_quota(adapter) -> None:
@@ -310,6 +341,112 @@ def cmd_agent_install(args: argparse.Namespace) -> int:
     destination = install_launch_agent()
     print("Runner 已安装并启动：%s" % destination)
     return 0
+
+
+def run_setup(args: argparse.Namespace, input_fn=input, print_fn=print) -> int:
+    """`keji setup`: tools → repositories → pairing → LaunchAgent.
+
+    Every step reuses the command it stands for (doctor's tool check,
+    `workspace add`, `cloud login`, `agent install`). Flags answer the
+    questions for scripted installs; end of input means "skip"."""
+    out = print_fn
+
+    def ask(question: str) -> Optional[str]:
+        try:
+            return input_fn(question).strip()
+        except EOFError:
+            return None
+
+    def confirm(question: str, flag_off: bool) -> bool:
+        if flag_off:
+            return False
+        if args.yes:
+            return True
+        answer = ask(question + " [Y/n] ")
+        return answer is not None and answer.lower() in ("", "y", "yes", "是", "好")
+
+    home, cfg, db = _open(args)
+    result = 0
+    out("刻迹 Runner 设置（%s）" % home)
+    out()
+    out("1/4 检查本机 AI 工具")
+    adapters = _adapters(cfg)
+    verified = []
+    for name in TOOLS:
+        lines, ok = _tool_check(name, cfg, adapters)
+        for line in lines:
+            out(line)
+        if ok:
+            verified.append(name)
+    if not verified:
+        out("  注意：没有工具通过零付费核验，Runner 不会派发任务。请先用订阅账号登录 claude / codex（不要用 API key）。")
+    out()
+
+    out("2/4 选择允许远程任务使用的 Git 仓库")
+    for row in db.list_workspaces():
+        out("  已登记：%s  %s" % (row["name"], row["path"]))
+    pending = list(args.repo or [])
+    interactive = not pending and not args.yes
+    while True:
+        if pending:
+            path = pending.pop(0)
+        elif interactive:
+            path = ask("  仓库路径（回车结束）：")
+        else:
+            break
+        if not path:
+            break
+        try:
+            added = add_workspace(db, path)
+            out("  已添加：%s" % added["path"])
+        except ValueError:
+            out("  不是 git 仓库：%s" % path)
+            if not interactive:
+                result = 2
+    out()
+
+    out("3/4 与手机绑定")
+    try:
+        existing = CredentialStore().load()
+    except Exception:
+        existing = None
+    if existing:
+        out("  已绑定：%s" % ((existing.get("runner") or {}).get("name") or "Mac"))
+        # Re-pairing asks with a "no" default and is never implied by --yes.
+        do_pair = False
+        if not args.no_pair and not args.yes:
+            answer = ask("  重新绑定这台电脑？ [y/N] ")
+            do_pair = bool(answer) and answer.lower() in ("y", "yes", "是")
+    else:
+        do_pair = confirm("  现在用手机扫码绑定？", args.no_pair)
+    if do_pair:
+        try:
+            code = pair_computer(cfg, db, home, out=out)
+        except Exception as exc:
+            out("  绑定失败：%s" % exc.__class__.__name__)
+            code = 1
+        if code != 0:
+            out("  没有完成绑定；之后可以运行 `keji cloud login` 再试。")
+            result = result or 1
+    out()
+
+    out("4/4 后台 Runner（macOS LaunchAgent，开机自动运行）")
+    if confirm("  安装并启动后台 Runner？", args.no_agent):
+        try:
+            destination = install_launch_agent()
+            out("  已安装：%s" % destination)
+        except Exception as exc:
+            out("  安装失败：%s；可稍后运行 `keji agent install`" % exc.__class__.__name__)
+            result = result or 1
+    else:
+        out("  跳过；需要时运行 `keji agent install`，或前台运行 `keji agent run`。")
+    out()
+    out("完成。随时运行 `keji agent doctor` 检查状态。" if result == 0 else "部分步骤未完成，见上方提示。")
+    return result
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    return run_setup(args)
 
 
 def cmd_config(args: argparse.Namespace) -> int:
@@ -646,6 +783,13 @@ def build_parser() -> argparse.ArgumentParser:
     wr = workspace_sub.add_parser("remove")
     wr.add_argument("id")
     wr.set_defaults(fn=cmd_workspace_remove)
+
+    st = sub.add_parser("setup", help="guided setup: tools, repositories, pairing, LaunchAgent")
+    st.add_argument("--repo", action="append", help="register this git repository (repeatable)")
+    st.add_argument("--yes", "-y", action="store_true", help="accept the defaults without asking")
+    st.add_argument("--no-pair", dest="no_pair", action="store_true", help="skip pairing with the phone")
+    st.add_argument("--no-agent", dest="no_agent", action="store_true", help="skip installing the LaunchAgent")
+    st.set_defaults(fn=cmd_setup)
 
     conf = sub.add_parser("config", help="read or change ~/.keji/config.json")
     conf_sub = conf.add_subparsers(dest="config_cmd", required=True)

@@ -111,6 +111,44 @@ class CliTest(unittest.TestCase):
         self.assertTrue(all(c[2] == "fresh-token" for c in calls if c[1].startswith("/runner/")))
         self.assertIn("已上报", out)
 
+    def test_cloud_login_prints_a_scannable_pair_qr_and_the_fallback_code(self):
+        from tests.test_qr import decode
+
+        def request(client, method, path, body=None, token=None):
+            if path == "/device-authorizations":
+                return {"user_code": "ABCD1234", "device_code": "secret-device-code", "expires_in": 600, "interval": 1}
+            return {"status": "expired"}
+
+        with patch("keji.cloud.CloudClient.request", new=request), \
+             patch("keji.cli.platform.node", return_value="Joey 的 Mac"), \
+             patch("keji.cli.time.sleep", return_value=None):
+            code, out, _ = self.run_cli("cloud", "login")
+        self.assertEqual(code, 1)  # expired in this fake
+        self.assertIn("ABCD1234", out)
+        self.assertNotIn("secret-device-code", out)
+        qr_lines = [line for line in out.splitlines() if line and set(line) <= set("█▀▄ ")]
+        self.assertGreater(len(qr_lines), 10)
+        # Unpack the half blocks (light drawn, dark blank) and strip the border.
+        rows = []
+        for line in qr_lines:
+            rows.append([ch in " ▄" for ch in line])
+            rows.append([ch in " ▀" for ch in line])
+        while rows and not any(rows[-1]):
+            rows.pop()
+        while rows and not any(rows[0]):
+            rows.pop(0)
+        left = min(row.index(True) for row in rows if any(row))
+        size = len(rows)
+        matrix = [row[left:left + size] for row in rows]
+        text, _, _ = decode(matrix)
+        self.assertEqual(text, "keji://pair?code=ABCD1234&name=Joey%20%E7%9A%84%20Mac&platform=darwin&v=1")
+
+    def test_pair_link_drops_the_name_when_it_would_not_fit_the_qr(self):
+        link = cli._pair_link("ABCD1234", "很长的名字" * 20)
+        self.assertEqual(link, "keji://pair?code=ABCD1234&platform=darwin&v=1")
+        from keji import qr
+        qr.encode(link)
+
     def test_launcher_works_through_a_symlink_from_any_directory(self):
         # README installs `bin/keji` with `ln -s` into a PATH directory; the
         # launcher must resolve that link back to the checkout.

@@ -12,8 +12,9 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
-from keji import __version__, config, limits, quota, render, scheduler, worktree
+from keji import __version__, config, limits, qr, quota, render, scheduler, worktree
 from keji.agent import Agent
 from keji.cloud import CloudClient
 from keji.credentials import CredentialStore, SessionManager
@@ -54,11 +55,39 @@ def _acquire_execution_lock(home: Path):
     return lock_file
 
 
+def _pair_link(user_code: str, name: str) -> str:
+    """The keji://pair link shown as a QR code. Only the short user code and a
+    display name — never the device code or any token. The name is dropped
+    when it would not fit a version-6 QR code."""
+    base = "keji://pair?code=%s" % quote(user_code, safe="")
+    tail = "&platform=darwin&v=1"
+    with_name = "%s&name=%s%s" % (base, quote(name, safe=""), tail)
+    try:
+        qr.encode(with_name)
+        return with_name
+    except ValueError:
+        return base + tail
+
+
+def _print_pair_qr(link: str) -> None:
+    lines = qr.render_half_blocks(qr.encode(link))
+    colour = sys.stdout.isatty()
+    for line in lines:
+        # White on black whatever the terminal theme, so the phone sees dark
+        # modules on a light background.
+        print("\x1b[97;40m%s\x1b[0m" % line if colour else line)
+
+
 def cmd_cloud_login(args: argparse.Namespace) -> int:
     home, cfg, db = _open(args)
     cloud = _cloud(cfg)
-    auth = cloud.create_device_authorization(platform.node() or "Mac", "darwin", __version__)
-    print("在刻迹 iPhone App 的「AI 工具 → 绑定电脑」中输入：%s" % auth["user_code"])
+    name = platform.node() or "Mac"
+    auth = cloud.create_device_authorization(name, "darwin", __version__)
+    print("用刻迹 iPhone App 的「你的 AI → 扫码绑定」扫描下方二维码（或用相机扫描）：")
+    print()
+    _print_pair_qr(_pair_link(auth["user_code"], name))
+    print()
+    print("扫不了码时，在「你的 AI → 绑定电脑」中输入：%s" % auth["user_code"])
     print("授权码 %d 分钟内有效，正在等待确认…" % max(1, int(auth["expires_in"]) // 60))
     deadline = time.time() + int(auth["expires_in"])
     while time.time() < deadline:

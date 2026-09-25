@@ -105,3 +105,14 @@ class ClaudeAdapterQuotaTest(unittest.TestCase):
         self.assertEqual(claude_usage._percent(100), 100.0)
         self.assertIsNone(claude_usage._percent("n/a"))
 
+
+class EpochParsingTest(unittest.TestCase):
+    def test_tolerates_long_fractions_and_compact_offsets(self):
+        self.assertEqual(claude_usage._epoch("2026-09-25T01:20:00.128092+00:00"), 1790299200)
+        self.assertEqual(claude_usage._epoch("2026-09-25T01:20:00.1280921+00:00"), 1790299200)  # 7 fractional digits
+        self.assertEqual(claude_usage._epoch("2026-09-25T01:20:00+0000"), 1790299200)           # compact offset
+        self.assertEqual(claude_usage._epoch("2026-09-25T01:20:00Z"), 1790299200)
+        self.assertEqual(claude_usage._epoch(1790299200), 1790299200)
+        self.assertIsNone(claude_usage._epoch("soon"))
+        self.assertIsNone(claude_usage._epoch(None))
+

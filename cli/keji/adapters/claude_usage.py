@@ -3,6 +3,7 @@ own /usage command calls. The access token comes from the local credentials
 (file, else the macOS Keychain item Claude Code uses), is sent once, and is
 never stored, logged, or returned."""
 import json
+import re
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -16,13 +17,30 @@ USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 WINDOWS = (("five_hour", 300), ("seven_day", 7 * 24 * 60))
 
 
+_ISO = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:?\d{2})?$")
+
+
 def _epoch(value: Any) -> Optional[int]:
+    """RFC 3339 → epoch seconds, tolerating what Python 3.9's fromisoformat
+    rejects: more than six fractional digits and compact offsets like +0000."""
     if value is None:
         return None
     if isinstance(value, (int, float)):
         return int(value)
+    match = _ISO.match(str(value).strip())
+    if not match:
+        return None
+    base, fraction, offset = match.groups()
+    text = base
+    if fraction:
+        text += "." + fraction[:6].ljust(6, "0")
+    offset = offset or "+00:00"
+    if offset == "Z":
+        offset = "+00:00"
+    elif ":" not in offset:
+        offset = offset[:3] + ":" + offset[3:]
     try:
-        return int(datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp())
+        return int(datetime.fromisoformat(text + offset).timestamp())
     except ValueError:
         return None
 

@@ -145,6 +145,30 @@ class CliTest(unittest.TestCase):
         self.assertIn("套餐: prolite", out)
         self.assertIn("本周 剩余 89%", out)
 
+    def test_doctor_labels_claude_windows_in_chinese(self):
+        from keji.models import Sample
+
+        class ClaudeLike:
+            def capabilities(self):
+                return {"can_read_quota": True, "can_enforce_zero_spend": True}
+
+            def capability_details(self):
+                return {"can_enforce_zero_spend": True, "auth_method": "claude.ai", "verified_at": 1000}
+
+            def plan_tier(self):
+                return "team"
+
+            def read_limits(self):
+                return [Sample(bucket_key="claude:five_hour", tool="claude", used_pct=51.0, reset_at=None, window_mins=300),
+                        Sample(bucket_key="claude:seven_day", tool="claude", used_pct=73.0, reset_at=None, window_mins=10080)]
+
+        with patch("keji.cli._adapters", return_value={"claude": ClaudeLike()}), \
+             patch("keji.cli.shutil.which", return_value="/test/claude"), \
+             patch("keji.cli.CredentialStore.load", return_value=None):
+            code, out, err = self.run_cli("agent", "doctor")
+        self.assertIn("短时 剩余 49%", out)
+        self.assertIn("本周 剩余 27%", out)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)

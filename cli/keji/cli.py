@@ -227,8 +227,9 @@ def _print_tool_quota(adapter) -> None:
     if not samples:
         print("  额度: 没有读到窗口")
     for s in samples:
-        label = {"short": "短时", "weekly": "本周", "monthly": "本月"}.get(
-            quota.semantic_scope(s.bucket_key.rsplit(":", 1)[-1], s.window_mins), s.bucket_key.rsplit(":", 1)[-1])
+        slot = s.bucket_key.rsplit(":", 1)[-1]
+        label = {"short": "短时", "five_hour": "短时", "weekly": "本周", "seven_day": "本周", "monthly": "本月"}.get(
+            quota.semantic_scope(slot, s.window_mins), slot)
         reset = ("，%s 重置" % _iso_local(s.reset_at)) if s.reset_at else ""
         print("  额度: %s 剩余 %d%%%s" % (label, round(100 - s.used_pct), reset))
 

@@ -34,6 +34,12 @@ final class RemoteExecutionClient {
         await loadRunners()
     }
 
+    /// 给电脑改名；成功后重新拉取列表，AI 页和设备页一起更新。
+    func rename(runnerID: String, to name: String) async throws {
+        _ = try await client.send(Endpoint.renameRunner(id: runnerID, name: name), as: RemoteRunner.self)
+        await loadRunners()
+    }
+
     func inspect(code: String) async throws -> DeviceAuthorizationInspection {
         try await client.send(Endpoint.inspectRunner(code: code.uppercased()), as: DeviceAuthorizationInspection.self)
     }

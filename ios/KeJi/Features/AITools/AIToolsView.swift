@@ -11,6 +11,9 @@ struct AIToolsView: View {
     @State private var pairingMessage: String?
     @State private var pendingInspection: DeviceAuthorizationInspection?
     @State private var selectedPool: AccountQuotaPool?
+    @State private var showScanner = false
+    /// 链接带来的授权码在登录前到达时，登录完成后自动核对。
+    @State private var inspectWhenLoggedIn = false
 
     var body: some View {
         SubPageScaffold(title: "你的 AI") {
@@ -42,6 +45,12 @@ struct AIToolsView: View {
                 Card(borderColor: theme.accent.opacity(0.2)) {
                     Text("请先登录账号，再绑定电脑。游客账号不能批准 Runner。")
                         .font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary)
+                    if !pairingCode.isEmpty {
+                        Text("已收到电脑的授权码 \(pairingCode)，登录后回到这里即可完成绑定。")
+                            .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
+                            .padding(.top, 6)
+                            .accessibilityIdentifier("pairing.pendingCode")
+                    }
                     AppButton("去登录", variant: .accent, fullWidth: true) { router.push(.account) }
                         .accessibilityIdentifier("pairing.login")
                         .padding(.top, 10)
@@ -50,12 +59,14 @@ struct AIToolsView: View {
                 Card(borderColor: theme.ai.opacity(0.25)) {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("绑定新电脑").font(Typo.sans(Typo.sm, weight: .medium)).foregroundStyle(theme.text)
-                        Text("在 Mac 运行 `keji cloud login`，然后输入屏幕上的 8 位授权码。")
+                        Text("在 Mac 运行 `keji cloud login`，扫描终端里的二维码；扫不了时输入屏幕上的 8 位授权码。")
                             .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
+                        AppButton("扫码绑定", variant: .accent, fullWidth: true) { showScanner = true }
+                            .accessibilityIdentifier("pairing.scan")
                         AppTextField(placeholder: "例如 A1B2C3D4", text: $pairingCode)
                             .textInputAutocapitalization(.characters)
                             .accessibilityIdentifier("runner-pairing-code")
-                        AppButton("检查电脑", variant: .accent, fullWidth: true,
+                        AppButton("检查电脑", variant: .secondary, fullWidth: true,
                                   disabled: pairingCode.trimmingCharacters(in: .whitespaces).count != 8) {
                             approvePairing()
                         }
@@ -92,6 +103,21 @@ struct AIToolsView: View {
             .padding(.top, 24)
         }
         .sheet(item: $selectedPool) { pool in poolDetail(pool) }
+        .sheet(isPresented: $showScanner) {
+            PairingScannerView { link in router.openPairing(link) }
+        }
+        // keji://pair 链接或扫码：预填授权码，已登录就直接核对并弹出确认框。
+        .onChange(of: router.pendingPairing, initial: true) { _, link in
+            guard let link else { return }
+            router.pendingPairing = nil
+            pairingCode = link.code
+            if sync.isLoggedIn { approvePairing() } else { inspectWhenLoggedIn = true }
+        }
+        .onChange(of: sync.isLoggedIn) { _, loggedIn in
+            guard loggedIn, inspectWhenLoggedIn else { return }
+            inspectWhenLoggedIn = false
+            approvePairing()
+        }
         // Keyed on the account identity: on a fresh install the page can appear before the
         // guest session exists, and that first request fails. Re-run once the session arrives.
         .task(id: sync.user?.id) {

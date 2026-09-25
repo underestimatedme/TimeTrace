@@ -21,6 +21,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_PUT(self):
         self.handle_request()
 
+    def do_PATCH(self):
+        self.handle_request()
+
     def handle_request(self):
         parts = self.path.strip("/").split("/")
         scenario, path = parts[0], "/" + "/".join(parts[1:])
@@ -100,8 +103,22 @@ class Handler(BaseHTTPRequestHandler):
                                             "observed_at": NOW, "expires_at": "2099-01-01T00:00:00Z",
                                             "source": "runner", "confidence": "exact"}]}],
                     "observed_at": NOW}
+        elif path == "/device-authorizations/inspect":
+            # keji://pair 链接里的小写码必须在手机上规范成大写再发出。
+            assert body.get("user_code") == "ABCD1234", body
+            data = {"device_name": "Fixture Mac", "platform": "darwin", "client_version": "0.4.0",
+                    "requested_at": NOW, "expires_at": "2099-01-01T00:00:00Z", "permissions": ["receive_jobs"]}
+        elif path == "/device-authorizations/approve":
+            assert body.get("user_code") == "ABCD1234", body
+            data = {"approved": True}
+        elif path == "/runners/runner-ui" and self.command == "PATCH":
+            name = (body.get("name") or "").strip()
+            assert 1 <= len(name) <= 80, body
+            state["runner_name"] = name
+            data = {"id": "runner-ui", "name": name, "platform": "darwin", "client_version": "1",
+                    "status": "online", "created_at": NOW, "updated_at": NOW}
         elif path == "/runners":
-            data = [{"runner": {"id": "runner-ui", "name": "Test Mac", "platform": "darwin", "client_version": "1",
+            data = [{"runner": {"id": "runner-ui", "name": state.get("runner_name", "Test Mac"), "platform": "darwin", "client_version": "1",
                                 "status": "online", "created_at": NOW, "updated_at": NOW},
                      "workspaces": [{"id": "workspace-ui", "name": "Test workspace", "enabled": True,
                                      "default_branch": "main", "updated_at": NOW}],
@@ -114,7 +131,7 @@ class Handler(BaseHTTPRequestHandler):
                     state[key] = list(existing.values())
             user_id = scenario if scenario.startswith("feedback-") else "local-test"
             data = {"user": {"id": user_id, "is_guest": False}, "state": {
-                key: value for key, value in state.items() if key not in ["plans", "jobs", "feedback", "feedback_tickets", "preferences"]}}
+                key: value for key, value in state.items() if key not in ["plans", "jobs", "feedback", "feedback_tickets", "preferences", "runner_name"]}}
         elif path.startswith("/tasks/") and path.endswith("/plans"):
             task_id = path.split("/")[2]
             if self.command == "POST":

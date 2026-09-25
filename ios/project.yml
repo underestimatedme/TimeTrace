@@ -48,6 +48,11 @@ targets:
         UIRequiresFullScreen: true
         UIUserInterfaceStyle: Automatic
         ITSAppUsesNonExemptEncryption: false
+        NSCameraUsageDescription: 扫描电脑上的二维码以绑定这台电脑
+        CFBundleURLTypes:
+          - CFBundleURLName: com.atlaspaces.timetrace.pair
+            CFBundleURLSchemes:
+              - keji
         KEJI_API_BASE_URL: https://apis.atlaspaces.com/timetrace/api/v1
   KeJiTests:
     type: bundle.unit-test

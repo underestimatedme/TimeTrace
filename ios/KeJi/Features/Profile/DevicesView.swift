@@ -9,6 +9,8 @@ struct DevicesView: View {
     @Environment(RemoteExecutionClient.self) private var remote
     @State private var pendingUnbind: RunnerInventory?
     @State private var unbindError: String?
+    @State private var renameTarget: RunnerInventory?
+    @State private var renameText = ""
 
     var body: some View {
         SubPageScaffold(title: "设备与授权") {
@@ -21,7 +23,7 @@ struct DevicesView: View {
             } else if remote.runners.isEmpty {
                 Card {
                     Text("还没有绑定的电脑").font(Typo.sans(Typo.sm, weight: .medium)).foregroundStyle(theme.text)
-                    Text("在「你的 AI」页输入电脑上显示的 8 位授权码完成绑定。")
+                    Text("在「你的 AI」页扫描电脑上的二维码，或输入 8 位授权码完成绑定。")
                         .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted).padding(.top, 4)
                 }
                 .padding(.bottom, 20)
@@ -45,7 +47,8 @@ struct DevicesView: View {
                 Text(unbindError).font(Typo.sans(Typo.xs)).foregroundStyle(theme.danger).padding(.top, 12)
             }
         }
-        .task { if sync.isLoggedIn { await remote.loadRunners() } }
+        // 以账号身份为键：页面可能在登录态就绪前出现，就绪后再拉一次。
+        .task(id: sync.user?.id) { if sync.isLoggedIn { await remote.loadRunners() } }
         .confirmationDialog("解绑这台电脑？", isPresented: Binding(
             get: { pendingUnbind != nil }, set: { if !$0 { pendingUnbind = nil } }
         ), titleVisibility: .visible) {
@@ -53,6 +56,17 @@ struct DevicesView: View {
             Button("取消", role: .cancel) { pendingUnbind = nil }
         } message: {
             Text("解绑后这台电脑不再接收任务，还在等它的任务会被取消；电脑端的 Runner 会自动清除本机凭据。要重新使用，在电脑上运行 keji cloud login。")
+        }
+        .alert("重命名电脑", isPresented: Binding(
+            get: { renameTarget != nil }, set: { if !$0 { renameTarget = nil } }
+        )) {
+            TextField("电脑名称", text: $renameText)
+                .accessibilityIdentifier("device.rename.field")
+            Button("取消", role: .cancel) { renameTarget = nil }
+            Button("保存") { rename() }
+                .disabled(!Self.isValidName(renameText))
+        } message: {
+            Text("最多 80 个字符，只影响在刻迹里显示的名字。")
         }
     }
 
@@ -73,11 +87,41 @@ struct DevicesView: View {
                 Text("最近在线 \(Format.relative(seen, now: Date()))")
                     .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted).padding(.top, 2)
             }
-            AppButton("解绑这台电脑", variant: .danger, size: .sm, fullWidth: true) { pendingUnbind = inventory }
-                .accessibilityIdentifier("device.unbind.\(inventory.runner.id)")
-                .padding(.top, 10)
+            HStack(spacing: 10) {
+                AppButton("重命名", variant: .secondary, size: .sm, fullWidth: true) {
+                    renameText = inventory.runner.name
+                    renameTarget = inventory
+                }
+                .accessibilityIdentifier("device.rename.\(inventory.runner.id)")
+                AppButton("解绑这台电脑", variant: .danger, size: .sm, fullWidth: true) { pendingUnbind = inventory }
+                    .accessibilityIdentifier("device.unbind.\(inventory.runner.id)")
+            }
+            .padding(.top, 10)
         }
+        // .contain：卡片自己带标识，但不覆盖里面按钮的标识。
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("device.\(inventory.runner.id)")
+    }
+
+    /// 与 Valley 一致：去掉首尾空白后 1–80 个字符。
+    static func isValidName(_ name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && trimmed.count <= 80
+    }
+
+    private func rename() {
+        guard let target = renameTarget else { return }
+        renameTarget = nil
+        let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Self.isValidName(name), name != target.runner.name else { return }
+        _Concurrency.Task {
+            do {
+                try await remote.rename(runnerID: target.runner.id, to: name)
+                unbindError = nil
+            } catch {
+                unbindError = "重命名失败：\(error.localizedDescription)"
+            }
+        }
     }
 
     private func unbind() {

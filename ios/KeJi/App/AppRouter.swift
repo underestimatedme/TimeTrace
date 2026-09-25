@@ -64,6 +64,8 @@ final class AppRouter {
     var phase: RootPhase = .splash
     var tab: AppTab = .today
     var path: [Route] = []
+    /// 通过 keji://pair 链接或扫码拿到、还没被「你的 AI」页处理的授权码。
+    var pendingPairing: PairingLink?
 
     func push(_ route: Route) { path.append(route) }
     func pop() { if !path.isEmpty { path.removeLast() } }
@@ -73,6 +75,12 @@ final class AppRouter {
     func go(_ tab: AppTab) {
         path.removeAll()
         self.tab = tab
+    }
+
+    /// 打开 keji://pair：回到 AI 页，由它预填授权码并直接核对电脑。
+    func openPairing(_ link: PairingLink) {
+        go(.ai)
+        pendingPairing = link
     }
 
     /// Parses a `--screen <route>` value.

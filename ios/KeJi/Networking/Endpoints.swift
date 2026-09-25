@@ -31,6 +31,10 @@ struct Endpoint {
     static func unbindRunner(id: String) -> Endpoint {
         Endpoint(method: .delete, path: "/runners/\(id)", requiresAuth: true, body: nil)
     }
+    /// 给电脑改个名字（1–80 个字符，服务端去掉首尾空白）。
+    static func renameRunner(id: String, name: String) -> Endpoint {
+        Endpoint(method: .patch, path: "/runners/\(id)", requiresAuth: true, body: ["name": name])
+    }
     static func approveRunner(code: String) -> Endpoint {
         Endpoint(method: .post, path: "/device-authorizations/approve", requiresAuth: true,
                  body: DeviceApprovalRequest(userCode: code))

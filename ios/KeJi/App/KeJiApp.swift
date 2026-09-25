@@ -12,6 +12,10 @@ struct KeJiApp: App {
                 .environment(environment.sync)
                 .environment(environment.remote)
                 .environment(environment)
+                // keji://pair?code=… ——电脑上 `keji cloud login` 打印的二维码用系统相机扫到后会走这里。
+                .onOpenURL { url in
+                    if let link = PairingLink.parse(url) { environment.router.openPairing(link) }
+                }
         }
     }
 }

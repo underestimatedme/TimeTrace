@@ -2,10 +2,21 @@
 
 ## 身份绑定
 
-1. Mac 执行 `keji cloud login`，Valley 创建 10 分钟有效的 device code，并返回 8 位 user code。
-2. 已登录（非游客）的 iOS 用户在「AI 工具管理」输入 user code。Valley 在事务中把该授权记录绑定到当前 `tt_users.id`。
-3. CLI 只轮询 device code；批准后用一次性 activation code 换取 Runner 专用 access/refresh token。它不会获得手机账号密码或用户 token。
-4. refresh token 通过 Security.framework 存入当前 macOS 登录用户的 Keychain；access token 仅驻留内存并每 15 分钟轮换。Claude/Codex 继续使用该 macOS 用户原有的本地登录态，任何厂商凭据都不上传 Valley。
+1. Mac 执行 `keji cloud login`，Valley 创建 10 分钟有效的 device code，并返回 8 位 user code 和 `verification_uri`（`keji://pair?code=<USERCODE>&name=<电脑名>&platform=darwin&v=1`）。
+2. CLI 在终端打印同一形式的二维码（Unicode 半块字符，白底黑码；纯标准库编码，byte 模式、纠错 M，放不下时退到 L，版本 1–6；电脑名过长时省略 `name`），下方仍打印 8 位码作为后备。二维码里只有 user code 和展示用的电脑名，没有 device code 或任何 token；拍到二维码的人仍需要登录后的手机账号确认才能绑定。
+3. 已登录（非游客）的 iOS 用户任选一种方式提交 user code，都会先调用 inspect 显示电脑名/平台/版本，再由用户点「确认绑定」调用 approve；Valley 在事务中把该授权记录绑定到当前 `tt_users.id`：
+   - 「你的 AI → 扫码绑定」：App 内相机（AVFoundation）只识别 `keji://pair` 二维码；模拟器或无相机权限时给出说明，改用手输。
+   - 系统相机扫码或点开 `keji://pair` 链接：App 通过 `keji` URL scheme 打开，切到「你的 AI」、预填授权码并直接弹出确认框；未登录时先显示登录提示，登录后自动继续核对。
+   - 手动输入 8 位码后点「检查电脑」。
+4. CLI 只轮询 device code；批准后用一次性 activation code 换取 Runner 专用 access/refresh token。它不会获得手机账号密码或用户 token。
+5. refresh token 通过 Security.framework 存入当前 macOS 登录用户的 Keychain；access token 仅驻留内存并每 15 分钟轮换。Claude/Codex 继续使用该 macOS 用户原有的本地登录态，任何厂商凭据都不上传 Valley。
+
+## 多台电脑
+
+一个账号可以绑定多台电脑，每台各自运行 `keji cloud login`。手机「我的 → 设备与授权」列出全部电脑：
+
+- 「重命名」调用 `PATCH /runners/:id`（`{"name": "..."}`，去掉首尾空白后 1–80 个字符；只能改自己的、未解绑的电脑，其余一律 404）。名字只影响刻迹里的显示，派发与额度仍按 Runner ID。
+- 「解绑这台电脑」调用 `DELETE /runners/:id`：吊销该电脑的 Runner 凭据并取消还在等它的任务。
 
 ## 首次启用
 

@@ -13,12 +13,14 @@
 Claude/Codex 的登录凭据不会上传：iPhone 只把任务发给 Valley，本机 `keji agent` 通过出站 HTTPS 领取任务，再调用当前 macOS 用户已经登录的 CLI。
 
 ```sh
-keji cloud login                    # 显示 8 位码，在 iPhone「AI 工具管理」批准
+keji cloud login                    # 终端显示二维码，用 iPhone「你的 AI → 扫码绑定」扫描后确认
 keji workspace add ~/code/TimeTrace # 只显式开放这个仓库
 keji agent doctor                   # 检查配对、CLI 和工作区
 keji agent run --once               # 联调一轮
 keji agent install                  # 安装并启动登录用户的 LaunchAgent
 ```
+
+`keji cloud login` 打印的二维码内容是 `keji://pair?code=<8 位码>&name=<电脑名>&platform=darwin&v=1`：只有授权码和展示用的电脑名，没有任何凭据，手机上仍需登录账号并点「确认绑定」才会生效。也可以用系统相机扫描（会打开刻迹 App）；扫不了码时，二维码下方的 8 位码照旧可以在「你的 AI → 绑定新电脑」里手动输入。二维码按白底黑码输出，终端窗口太窄时把窗口拉宽一些再扫。一个账号可以绑定多台电脑，在手机「设备与授权」里重命名或解绑。
 
 Runner refresh token 存在 macOS 登录 Keychain（service `com.atlaspaces.keji.runner`）；access token 15 分钟轮换。每个远程任务仍进入独立 worktree，且 push 被禁用。电脑关机、休眠或未登录时，Valley 只保留排队任务，不会在云端接管本地代码或账号。
 

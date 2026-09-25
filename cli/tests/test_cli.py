@@ -287,6 +287,14 @@ class CliTest(unittest.TestCase):
         self.assertEqual(destination, user_home / "Library" / "LaunchAgents" / "com.keji.run.plist")
         self.assertEqual([c[:2] for c in calls], [["launchctl", "unload"], ["launchctl", "load"]])
 
+    def test_launch_agent_runs_the_installed_module_when_there_is_no_checkout_launcher(self):
+        # pipx / pip installs have no bin/keji next to the package.
+        import plistlib
+        with patch("keji.cli._LAUNCHER", Path(self.tmp.name) / "missing" / "keji"):
+            destination = cli.install_launch_agent(Path(self.tmp.name) / "u", run=lambda cmd, **kw: None)
+        doc = plistlib.loads(destination.read_bytes())
+        self.assertEqual(doc["ProgramArguments"], [sys.executable, "-m", "keji", "agent", "run"])
+
     def test_add_then_ls(self):
         code, out, _ = self.run_cli("add", "fix things", "--repo", str(self.repo), "--tool", "claude",
                                     "--priority", "2")

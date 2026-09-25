@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import plistlib
+import shlex
 import shutil
 import subprocess
 import sys
@@ -14,7 +15,6 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
-from xml.sax.saxutils import escape as xml_escape
 
 from keji import __version__, config, limits, qr, quota, render, scheduler, worktree
 from keji.agent import Agent
@@ -319,19 +319,39 @@ def _print_tool_quota(adapter) -> None:
         print("  额度: %s 剩余 %d%%%s" % (label, round(100 - s.used_pct), reset))
 
 
+_LAUNCHER = Path(__file__).resolve().parents[1] / "bin" / "keji"
+
+
+def keji_command() -> List[str]:
+    """How to start keji again from launchd or a hook: the checkout's
+    launcher when running from a clone, else this interpreter's module
+    (pip/pipx installs)."""
+    if _LAUNCHER.is_file() and os.access(str(_LAUNCHER), os.X_OK):
+        return [str(_LAUNCHER)]
+    return [sys.executable, "-m", "keji"]
+
+
 def install_launch_agent(user_home: Optional[Path] = None, run=subprocess.run) -> Path:
-    """Render launchd/com.keji.run.plist for this checkout and (re)load it."""
+    """Write ~/Library/LaunchAgents/com.keji.run.plist and (re)load it.
+    Generated with plistlib, so any path is escaped correctly."""
     user_home = Path(user_home or Path.home())
-    template = Path(__file__).resolve().parents[1] / "launchd" / "com.keji.run.plist"
     destination = user_home / "Library" / "LaunchAgents" / "com.keji.run.plist"
-    keji_bin = Path(__file__).resolve().parents[1] / "bin" / "keji"
-    # Paths are XML-escaped: a home such as "R&D" must not break the plist.
-    rendered = (template.read_text(encoding="utf-8")
-                .replace("__KEJI_BIN__", xml_escape(str(keji_bin)))
-                .replace("__HOME__", xml_escape(str(user_home))))
-    plistlib.loads(rendered.encode("utf-8"))  # refuse to install a broken file
+    data_dir = user_home / ".keji"
+    doc = {
+        "Label": "com.keji.run",
+        "ProgramArguments": keji_command() + ["agent", "run"],
+        "EnvironmentVariables": {
+            # claude's native installer uses ~/.local/bin; Homebrew one of the others.
+            "PATH": "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:%s" % (user_home / ".local" / "bin"),
+            "KEJI_HOME": str(data_dir),
+        },
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        "StandardOutPath": str(data_dir / "daemon.log"),
+        "StandardErrorPath": str(data_dir / "daemon.err"),
+    }
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(rendered, encoding="utf-8")
+    destination.write_bytes(plistlib.dumps(doc))
     run(["launchctl", "unload", str(destination)], check=False, capture_output=True)
     run(["launchctl", "load", str(destination)], check=True)
     return destination
@@ -692,7 +712,7 @@ def _install_statusline() -> int:
         except ValueError:
             print("error: %s is not valid JSON; fix it first" % settings, file=sys.stderr)
             return 1
-    keji_bin = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "bin", "keji"))
+    keji_bin = " ".join(shlex.quote(part) for part in keji_command())
     current = data.get("statusLine")
     if current and "keji" not in json.dumps(current):
         print("existing statusLine kept, not overwriting: %s" % json.dumps(current), file=sys.stderr)

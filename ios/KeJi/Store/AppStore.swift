@@ -34,6 +34,9 @@ final class AppStore {
     var accountQuota: AccountQuota?
     /// 公共重置信号：只来自 Valley，离线时为 nil，不伪造。
     var resetSignals: ResetSignalsResponse?
+    /// 公共重置日历按月缓存（key = 本地 yyyy-MM），只在内存里。
+    var resetEventMonths: [String: [ResetEvent]] = [:]
+    @ObservationIgnored var resetMonthsLoading: Set<String> = []
     /// Display/behaviour preferences (theme lives in settings). Persisted locally.
     var preferences: UserPreferences = .defaults
     var settings: UserSettings = .defaults()

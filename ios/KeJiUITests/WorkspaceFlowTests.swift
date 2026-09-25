@@ -373,6 +373,38 @@ final class WorkspaceFlowTests: XCTestCase {
         XCTAssertTrue(note.label.contains("不替代个人额度核验"), "必须写明公共信号不代表个人额度")
         capture("ai-reset-signals")
     }
+    /// 公共重置日历：当月 10 日 Codex 与 Claude 都有已确认重置（fixture 按请求的月份造事件），
+    /// 点开这一天列出两条事件，写明「已重置」、原文和来源。
+    func testResetCalendarListsEventsOfTappedDay() {
+        app.terminate()
+        app.launchArguments = ["--workspace-fixture", "--online-ui-testing", "--api-base-url",
+                               "http://127.0.0.1:18768/calendar-\(UUID().uuidString)", "--screen", "ai-tools"]
+        app.launchEnvironment["KEJI_OFFLINE"] = "0"
+        app.launch()
+        let monthFormatter = DateFormatter()
+        monthFormatter.calendar = Calendar(identifier: .gregorian)
+        monthFormatter.dateFormat = "yyyy-MM"
+        let dayKey = monthFormatter.string(from: Date()) + "-10"
+        let calendar = app.descendants(matching: .any)["reset.calendar"].firstMatch
+        XCTAssertTrue(app.staticTexts["62%"].waitForExistence(timeout: 20))
+        let day = app.buttons["reset.day.\(dayKey)"].firstMatch
+        for _ in 0..<8 where !(day.exists && day.isHittable) { app.swipeUp() }
+        XCTAssertTrue(calendar.waitForExistence(timeout: 5), "AI 页应显示公共重置日历")
+        XCTAssertTrue(day.waitForExistence(timeout: 10), "当月 10 日应当有重置标记")
+        XCTAssertTrue(day.label.contains("Codex") && day.label.contains("Claude"), day.label)
+        let summary = app.staticTexts["reset.summary"].firstMatch
+        for _ in 0..<3 where !summary.isHittable { app.swipeUp() }
+        XCTAssertTrue(summary.exists && summary.label.hasPrefix("最近一次重置："), summary.label)
+        capture("reset-calendar")
+        day.tap()
+        let codex = app.descendants(matching: .any)["reset.event.rse_fixture_codex"].firstMatch
+        XCTAssertTrue(codex.waitForExistence(timeout: 5), "点开日期应列出当天事件")
+        XCTAssertTrue(app.descendants(matching: .any)["reset.event.rse_fixture_claude"].firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["Codex 用量已重置"].firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", "已重置")).count >= 2)
+        XCTAssertTrue(app.buttons["查看来源"].firstMatch.exists || app.links["查看来源"].firstMatch.exists)
+        capture("reset-calendar-day")
+    }
     /// 反馈真的发到服务端，并显示服务端返回的工单号（之前联网时只显示「已保存草稿」，其实什么都没发）。
     func testFeedbackIsSubmittedToServerAndShowsTicket() {
         app.terminate()

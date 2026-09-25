@@ -59,6 +59,10 @@ struct Endpoint {
 
     static let accountQuota = Endpoint(method: .get, path: "/quota", requiresAuth: true, body: nil)
     static let resetSignals = Endpoint(method: .get, path: "/reset-signals", requiresAuth: true, body: nil)
+    /// 按 UTC 天取一段范围（含两端），日历每月请求一次。
+    static func resetSignals(from: String, to: String) -> Endpoint {
+        Endpoint(method: .get, path: "/reset-signals?from=\(from)&to=\(to)", requiresAuth: true, body: nil)
+    }
     static let getPreferences = Endpoint(method: .get, path: "/preferences", requiresAuth: true, body: nil)
     static func putPreferences(expectedRevision: Int64, prefs: UserPreferences) -> Endpoint {
         Endpoint(method: .put, path: "/preferences", requiresAuth: true,

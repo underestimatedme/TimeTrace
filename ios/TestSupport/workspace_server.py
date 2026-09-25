@@ -93,12 +93,32 @@ class Handler(BaseHTTPRequestHandler):
                 current = {"revision": current["revision"] + 1, "data": body.get("data", {}), "updated_at": NOW}
                 state["preferences"] = current
                 data = current
-        elif path == "/reset-signals":
-            # 与 Valley linkOnlyResetSignals() 完全一致：只给来源链接，不给事件。
-            data = {"integration_status": "link_only",
+        elif path.split("?")[0] == "/reset-signals":
+            # 与 Valley 的 cached 形状一致：来源链接 + 公共重置日历事件（新的在前）。
+            # 事件落在所请求月份的 10 日 / 14 日（from 是本地月初前一天）；不带 from 时用当前 UTC 月。
+            query = parse_qs(urlsplit(path).query)
+            start = query.get("from", [""])[0]
+            if start:
+                month = time.strftime("%Y-%m", time.gmtime(time.mktime(time.strptime(start, "%Y-%m-%d")) + 2 * 86400))
+            else:
+                month = time.strftime("%Y-%m", time.gmtime())
+            data = {"integration_status": "cached",
                     "sources": [{"name": "BetterOPC", "url": "https://betteropc.com"}],
                     "signals": [], "cache_age_seconds": 0,
-                    "note": "尚无确认可用的公共信号接口或抓取许可；仅提供来源链接。公共信号不替代个人额度核验。"}
+                    "note": "公共信号来自 BetterOPC 的公开动态，仅供参考。公共信号不替代个人额度核验。",
+                    "events": [
+                        {"id": "rse_fixture_announce", "product": "codex", "provider": "codex", "kind": "announcement",
+                         "occurred_at": month + "-14T09:00:00Z", "text": "Codex 将发放重置卡",
+                         "source_url": "https://x.com/betteropc/status/3", "status": "scheduled", "label": "发重置卡",
+                         "confidence": "possible"},
+                        {"id": "rse_fixture_claude", "product": "claude-code", "provider": "claude", "kind": "confirmed_reset",
+                         "occurred_at": month + "-10T13:30:00Z", "text": "Claude Code 用量已重置",
+                         "source_url": "https://x.com/betteropc/status/2", "status": "executed", "label": "",
+                         "confidence": "confirmed"},
+                        {"id": "rse_fixture_codex", "product": "codex", "provider": "codex", "kind": "confirmed_reset",
+                         "occurred_at": month + "-10T12:00:00Z", "text": "Codex 用量已重置",
+                         "source_url": "https://x.com/betteropc/status/1", "status": "executed", "label": "",
+                         "confidence": "confirmed"}]}
         elif path == "/quota":
             data = {"pools": [{"pool_id": "pool-codex", "provider": "codex", "availability": "available",
                                "windows": [{"pool_id": "pool-codex", "scope": "short", "kind": "codex",

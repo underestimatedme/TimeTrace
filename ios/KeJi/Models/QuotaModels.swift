@@ -114,4 +114,79 @@ struct ResetSignalsResponse: Codable, Equatable {
     var cacheAgeSeconds: Int
     var fetchedAt: Date?
     var note: String
+    /// 公共重置日历的事件（新的在前）。后加字段：旧服务端没有时为空；坏掉的单条跳过。
+    var events: [ResetEvent] = []
+}
+
+extension ResetSignalsResponse {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        integrationStatus = try c.decodeIfPresent(String.self, forKey: .integrationStatus) ?? ""
+        sources = try c.decodeIfPresent([ResetSource].self, forKey: .sources) ?? []
+        signals = try c.decodeIfPresent([ResetSignal].self, forKey: .signals) ?? []
+        cacheAgeSeconds = try c.decodeIfPresent(Int.self, forKey: .cacheAgeSeconds) ?? 0
+        fetchedAt = try c.decodeIfPresent(Date.self, forKey: .fetchedAt)
+        note = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
+        events = (try c.decodeIfPresent([Lossy<ResetEvent>].self, forKey: .events) ?? []).compactMap(\.value)
+    }
+}
+
+/// 解码失败的数组元素变成 nil，不拖累整个响应。
+struct Lossy<Value: Decodable>: Decodable {
+    var value: Value?
+    init(from decoder: Decoder) throws { value = try? Value(from: decoder) }
+}
+
+/// 一条公共重置事件（来自 BetterOPC，经 Valley 缓存）。kind / status 是开放字符串：
+/// 服务端以后加新值也照收，只有 `confirmed_reset` 算「已重置」。
+struct ResetEvent: Codable, Equatable, Identifiable {
+    var id: String
+    var product: String         // codex / claude-code
+    var provider: String        // codex / claude
+    var kind: String            // confirmed_reset / announcement
+    var occurredAt: Date
+    var text: String
+    var sourceUrl: URL?
+    var status: String          // executed / possible / scheduled / ""
+    var label: String           // 例如「发重置卡」
+    var confidence: String      // confirmed / possible
+
+    var isConfirmedReset: Bool { kind == "confirmed_reset" }
+    var kindLabel: String {
+        if isConfirmedReset { return "已重置" }
+        return label.isEmpty ? "公告" : label
+    }
+    var resetProvider: ResetProvider? {
+        ResetProvider(rawValue: provider) ?? (product == "claude-code" ? .claude : ResetProvider(rawValue: product))
+    }
+    var productName: String {
+        switch product {
+        case "codex": return "Codex"
+        case "claude-code": return "Claude Code"
+        default: return resetProvider?.label ?? (product.isEmpty ? provider : product)
+        }
+    }
+}
+
+extension ResetEvent {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        occurredAt = try c.decode(Date.self, forKey: .occurredAt)
+        product = try c.decodeIfPresent(String.self, forKey: .product) ?? ""
+        provider = try c.decodeIfPresent(String.self, forKey: .provider) ?? ""
+        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? ""
+        text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
+        let rawURL = (try? c.decodeIfPresent(String.self, forKey: .sourceUrl)) ?? nil
+        sourceUrl = rawURL.flatMap { $0.isEmpty ? nil : URL(string: $0) }
+        status = try c.decodeIfPresent(String.self, forKey: .status) ?? ""
+        label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
+        confidence = try c.decodeIfPresent(String.self, forKey: .confidence) ?? ""
+    }
+}
+
+/// 日历上区分的两个工具：Codex 在前、Claude 在后。
+enum ResetProvider: String, CaseIterable, Equatable {
+    case codex, claude
+    var label: String { self == .codex ? "Codex" : "Claude" }
 }

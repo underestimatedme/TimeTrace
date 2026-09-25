@@ -36,6 +36,10 @@ final class WorkspaceClient {
         try await client.send(.resetSignals, as: ResetSignalsResponse.self)
     }
 
+    func resetSignals(from: String, to: String) async throws -> ResetSignalsResponse {
+        try await client.send(.resetSignals(from: from, to: to), as: ResetSignalsResponse.self)
+    }
+
     func plans(taskID: String) async throws -> [PlanItem] {
         try await client.send(.taskPlans(taskID: taskID), as: [PlanItem].self)
     }

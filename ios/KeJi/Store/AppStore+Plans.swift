@@ -292,4 +292,24 @@ extension AppStore {
         if let quota = try? await workspaceClient.accountQuota() { accountQuota = quota }
         if let signals = try? await workspaceClient.resetSignals() { resetSignals = signals }
     }
+
+    /// 日历显示某个月时按 UTC 天前后各多要一天，同一个月只拉一次；失败不缓存。
+    @MainActor
+    func loadResetMonth(_ month: Date, calendar: Calendar = .current) async {
+        guard let workspaceClient else { return }
+        let key = ResetCalendar.monthKey(month, calendar: calendar)
+        guard resetEventMonths[key] == nil, !resetMonthsLoading.contains(key) else { return }
+        resetMonthsLoading.insert(key)
+        defer { resetMonthsLoading.remove(key) }
+        let range = ResetCalendar.fetchRange(month: month, calendar: calendar)
+        guard let response = try? await workspaceClient.resetSignals(from: range.from, to: range.to) else { return }
+        resetEventMonths[key] = response.events
+        if resetSignals == nil { resetSignals = response }
+    }
+
+    /// 已拿到的全部公共重置事件（整体响应 + 各月缓存），按 id 去重。
+    var knownResetEvents: [ResetEvent] {
+        var seen = Set<String>()
+        return ((resetSignals?.events ?? []) + resetEventMonths.values.flatMap { $0 }).filter { seen.insert($0.id).inserted }
+    }
 }

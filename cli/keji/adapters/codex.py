@@ -19,7 +19,7 @@ import threading
 from typing import Any, Dict, List, Optional
 
 from keji.adapters.base import SAFETY_RULES, ToolAdapter, run_streaming
-from keji import tiers
+from keji import tiers, worktree
 from keji.models import CODEX, RunResult, Sample
 from keji.billing import billing_env_keys, codex_verifier, sanitized_env
 from keji.quota import merge_capabilities
@@ -99,13 +99,18 @@ def app_server_request(bin_: str, method: str, params: Optional[dict] = None,
 
 # ---- exec -----------------------------------------------------------------------
 def build_cmd(cfg: Dict[str, Any], prompt: str, cwd: str, resume: Optional[str] = None,
-              last_msg_file: Optional[str] = None) -> List[str]:
+              last_msg_file: Optional[str] = None, add_dirs: Optional[List[str]] = None) -> List[str]:
     cmd = [cfg.get("bin", "codex"), "exec"]
     if resume:
         cmd += ["resume", resume]
     cmd += ["--json", "--skip-git-repo-check"]
     if not resume:
         cmd += ["-s", cfg.get("sandbox", "workspace-write"), "-C", cwd]
+    # Directories the workspace-write sandbox may also write: a linked
+    # worktree's git metadata lives in the main repo's .git, and `git commit`
+    # inside the worktree needs it.
+    for extra in add_dirs or []:
+        cmd += ["--add-dir", extra]
     if cfg.get("model"):
         cmd += ["-m", cfg["model"]]
     if last_msg_file:
@@ -186,13 +191,24 @@ class CodexAdapter(ToolAdapter):
         path = self.cfg.get("auth_path") or Path.home() / ".codex" / "auth.json"
         return tiers.codex_plan_tier(Path(path))
 
+    @staticmethod
+    def _writable_extras(cwd: str) -> List[str]:
+        try:
+            common = worktree.git_common_dir(cwd)
+        except Exception:
+            return []
+        inside = Path(common).resolve()
+        root = Path(cwd).resolve()
+        return [] if root == inside or root in inside.parents else [common]
+
     def start(self, prompt: str, cwd: str, session_id: str, log_file: str, cancel_event=None) -> RunResult:
-        cmd = build_cmd(self.cfg, prompt, cwd, last_msg_file=log_file + ".last.md")
+        cmd = build_cmd(self.cfg, prompt, cwd, last_msg_file=log_file + ".last.md",
+                        add_dirs=self._writable_extras(cwd))
         return self._run(cmd, cwd, log_file, cancel_event)
 
     def resume(self, prompt: str, cwd: str, session_id: str, log_file: str, cancel_event=None) -> RunResult:
         cmd = build_cmd(self.cfg, prompt, cwd, resume=session_id,
-                        last_msg_file=log_file + ".last.md")
+                        last_msg_file=log_file + ".last.md", add_dirs=self._writable_extras(cwd))
         res = self._run(cmd, cwd, log_file, cancel_event)
         res.session_id = res.session_id or session_id
         return res

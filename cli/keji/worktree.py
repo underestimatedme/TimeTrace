@@ -61,6 +61,13 @@ def same_repository(path: str, registered: str) -> bool:
     return common(path) == common(registered)
 
 
+def git_common_dir(path: str) -> str:
+    """Absolute path of the repository metadata a checkout writes to. For a
+    linked worktree that is the main repo's .git, outside the worktree itself."""
+    common = _git("-C", path, "rev-parse", "--git-common-dir")
+    return str((Path(path) / common).resolve()) if not os.path.isabs(common) else str(Path(common).resolve())
+
+
 def _git(*args: str, cwd: str = None) -> str:
     out = subprocess.run(
         ["git"] + list(args), cwd=cwd, check=True, capture_output=True, text=True

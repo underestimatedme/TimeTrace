@@ -87,6 +87,45 @@ class BuildCmdTest(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("-m") + 1], "gpt-5.6")
 
 
+class WorktreeWritableRootTest(unittest.TestCase):
+    def test_build_cmd_adds_extra_writable_dirs(self):
+        cmd = codex.build_cmd(BuildCmdTest.cfg, "do it", "/wt", add_dirs=["/repo/.git"])
+        self.assertEqual(cmd[cmd.index("--add-dir") + 1], "/repo/.git")
+        resumed = codex.build_cmd(BuildCmdTest.cfg, "go on", "/wt", resume="tid", add_dirs=["/repo/.git"])
+        self.assertIn("--add-dir", resumed)
+
+    def test_adapter_makes_the_worktrees_git_dir_writable(self):
+        # A linked worktree keeps its metadata under the main repo's .git; the
+        # workspace-write sandbox must be allowed to write there or `git commit`
+        # inside the worktree fails.
+        import subprocess
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            repo = Path(d) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+            subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "--allow-empty", "-qm", "init"], cwd=repo, check=True)
+            wt = Path(d) / "wt"
+            subprocess.run(["git", "worktree", "add", "-q", str(wt), "-b", "task"], cwd=repo, check=True)
+            seen = {}
+
+            def fake_run(cmd, cwd, log, **kwargs):
+                seen["cmd"] = cmd
+                return 0, []
+
+            ad = codex.CodexAdapter({"bin": "codex"})
+            original = codex.run_streaming
+            codex.run_streaming = fake_run
+            try:
+                ad.start("do it", str(wt), "s", str(Path(d) / "log"))
+            finally:
+                codex.run_streaming = original
+            cmd = seen["cmd"]
+            self.assertIn("--add-dir", cmd)
+            self.assertEqual(Path(cmd[cmd.index("--add-dir") + 1]).resolve(), (repo / ".git").resolve())
+
+
 class AdapterBlockedResetTest(unittest.TestCase):
     def test_blocked_run_pulls_reset_from_live_limits(self):
         ad = codex.CodexAdapter({"bin": "codex"})

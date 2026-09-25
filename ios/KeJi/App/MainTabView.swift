@@ -52,9 +52,11 @@ struct MainTabView: View {
                 .accessibilityIdentifier("workspace.tab.\(tab.rawValue)")
             }
         }
-        // backdrop-filter: blur(18px) + #fbfdfff2
-        .background(theme.bgElevated.opacity(0.95), in: Rectangle())
-        .background(.ultraThinMaterial)
+        // backdrop-filter: blur(18px) + #fbfdfff2. The bar's backdrop runs to
+        // the screen's bottom edge (under the home indicator), App Store style,
+        // so no strip of page background shows below the tabs.
+        .background(theme.bgElevated.opacity(0.95), ignoresSafeAreaEdges: .bottom)
+        .background(.ultraThinMaterial, ignoresSafeAreaEdges: .bottom)
         .overlay(alignment: .top) { Divider1() }
     }
 }

@@ -38,6 +38,46 @@ final class PairingLinkTests: XCTestCase {
         XCTAssertNil(parse("keji://pair?code=ABCD-123"))
     }
 
+    /// 新 CLI 在链接里带 exp（unix 秒）；旧 CLI 不带就永不按本地时间判过期，交给服务端。
+    func testParsesOptionalExpiry() {
+        let link = parse("keji://pair?code=ABCD1234&name=Mac&exp=1790000000&platform=darwin&v=1")
+        XCTAssertEqual(link?.exp, 1790000000)
+        XCTAssertEqual(link?.isExpired(now: Date(timeIntervalSince1970: 1789999999)), false)
+        XCTAssertEqual(link?.isExpired(now: Date(timeIntervalSince1970: 1790000000)), true)
+        XCTAssertEqual(link?.isExpired(now: Date(timeIntervalSince1970: 1790000100)), true)
+        let old = parse("keji://pair?code=ABCD1234")
+        XCTAssertNil(old?.exp)
+        XCTAssertEqual(old?.isExpired(now: .distantFuture), false)
+        // exp 写坏了不影响授权码本身：当作没有 exp。
+        XCTAssertNil(parse("keji://pair?code=ABCD1234&exp=soon")?.exp)
+        XCTAssertEqual(parse("keji://pair?code=ABCD1234&exp=soon")?.code, "ABCD1234")
+        XCTAssertEqual(PairingLink.expiredMessage, "二维码已过期，请看电脑上刷新出的新二维码")
+    }
+
+    /// 二维码上的电脑名与服务端记录不一致时要提醒（忽略首尾空白与大小写）。
+    func testNameMismatchWarning() {
+        XCTAssertNil(pairingNameMismatchWarning(linkName: nil, serverName: "Fixture Mac"))
+        XCTAssertNil(pairingNameMismatchWarning(linkName: "  fixture MAC ", serverName: "Fixture Mac"))
+        XCTAssertNil(pairingNameMismatchWarning(linkName: "  ", serverName: "Fixture Mac"))
+        XCTAssertEqual(pairingNameMismatchWarning(linkName: "Joey 的 Mac", serverName: "Fixture Mac"),
+                       "⚠️ 二维码上的电脑名（Joey 的 Mac）与服务器记录（Fixture Mac）不一致，确认是你自己的电脑再绑定")
+    }
+
+    /// 确认框正文：不一致时第一行就是警告，其余照旧。
+    func testConfirmMessageStartsWithWarningOnMismatch() {
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        let info = DeviceAuthorizationInspection(deviceName: "Fixture Mac", platform: "darwin", clientVersion: "0.4.0",
+                                                 requestedAt: now, expiresAt: now.addingTimeInterval(120),
+                                                 permissions: ["receive_jobs"])
+        let warned = pairingConfirmMessage(info, linkName: "Other Mac", now: now)
+        XCTAssertTrue(warned.hasPrefix("⚠️ 二维码上的电脑名（Other Mac）与服务器记录（Fixture Mac）不一致，确认是你自己的电脑再绑定\n"), warned)
+        XCTAssertTrue(warned.contains("Fixture Mac · darwin · v0.4.0"))
+        let plain = pairingConfirmMessage(info, linkName: "fixture mac", now: now)
+        XCTAssertTrue(plain.hasPrefix("Fixture Mac · darwin · v0.4.0\n"), plain)
+        XCTAssertTrue(plain.contains("权限：仅接收任务"))
+        XCTAssertEqual(pairingConfirmMessage(info, linkName: nil, now: now), plain)
+    }
+
     /// 从二维码读到的是字符串：非 URL、非刻迹的二维码都不能触发绑定。
     func testScannedStringParsing() {
         XCTAssertEqual(PairingLink.parse(scanned: " keji://pair?code=abcd1234 ")?.code, "ABCD1234")

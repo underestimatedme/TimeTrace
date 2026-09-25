@@ -14,6 +14,8 @@ struct AIToolsView: View {
     @State private var showScanner = false
     /// 链接带来的授权码在登录前到达时，登录完成后自动核对。
     @State private var inspectWhenLoggedIn = false
+    /// 最近一次扫码 / 打开的链接：用来判过期、比对电脑名。手输的授权码与它不同时不再沿用。
+    @State private var scannedLink: PairingLink?
 
     var body: some View {
         SubPageScaffold(title: "你的 AI") {
@@ -45,6 +47,11 @@ struct AIToolsView: View {
                 Card(borderColor: theme.accent.opacity(0.2)) {
                     Text("请先登录账号，再绑定电脑。游客账号不能批准 Runner。")
                         .font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary)
+                    if let pairingMessage {
+                        Text(pairingMessage).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
+                            .padding(.top, 6)
+                            .accessibilityIdentifier("pairing.message")
+                    }
                     if !pairingCode.isEmpty {
                         Text("已收到电脑的授权码 \(pairingCode)，登录后回到这里即可完成绑定。")
                             .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
@@ -73,6 +80,7 @@ struct AIToolsView: View {
                         .accessibilityIdentifier("runner-pairing-submit")
                         if let pairingMessage {
                             Text(pairingMessage).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
+                                .accessibilityIdentifier("pairing.message")
                         }
                     }
                 }
@@ -113,7 +121,17 @@ struct AIToolsView: View {
         .onChange(of: router.pendingPairing, initial: true) { _, link in
             guard let link else { return }
             router.pendingPairing = nil
+            // 过期的二维码不去服务端核对，直接让用户看电脑上刷新出的新码。
+            guard !link.isExpired(now: Date()) else {
+                scannedLink = nil
+                inspectWhenLoggedIn = false
+                pairingMessage = PairingLink.expiredMessage
+                UsageEvents.shared.record(.pairingStep, ["step": .string("inspect"), "result": .string("expired")])
+                return
+            }
+            scannedLink = link
             pairingCode = link.code
+            pairingMessage = nil
             if sync.isLoggedIn { approvePairing() } else { inspectWhenLoggedIn = true }
         }
         .onChange(of: sync.isLoggedIn) { _, loggedIn in
@@ -140,7 +158,7 @@ struct AIToolsView: View {
             }
         } message: {
             if let info = pendingInspection {
-                Text("\(info.deviceName) · \(info.platform) · v\(info.clientVersion)\n请求时间：\(Format.relative(info.requestedAt, now: Date()))\n权限：仅接收任务、运行本机已登记仓库、回报状态及取消进程")
+                Text(pairingConfirmMessage(info, linkName: currentLink?.name, now: Date()))
             }
         }
     }
@@ -216,7 +234,20 @@ struct AIToolsView: View {
         }
     }
 
+    /// 输入框里的码仍是链接带来的那个时才沿用链接（名字、有效期）；手输别的码就当没有链接。
+    private var currentLink: PairingLink? {
+        guard let scannedLink,
+              scannedLink.code == pairingCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() else { return nil }
+        return scannedLink
+    }
+
     private func approvePairing() {
+        // 链接到达时还没登录、登录完已过了有效期：同样不去核对。
+        if let link = currentLink, link.isExpired(now: Date()) {
+            scannedLink = nil
+            pairingMessage = PairingLink.expiredMessage
+            return
+        }
         pairingMessage = "正在核对电脑信息…"
         _Concurrency.Task {
             do {

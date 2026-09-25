@@ -30,6 +30,45 @@ final class PairingFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["电脑已绑定，可以远程派发任务。"].waitForExistence(timeout: 10))
     }
 
+    /// 过期的二维码（exp 已过）不去服务端核对，直接提示看电脑上的新二维码。
+    func testExpiredPairLinkShowsRefreshHint() {
+        launchOnline("pairexpired", screen: "today")
+        XCTAssertTrue(app.buttons["workspace.tab.ai"].waitForExistence(timeout: 10))
+        app.open(URL(string: "keji://pair?code=abcd1234&name=Fixture%20Mac&exp=1000000000&platform=darwin&v=1")!)
+        let message = app.staticTexts["二维码已过期，请看电脑上刷新出的新二维码"].firstMatch
+        for _ in 0..<6 where !message.exists { app.swipeUp() }
+        XCTAssertTrue(message.waitForExistence(timeout: 15), "过期链接应提示刷新")
+        XCTAssertFalse(app.buttons["确认绑定"].firstMatch.waitForExistence(timeout: 3), "过期链接不应弹出确认绑定")
+    }
+
+    /// 链接上的电脑名与服务端记录不一致：确认框第一行就是警告。
+    func testPairLinkNameMismatchWarnsInConfirmation() {
+        launchOnline("pairmismatch", screen: "today")
+        XCTAssertTrue(app.buttons["workspace.tab.ai"].waitForExistence(timeout: 10))
+        let exp = Int(Date().timeIntervalSince1970) + 120
+        app.open(URL(string: "keji://pair?code=ABCD1234&name=Other%20Mac&exp=\(exp)&platform=darwin&v=1")!)
+        XCTAssertTrue(app.buttons["确认绑定"].firstMatch.waitForExistence(timeout: 15))
+        let warning = app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@",
+            "⚠️ 二维码上的电脑名（Other Mac）与服务器记录（Fixture Mac）不一致")).firstMatch
+        XCTAssertTrue(warning.exists, "确认框应以电脑名不一致的警告开头")
+    }
+
+    /// 手输授权码仍然能走核对 → 确认，且没有链接时不出现电脑名警告。
+    func testTypedCodeStillInspects() {
+        launchOnline("pairtyped", screen: "ai-tools")
+        let field = app.textFields["runner-pairing-code"].firstMatch
+        for _ in 0..<6 where !(field.exists && field.isHittable) { app.swipeUp() }
+        XCTAssertTrue(field.waitForExistence(timeout: 15))
+        field.tap()
+        field.typeText("abcd1234")
+        let submit = app.buttons["runner-pairing-submit"].firstMatch
+        if !submit.isHittable { app.swipeUp() }
+        submit.tap()
+        XCTAssertTrue(app.buttons["确认绑定"].firstMatch.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "不一致")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Fixture Mac")).firstMatch.exists)
+    }
+
     /// 模拟器没有相机：扫码页要说明原因，而不是黑屏。
     func testScannerExplainsWhenNoCamera() {
         launchOnline("scan", screen: "ai-tools")

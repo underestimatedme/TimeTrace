@@ -85,6 +85,19 @@ final class QuotaPresentationTests: XCTestCase {
         XCTAssertTrue(card.detail.hasPrefix("周额度剩余 60%"), card.detail)
     }
 
+    /// 额度卡写明数据来自哪台电脑；同一账号在两台电脑上会列出两台。
+    func testToolCardNamesItsSourceComputers() throws {
+        let json = Data(#"""
+        {"pool_id":"pool-codex-ab12cd34","provider":"codex","plan_tier":"prolite","availability":"available","windows":[],
+         "sources":[{"runner_id":"r1","runner_name":"Joeys-MacBook-Air","observed_at":"2026-09-25T10:00:00Z"},
+                    {"runner_id":"r2","runner_name":"Office iMac","observed_at":"2026-09-25T09:00:00Z"}]}
+        """#.utf8)
+        let pool = try JSONCoding.decoder.decode(AccountQuotaPool.self, from: json)
+        XCTAssertEqual(ToolQuotaCard(pool: pool).source, "来自 Joeys-MacBook-Air、Office iMac")
+        let legacy = AccountQuotaPool(poolId: "pool-codex", provider: "codex", availability: "unknown", windows: [])
+        XCTAssertEqual(ToolQuotaCard(pool: legacy).source, "来源电脑未知")
+    }
+
     /// 卡片显示套餐等级，周额度副行带绝对重置时刻。
     func testToolCardShowsTierAndWeeklyResetMoment() {
         let now = Date()

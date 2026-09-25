@@ -27,6 +27,13 @@ final class RemoteExecutionClient {
         await loadRunners()
     }
 
+    struct UnbindResponse: Decodable { var unbound: Bool }
+
+    func unbind(runnerID: String) async throws {
+        _ = try await client.send(Endpoint.unbindRunner(id: runnerID), as: UnbindResponse.self)
+        await loadRunners()
+    }
+
     func inspect(code: String) async throws -> DeviceAuthorizationInspection {
         try await client.send(Endpoint.inspectRunner(code: code.uppercased()), as: DeviceAuthorizationInspection.self)
     }

@@ -114,6 +114,12 @@ enum TimeSessionType: String, Codable, CaseIterable {
     case humanReview = "human_review"
     case aiActive = "ai_active"
     case aiIdle = "ai_idle"
+
+    /// 服务端写入的值：不认识就回落，绝不让整份同步失败。
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = Self(rawValue: raw) ?? .aiIdle
+    }
     case waitingHuman = "waiting_human"
     case waitingAI = "waiting_ai"
     case waitingExternal = "waiting_external"
@@ -137,10 +143,22 @@ enum TimeSessionType: String, Codable, CaseIterable {
 
 enum TimeSessionSource: String, Codable, CaseIterable {
     case manual, timer, integration, inferred, simulated
+
+    /// 服务端写入的值：不认识就回落，绝不让整份同步失败。
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = Self(rawValue: raw) ?? .integration
+    }
 }
 
 enum Confidence: String, Codable, CaseIterable {
     case exact, estimated
+
+    /// 服务端写入的值：不认识就回落，绝不让整份同步失败。
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = Self(rawValue: raw) ?? .estimated
+    }
 }
 
 enum AIExecutionStatus: String, Codable, CaseIterable {
@@ -148,6 +166,12 @@ enum AIExecutionStatus: String, Codable, CaseIterable {
     case waitingAuth = "waiting_auth"
     case waitingInput = "waiting_input"
     case completed, failed, cancelled
+
+    /// 服务端写入的值：不认识就回落，绝不让整份同步失败。
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = Self(rawValue: raw) ?? .failed
+    }
 
     var label: String {
         switch self {

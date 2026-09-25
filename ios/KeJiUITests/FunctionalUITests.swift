@@ -162,6 +162,17 @@ final class FunctionalUITests: XCTestCase {
             capture("route-\(route.replacingOccurrences(of: "/", with: "-"))")
         }
     }
+    /// 子页面支持从屏幕左边缘右滑返回，和系统 App 一致。
+    func testEdgeSwipeGoesBack() {
+        launch("account")
+        XCTAssertTrue(app.buttons["subpage.back"].waitForExistence(timeout: 5))
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.5))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        XCTAssertTrue(app.buttons["workspace.tab.mine"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["subpage.back"].waitForExistence(timeout: 2), "edge swipe must pop the pushed page")
+    }
+
     /// 一级标签页没有可返回的上级，不显示「返回」；全新安装的空状态要给出新建入口。
     func testTabRootsHideBackAndEmptyStatesOfferCreate() {
         launch("projects", sample: false, reset: true)

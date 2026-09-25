@@ -3,3 +3,5 @@ qa-artifacts/
 DerivedData/
 TestResults.xcresult/
 KeJi.xcodeproj/
+.derived-data-archive/
+build/

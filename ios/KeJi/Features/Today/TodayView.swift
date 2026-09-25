@@ -5,6 +5,7 @@ struct TodayView: View {
     @Environment(\.theme) private var theme
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
+    @Environment(SyncEngine.self) private var sync
 
     private var today: String { Format.dayKey(store.now) }
 
@@ -95,7 +96,7 @@ struct TodayView: View {
                     Text(Format.date(store.now))
                         .font(Typo.sans(Glass.small)).foregroundStyle(theme.textMuted)
                         .padding(.bottom, 3)
-                    Text("\(Format.greeting(now: store.now))，\(store.settings.name)")
+                    Text("\(Format.greeting(now: store.now))，\(ProfileIdentity.displayName(settingsName: store.settings.name, user: sync.user))")
                         .font(Typo.sans(Glass.display, weight: .bold))
                         .kerning(Glass.displayTracking)
                         .foregroundStyle(theme.text)
@@ -169,12 +170,7 @@ struct TodayView: View {
     /// .gl-avatar —— 白边 + 冰蓝光圈。
     private var avatar: some View {
         Button { router.go(.mine) } label: {
-            Image("avatar")
-                .resizable().scaledToFill()
-                .frame(width: 42, height: 42)
-                .clipShape(Circle())
-                .overlay(Circle().stroke(Color.white, lineWidth: 2))
-                .overlay(Circle().stroke(theme.accent.opacity(0.35), lineWidth: 1).padding(-2))
+            InitialAvatar(name: ProfileIdentity.displayName(settingsName: store.settings.name, user: sync.user))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("我的")
@@ -205,7 +201,7 @@ struct TodayView: View {
             .frame(width: 156)
             .padding(.top, 9)
             Spacer(minLength: 0)
-            Text("连续专注 \(store.settings.streakDays) 天")
+            Text(Stats.streakDays(store.timeSessions, asOf: store.now) > 0 ? "连续 \(Stats.streakDays(store.timeSessions, asOf: store.now)) 天有记录" : "今天还没有时间记录")
                 .font(Typo.sans(Glass.tiny)).foregroundStyle(theme.textMuted)
         }
         .padding(20)

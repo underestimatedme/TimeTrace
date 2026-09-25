@@ -124,8 +124,20 @@ final class WorkspaceContractTests: XCTestCase {
         XCTAssertEqual(try JSONCoding.decoder.decode(TaskStatus.self, from: Data(#""something_new""#.utf8)), .ready)
     }
 
+    /// 服务端写入的枚举值只要手机不认识，就会让整份同步失败；每个都必须有容错。
+    func testServerWrittenEnumsNeverBreakDecoding() throws {
+        let d = JSONCoding.decoder
+        XCTAssertEqual(try d.decode(TimeSessionSource.self, from: Data(#""runner""#.utf8)), .integration)
+        XCTAssertEqual(try d.decode(Confidence.self, from: Data(#""probable""#.utf8)), .estimated)
+        XCTAssertEqual(try d.decode(TimeSessionType.self, from: Data(#""ai_waiting""#.utf8)), .aiIdle)
+        XCTAssertEqual(try d.decode(AIExecutionStatus.self, from: Data(#""interrupted""#.utf8)), .failed)
+        XCTAssertEqual(try d.decode(TimeSessionType.self, from: Data(#""ai_active""#.utf8)), .aiActive)
+    }
+
     func testEndpointPaths() {
         XCTAssertEqual(Endpoint.accountQuota.path, "/quota")
+        XCTAssertEqual(Endpoint.unbindRunner(id: "r1").path, "/runners/r1")
+        XCTAssertEqual(Endpoint.unbindRunner(id: "r1").method, .delete)
         XCTAssertEqual(Endpoint.taskPlans(taskID: "t1").path, "/tasks/t1/plans")
         XCTAssertEqual(Endpoint.acceptPlan(id: "p1", expectedRevision: 2, evidenceIDs: [], criteria: []).path, "/plans/p1/accept")
         XCTAssertEqual(Endpoint.cancelPlan(id: "p1", expectedRevision: 2).path, "/plans/p1/cancel")

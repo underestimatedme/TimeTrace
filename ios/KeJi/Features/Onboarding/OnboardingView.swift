@@ -57,7 +57,6 @@ struct OnboardingView: View {
                 VStack(spacing: 12) {
                     if isLast {
                         AppButton("开始使用", variant: .accent, size: .lg, fullWidth: true) { start(useSample: false) }
-                        AppButton("使用示例数据体验", variant: .secondary, size: .lg, fullWidth: true) { start(useSample: true) }
                     } else {
                         AppButton("继续", variant: .accent, size: .lg, fullWidth: true) {
                             withAnimation(.easeInOut(duration: 0.25)) { current += 1 }

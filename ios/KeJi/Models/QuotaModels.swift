@@ -45,6 +45,8 @@ struct AccountQuotaPool: Codable, Equatable, Identifiable {
     var windows: [QuotaWindow]
     /// 该池所属工具登录账号的套餐等级；空表示未知。
     var planTier: String = ""
+    /// 上报这个池的电脑，最新的在前。
+    var sources: [QuotaSource] = []
 
     var id: String { poolId }
 
@@ -61,7 +63,14 @@ struct AccountQuotaPool: Codable, Equatable, Identifiable {
         availability = try c.decodeIfPresent(String.self, forKey: .availability) ?? "unknown"
         windows = try c.decodeIfPresent([QuotaWindow].self, forKey: .windows) ?? []
         planTier = try c.decodeIfPresent(String.self, forKey: .planTier) ?? ""
+        sources = try c.decodeIfPresent([QuotaSource].self, forKey: .sources) ?? []
     }
+}
+
+struct QuotaSource: Codable, Equatable, Hashable {
+    var runnerId: String
+    var runnerName: String
+    var observedAt: Date
 }
 
 struct AccountQuota: Codable, Equatable {

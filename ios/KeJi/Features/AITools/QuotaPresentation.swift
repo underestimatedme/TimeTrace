@@ -75,6 +75,8 @@ struct ToolQuotaCard: Identifiable, Equatable {
     let capability: String
     /// 「套餐 Max」/「套餐未知」，来自工具清单，不是猜的。
     let tier: String
+    /// 「来自 Joeys-MacBook-Air」：数据来自哪台电脑上的工具。
+    let source: String
     let headline: String
     let meterPercent: Double?
     let detail: String
@@ -86,6 +88,8 @@ struct ToolQuotaCard: Identifiable, Equatable {
         name = ToolQuotaCard.toolName(provider: pool.provider, poolId: pool.poolId)
         capability = ToolQuotaCard.capability(provider: pool.provider)
         availability = availabilityLabel(pool.availability)
+        let names = pool.sources.map(\.runnerName).filter { !$0.isEmpty }
+        source = names.isEmpty ? "来源电脑未知" : "来自 " + names.joined(separator: "、")
         tier = pool.planTier.isEmpty ? "套餐未知" : "套餐 " + pool.planTier.prefix(1).uppercased() + pool.planTier.dropFirst()
 
         // 同一类窗口有多条时先取主限额。

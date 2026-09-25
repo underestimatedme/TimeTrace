@@ -207,3 +207,20 @@ enum Stats {
         }
     }
 }
+
+extension Stats {
+    /// 连续有时间记录的天数（人工或 AI 都算），截止今天；今天还没记录时从昨天往回数。
+    static func streakDays(_ sessions: [TimeSession], asOf now: Date, calendar: Calendar = .current) -> Int {
+        let days = Set(sessions.filter { $0.durationSeconds > 0 || $0.endedAt == nil }
+            .map { calendar.startOfDay(for: $0.startedAt) })
+        var day = calendar.startOfDay(for: now)
+        if !days.contains(day) { day = calendar.date(byAdding: .day, value: -1, to: day)! }
+        var count = 0
+        while days.contains(day) {
+            count += 1
+            day = calendar.date(byAdding: .day, value: -1, to: day)!
+        }
+        return count
+    }
+}
+

@@ -117,7 +117,8 @@ struct AIToolsView: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(card.name).font(Typo.sans(Glass.quotaTitle, weight: .semibold)).foregroundStyle(theme.text)
-                    Text(card.tier).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
+                    Text("\(card.tier) · \(card.source)").font(Typo.sans(Typo.xs)).foregroundStyle(theme.textSecondary)
+                        .lineLimit(2)
                     Text(card.capability).font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
                 }
                 Spacer(minLength: 8)
@@ -191,6 +192,7 @@ struct AIToolsView: View {
                 Section("账号额度") {
                     LabeledContent("工具", value: card.name)
                     LabeledContent("套餐", value: card.tier)
+                    LabeledContent("来源", value: card.source)
                     LabeledContent("能力", value: card.capability)
                     LabeledContent("可用性", value: card.availability)
                     LabeledContent("额度池", value: pool.poolId)

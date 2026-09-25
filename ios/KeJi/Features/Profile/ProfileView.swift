@@ -16,6 +16,9 @@ struct ProfileView: View {
         var route: Route?
     }
 
+    private var displayName: String { ProfileIdentity.displayName(settingsName: store.settings.name, user: sync.user) }
+    private var streak: Int { Stats.streakDays(store.timeSessions, asOf: store.now) }
+
     private var accountLabel: String {
         if let user = sync.user, !user.isGuest { return user.accountLabel ?? user.nickname ?? "已登录" }
         return "游客"
@@ -25,8 +28,6 @@ struct ProfileView: View {
         [
             MenuItem(icon: "person.crop.circle", label: "账号", value: accountLabel, route: .account),
             MenuItem(icon: "folder", label: "项目与目标", route: .projects),
-            MenuItem(icon: "target", label: "每周时间目标", value: "\(store.settings.weeklyTimeGoalHours) 小时"),
-            MenuItem(icon: "clock", label: "工作时间设置", value: "\(store.settings.workStartHour):00 – \(store.settings.workEndHour):00"),
             MenuItem(icon: "cpu", label: "你的 AI", route: .aiTools),
             MenuItem(icon: "desktopcomputer", label: "设备与授权", value: "电脑 Runner 与 AI 账号绑定", route: .devices),
             MenuItem(icon: "shield", label: "数据与隐私", route: .privacy),
@@ -45,16 +46,11 @@ struct ProfileView: View {
 
         TabPage {
             HStack(spacing: 16) {
-                Image("avatar")
-                    .resizable().scaledToFill()
-                    .frame(width: 58, height: 58)
-                    .clipShape(Circle())
-                    .overlay(Circle().stroke(Color.white, lineWidth: 2))
-                    .overlay(Circle().stroke(theme.accent.opacity(0.3), lineWidth: 1).padding(-2))
+                InitialAvatar(name: displayName, size: 58)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(store.settings.name)
+                    Text(displayName)
                         .font(Typo.sans(Glass.profileName, weight: .semibold)).foregroundStyle(theme.text)
-                    Text("连续专注 \(store.settings.streakDays) 天").font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary)
+                    Text(streak > 0 ? "连续 \(streak) 天有记录" : "今天还没有时间记录").font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary)
                     syncIndicator
                 }
             }
@@ -65,21 +61,6 @@ struct ProfileView: View {
                 StatCard(label: "今日 AI", value: Format.duration(todayAI), valueColor: theme.ai, valueSize: Typo.lg)
             }
             .padding(.bottom, 24)
-
-            Card {
-                HStack {
-                    Text("默认专注时长").font(Typo.sans(Typo.sm)).foregroundStyle(theme.textSecondary)
-                    Spacer()
-                    Text("\(store.settings.defaultFocusMinutes) 分钟").font(Typo.mono(Typo.sm)).foregroundStyle(theme.text)
-                }
-                .padding(.bottom, 12)
-                Slider(value: Binding(
-                    get: { Double(store.settings.defaultFocusMinutes) },
-                    set: { v in store.updateSettings { $0.defaultFocusMinutes = Int(v) } }
-                ), in: 15...90, step: 5)
-                .tint(theme.accent)
-            }
-            .padding(.bottom, 16)
 
             Card(padding: 0, radius: Glass.groupRadius) {
                 VStack(spacing: 0) {
@@ -93,7 +74,6 @@ struct ProfileView: View {
             .padding(.bottom, 24)
 
             VStack(spacing: 8) {
-                AppButton("恢复示例数据", icon: "arrow.counterclockwise", variant: .secondary, fullWidth: true) { store.resetToSample() }
                 AppButton("清除所有数据", variant: .danger, fullWidth: true) { confirmClear = true }
             }
         }

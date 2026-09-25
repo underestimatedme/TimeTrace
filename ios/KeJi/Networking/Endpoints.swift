@@ -27,6 +27,10 @@ struct Endpoint {
         Endpoint(method: .post, path: "/sync", requiresAuth: true, body: request)
     }
     static let runners = Endpoint(method: .get, path: "/runners", requiresAuth: true, body: nil)
+    /// 解绑一台电脑：服务端吊销它的凭据并取消还在等它的任务。
+    static func unbindRunner(id: String) -> Endpoint {
+        Endpoint(method: .delete, path: "/runners/\(id)", requiresAuth: true, body: nil)
+    }
     static func approveRunner(code: String) -> Endpoint {
         Endpoint(method: .post, path: "/device-authorizations/approve", requiresAuth: true,
                  body: DeviceApprovalRequest(userCode: code))

@@ -7,6 +7,8 @@ struct DevicesView: View {
     @Environment(AppRouter.self) private var router
     @Environment(SyncEngine.self) private var sync
     @Environment(RemoteExecutionClient.self) private var remote
+    @State private var pendingUnbind: RunnerInventory?
+    @State private var unbindError: String?
 
     var body: some View {
         SubPageScaffold(title: "设备与授权") {
@@ -39,10 +41,19 @@ struct DevicesView: View {
             AppButton("如何连接新电脑", variant: .secondary, fullWidth: true) { router.push(.aiTools) }
                 .accessibilityIdentifier("devices.pair")
 
-            Text("撤销授权目前需要在电脑上停止 Runner；App 内撤销尚未提供。")
-                .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted).padding(.top, 12)
+            if let unbindError {
+                Text(unbindError).font(Typo.sans(Typo.xs)).foregroundStyle(theme.danger).padding(.top, 12)
+            }
         }
         .task { if sync.isLoggedIn { await remote.loadRunners() } }
+        .confirmationDialog("解绑这台电脑？", isPresented: Binding(
+            get: { pendingUnbind != nil }, set: { if !$0 { pendingUnbind = nil } }
+        ), titleVisibility: .visible) {
+            Button("解绑", role: .destructive) { unbind() }
+            Button("取消", role: .cancel) { pendingUnbind = nil }
+        } message: {
+            Text("解绑后这台电脑不再接收任务，还在等它的任务会被取消；电脑端的 Runner 会自动清除本机凭据。要重新使用，在电脑上运行 keji cloud login。")
+        }
     }
 
     private func deviceCard(_ inventory: RunnerInventory) -> some View {
@@ -62,7 +73,23 @@ struct DevicesView: View {
                 Text("最近在线 \(Format.relative(seen, now: Date()))")
                     .font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted).padding(.top, 2)
             }
+            AppButton("解绑这台电脑", variant: .danger, size: .sm, fullWidth: true) { pendingUnbind = inventory }
+                .accessibilityIdentifier("device.unbind.\(inventory.runner.id)")
+                .padding(.top, 10)
         }
         .accessibilityIdentifier("device.\(inventory.runner.id)")
+    }
+
+    private func unbind() {
+        guard let target = pendingUnbind else { return }
+        pendingUnbind = nil
+        _Concurrency.Task {
+            do {
+                try await remote.unbind(runnerID: target.runner.id)
+                unbindError = nil
+            } catch {
+                unbindError = "解绑失败：\(error.localizedDescription)"
+            }
+        }
     }
 }

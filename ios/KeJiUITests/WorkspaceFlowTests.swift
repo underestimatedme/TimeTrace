@@ -268,11 +268,15 @@ final class WorkspaceFlowTests: XCTestCase {
         if schedule {
             let toggle = app.switches["plan.dispatch.schedule"].firstMatch
             XCTAssertTrue(toggle.waitForExistence(timeout: 5))
-            // A Form row's centre is the label; the control sits at the trailing edge.
-            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
-            XCTAssertTrue(app.datePickers["plan.dispatch.runAt"].firstMatch.waitForExistence(timeout: 5)
-                          || app.otherElements["plan.dispatch.runAt"].firstMatch.waitForExistence(timeout: 1),
-                          "schedule toggle did not switch on: \(toggle.value ?? "nil")")
+            // A Form row's centre is the label; the control sits at the trailing edge,
+            // and where exactly differs per simulator, so walk inwards until the value flips.
+            func isOn() -> Bool { (toggle.value as? String) == "1" }
+            if let knob = toggle.switches.allElementsBoundByIndex.first, knob.exists { knob.tap() }
+            for dx in [0.95, 0.9, 0.85, 0.8] where !isOn() {
+                toggle.coordinate(withNormalizedOffset: CGVector(dx: dx, dy: 0.5)).tap()
+                _ = app.datePickers["plan.dispatch.runAt"].firstMatch.waitForExistence(timeout: 1)
+            }
+            XCTAssertTrue(isOn(), "schedule toggle did not switch on: \(toggle.value ?? "nil")")
             tap("plan.dispatch.confirm")
             return
         }

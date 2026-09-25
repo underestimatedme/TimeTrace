@@ -98,9 +98,10 @@ class ReadingPayloadTest(unittest.TestCase):
         payloads = [payload_from_reading(s.bucket_key, s.tool, s.used_pct, s.reset_at,
                     s.window_mins, "account-pool", "custom-profile", 1788300000) for s in readings]
         identities = {(p.get("limit_id"), p["scope"], p.get("window_mins")) for p in payloads}
-        self.assertEqual(identities, {("codex:codex", "primary", 300),
-                                     ("codex:codex", "secondary", 10080),
-                                     ("codex:base_model_inference", "primary", 10080)})
+        # Slot names become duration scopes so the phone can label the windows.
+        self.assertEqual(identities, {("codex:codex", "short", 300),
+                                     ("codex:codex", "weekly", 10080),
+                                     ("codex:base_model_inference", "weekly", 10080)})
         self.assertTrue(all(p.get("pool_authoritative") is False for p in payloads))
 
     def test_distinct_subsecond_readings_are_not_tied(self):
@@ -137,3 +138,21 @@ class AdapterCapabilityTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SemanticScopeTest(unittest.TestCase):
+    def test_codex_slot_names_become_duration_scopes(self):
+        # Codex reports slots ("primary"/"secondary"); the phone needs a meaning.
+        weekly = payload_from_reading("codex:codex:primary", "codex", 11, 2000, 10080, "pool-codex", "codex-default", 1000)
+        self.assertEqual(weekly["scope"], "weekly")
+        short = payload_from_reading("codex:codex:primary", "codex", 11, 2000, 300, "pool-codex", "codex-default", 1000)
+        self.assertEqual(short["scope"], "short")
+        secondary = payload_from_reading("codex:codex:secondary", "codex", 11, 2000, 10080, "pool-codex", "codex-default", 1000)
+        self.assertEqual(secondary["scope"], "weekly")
+
+    def test_named_scopes_are_kept(self):
+        five = payload_from_reading("claude:five_hour", "claude", 41, 2000, 300, "pool-claude", "claude-default", 1000)
+        self.assertEqual(five["scope"], "five_hour")
+        unknown_duration = payload_from_reading("codex:codex:primary", "codex", 11, 2000, None, "pool-codex", "codex-default", 1000)
+        self.assertEqual(unknown_duration["scope"], "primary")
+

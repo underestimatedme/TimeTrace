@@ -93,6 +93,19 @@ def _iso(epoch: Optional[float]) -> Optional[str]:
     return dt.strftime("%Y-%m-%dT%H:%M:%S.") + ("%03dZ" % (dt.microsecond // 1000))
 
 
+def semantic_scope(slot: str, window_mins: Optional[int]) -> str:
+    """Vendor slot names ("primary"/"secondary") say nothing about the window;
+    map them by duration so the phone can label 短时 / 本周 / 本月. Named scopes
+    (five_hour, seven_day, weekly, ...) pass through unchanged."""
+    if slot not in ("primary", "secondary") or not window_mins:
+        return slot
+    if window_mins <= 300:
+        return "short"
+    if window_mins <= 7 * 24 * 60:
+        return "weekly"
+    return "monthly"
+
+
 def payload_from_reading(bucket_key: str, tool: str, used_percent: Any, reset_at: Optional[float],
                          window_mins: Optional[int], pool_id: str, profile_id: str, now: float,
                          source: str = "runner", confidence: str = "exact",
@@ -100,7 +113,7 @@ def payload_from_reading(bucket_key: str, tool: str, used_percent: Any, reset_at
     """Wrap one vendor rate-limit reading as a Valley sample. A reset time is
     only trusted when it is still in the future; otherwise the reading is fresh
     for a bounded horizon and carries no reset boundary."""
-    scope = bucket_key.rsplit(":", 1)[-1] if ":" in bucket_key else (bucket_key or "primary")
+    scope = semantic_scope(bucket_key.rsplit(":", 1)[-1] if ":" in bucket_key else (bucket_key or "primary"), window_mins)
     limit_id = bucket_key.rsplit(":", 1)[0] if ":" in bucket_key else bucket_key
     trusted_reset = reset_at if (reset_at is not None and reset_at > now) else None
     expires = trusted_reset if trusted_reset is not None else now + (window_mins * 60 if window_mins else default_ttl)

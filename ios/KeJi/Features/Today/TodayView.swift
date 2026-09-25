@@ -67,19 +67,6 @@ struct TodayView: View {
                 MetricCard(label: "等待损耗", value: Format.duration(stats.waiting))
                 MetricCard(label: "完成任务", value: "\(stats.completed)")
             }
-            Card(borderColor: theme.accent.opacity(0.1)) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("时间杠杆").font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted)
-                        Text(Format.leverage(stats.leverage)).font(Typo.mono(Typo.xl)).foregroundStyle(theme.accent)
-                    }
-                    Spacer()
-                    Image(systemName: "bolt").font(.system(size: 20)).foregroundStyle(theme.accent.opacity(0.4))
-                        .accessibilityHidden(true)
-                }
-                Text("AI 活跃时间 ÷ 人工投入时间").font(Typo.sans(Typo.xs)).foregroundStyle(theme.textMuted).padding(.top, 8)
-            }
-            .padding(.top, 8)
         }
     }
 

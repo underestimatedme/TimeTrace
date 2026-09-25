@@ -64,82 +64,119 @@ final class WorkspaceFlowTests: XCTestCase {
         app.launch()
     }
 
-    /// Scrolls until the "生成新修订" button (below the time breakdown cards) is hittable.
-    private func scrollToTimeBreakdown() {
-        let generate = app.buttons["reports.generate"].firstMatch
-        for _ in 0..<8 where !generate.isHittable { app.swipeUp() }
-        XCTAssertTrue(app.staticTexts["等待"].waitForExistence(timeout: 3))
-    }
-
     private func tap(_ id: String, timeout: TimeInterval = 5, file: StaticString = #filePath, line: UInt = #line) {
         let el = app.buttons[id].firstMatch
         XCTAssertTrue(el.waitForExistence(timeout: timeout), "missing \(id)", file: file, line: line)
         el.tap()
     }
 
-    func testReportsOpenFromTodayShowsSeparatedTimes() {
+    /// 报告只回答三件事：AI 今天干了什么、额度值不值、明天交给 AI 什么；不再有任何评分。
+    func testReportsOpenFromTodayShowsDailyBrief() {
         app.terminate()
         app.launchArguments = ["--ui-testing", "--offline", "--sample-data", "--screen", "today"]
         app.launch()
         tap("reports.open")
         XCTAssertTrue(app.staticTexts["报告"].waitForExistence(timeout: 5))
-        // The report leads with delivery (accepted Plans), then the time breakdown below the ChangeLog.
-        XCTAssertTrue(app.staticTexts["个 Plan 已验收"].waitForExistence(timeout: 3))
-        // Human and AI time are shown as separate sections (never summed).
-        let human = app.staticTexts["人工投入"]
-        for _ in 0..<8 where !human.isHittable { app.swipeUp() }
-        XCTAssertTrue(human.waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["AI 活跃（累计）"].exists)
+        XCTAssertTrue(app.staticTexts["AI 今天替你干了什么"].waitForExistence(timeout: 3))
+        // 示例数据里 Codex 已跑完单元测试、等我确认：它必须以「去验收」突出显示。
+        let review = app.buttons["reports.work.review.t4"].firstMatch
+        XCTAssertTrue(review.waitForExistence(timeout: 3))
+        XCTAssertTrue(review.label.contains("去验收"))
+        for gone in ["生产力", "时间杠杆", "效率指数", "评分"] {
+            XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", gone)).firstMatch.exists,
+                           "报告里不应再出现「\(gone)」")
+        }
+        let quota = app.staticTexts["额度用得值不值"]
+        for _ in 0..<6 where !quota.isHittable { app.swipeUp() }
+        XCTAssertTrue(quota.exists)
+        let unknown = app.descendants(matching: .any)["reports.quota.hint.pool-claude"].firstMatch
+        for _ in 0..<4 where !unknown.exists { app.swipeUp() }
+        XCTAssertTrue(unknown.waitForExistence(timeout: 3))
+        XCTAssertTrue(unknown.label.contains("额度未知（电脑离线或未上报）"))
+        // 离线没有在线电脑：「安排在重置后执行」必须禁用并说明原因。
+        let schedule = app.buttons["reports.schedule.t6"].firstMatch
+        for _ in 0..<6 where !schedule.isHittable { app.swipeUp() }
+        XCTAssertTrue(schedule.waitForExistence(timeout: 3))
+        XCTAssertFalse(schedule.isEnabled)
+        XCTAssertTrue(schedule.label.contains("没有在线电脑"), schedule.label)
+        capture("report-daily-brief")
+        // 去验收直达对应的 Plan。
+        for _ in 0..<8 where !review.isHittable { app.swipeDown() }
+        review.tap()
+        XCTAssertTrue(app.staticTexts["Plan 详情"].waitForExistence(timeout: 5))
     }
 
-    func testReportsUseServerFactsRevisionAndCoverageGate() {
-        app.terminate()
-        app.launchArguments = ["--workspace-fixture", "--online-ui-testing", "--api-base-url",
-                               "http://127.0.0.1:18768/reports-\(UUID().uuidString)", "--screen", "today"]
-        app.launchEnvironment["KEJI_OFFLINE"] = "0"
-        app.launch()
+    /// 联网：额度与电脑来自服务端；有额度快重置而剩余很多时给出提示，
+    /// 一键把任务安排到重置后 2 分钟执行，派发请求带上 not_before。
+    func testReportSchedulesTaskAfterQuotaReset() {
+        createTask()
+        tap("workspace.tab.today")
         tap("reports.open")
-        XCTAssertTrue(app.staticTexts["时区 \(TimeZone.current.identifier) · 修订 7 · 私有草稿"].waitForExistence(timeout: 8))
-        // The time breakdown sits below the ChangeLog; on smaller simulators it is not
-        // in the accessibility tree until scrolled into view.
-        scrollToTimeBreakdown()
-        XCTAssertTrue(app.staticTexts["10 分钟"].exists)
-        XCTAssertTrue(app.staticTexts["20 分钟"].exists)
-        XCTAssertTrue(app.staticTexts["无记录"].exists)
-        XCTAssertFalse(app.staticTexts["95"].exists)
-        tap("reports.generate")
-        XCTAssertTrue(app.staticTexts["时区 \(TimeZone.current.identifier) · 修订 8 · 私有草稿"].waitForExistence(timeout: 5))
-        capture("report-server-facts")
+        let hint = app.descendants(matching: .any)["reports.quota.hint.pool-codex"].firstMatch
+        for _ in 0..<6 where !hint.exists { app.swipeUp() }
+        XCTAssertTrue(hint.waitForExistence(timeout: 20), "额度应当来自服务端")
+        XCTAssertTrue(hint.label.contains("还剩 62%") && hint.label.contains("现在派一批任务更划算"), hint.label)
+        let schedule = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "F08 报告任务")).firstMatch
+        for _ in 0..<6 where !(schedule.exists && schedule.isHittable) { app.swipeUp() }
+        XCTAssertTrue(schedule.waitForExistence(timeout: 10))
+        let enabled = NSPredicate(format: "enabled == true")
+        expectation(for: enabled, evaluatedWith: schedule)
+        waitForExpectations(timeout: 10)   // runners arrive from GET /runners
+        XCTAssertTrue(schedule.label.contains("安排在重置后执行"), schedule.label)
+        schedule.tap()
+        let planned = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "已安排 · ")).firstMatch
+        XCTAssertTrue(planned.waitForExistence(timeout: 10), app.debugDescription)
+        capture("report-scheduled")
     }
 
-    func testProjectReportUsesOnlyItsServerFacts() {
+    /// 项目报告只看这个项目：示例数据的「工作」项目没有 AI 任务，所以显示空状态，
+    /// 也不会串进另一个项目里等待验收的 Codex 任务。
+    func testProjectReportStaysWithinProject() {
         app.terminate()
-        app.launchArguments = ["--workspace-fixture", "--online-ui-testing", "--api-base-url",
-                               "http://127.0.0.1:18768/reports-project-\(UUID().uuidString)", "--screen", "projects"]
-        app.launchEnvironment["KEJI_OFFLINE"] = "0"
+        app.launchArguments = ["--ui-testing", "--offline", "--sample-data", "--screen", "reports/p2"]
         app.launch()
-        tap("project.keji")
-        tap("reports.open.project")
-        XCTAssertTrue(app.staticTexts["时区 \(TimeZone.current.identifier) · 修订 7 · 私有草稿"].waitForExistence(timeout: 8))
-        scrollToTimeBreakdown()
-        XCTAssertTrue(app.staticTexts["10 分钟"].exists)
-        XCTAssertTrue(app.staticTexts["20 分钟"].exists)
-        XCTAssertFalse(app.staticTexts["30 分钟"].exists, "other project's AI must be excluded")
-        XCTAssertFalse(app.staticTexts["生产力总分 95"].exists)
-        capture("report-project-server-facts")
+        XCTAssertTrue(app.staticTexts["项目报告"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["今天还没有派给 AI 的任务"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["reports.work.review.t4"].exists, "other project's work must be excluded")
+        XCTAssertFalse(app.buttons["reports.schedule.t6"].exists)
     }
 
-    func testReportRejectsSnapshotFromAnotherTimeZone() {
+    /// 今天还没派过 AI 任务：空状态直接给出新建任务的入口。
+    func testEmptyReportOffersTaskCreation() {
         app.terminate()
-        app.launchArguments = ["--workspace-fixture", "--online-ui-testing", "--api-base-url",
-                               "http://127.0.0.1:18768/reports-zone-mismatch-\(UUID().uuidString)", "--screen", "today"]
+        app.launchArguments = ["--workspace-fixture", "--screen", "reports"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["今天还没有派给 AI 的任务"].waitForExistence(timeout: 5))
+        tap("reports.work.create")
+        XCTAssertTrue(app.textFields["输入任务名称"].waitForExistence(timeout: 5))
+    }
+
+    /// 匿名使用统计真的发到服务端：打开报告后切到后台触发上报，fixture 只收白名单事件。
+    func testUsageEventsReachServerOnBackground() throws {
+        let base = "http://127.0.0.1:18768/events-\(UUID().uuidString)"
+        app.terminate()
+        app.launchArguments = ["--workspace-fixture", "--online-ui-testing", "--api-base-url", base, "--screen", "today"]
         app.launchEnvironment["KEJI_OFFLINE"] = "0"
         app.launch()
-        tap("reports.open")
-        let mismatch = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "报告日期或时区不匹配")).firstMatch
-        XCTAssertTrue(mismatch.waitForExistence(timeout: 8))
-        XCTAssertFalse(app.staticTexts["20 分钟"].exists)
-        XCTAssertFalse(app.staticTexts["时区 America/New_York · 修订 7 · 私有草稿"].exists)
+        tap("reports.open", timeout: 10)
+        XCTAssertTrue(app.staticTexts["AI 今天替你干了什么"].waitForExistence(timeout: 5))
+        sleep(3)   // 等游客会话建立
+        XCUIDevice.shared.press(.home)
+        var names: [String] = []
+        var invalid = -1
+        for _ in 0..<20 {
+            sleep(1)
+            let data = try Data(contentsOf: URL(string: base + "/events")!)
+            let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let payload = object?["data"] as? [String: Any]
+            names = (payload?["events"] as? [[String: Any]])?.compactMap { $0["name"] as? String } ?? []
+            invalid = payload?["invalid"] as? Int ?? -1
+            if names.contains("report_opened") { break }
+        }
+        XCTAssertTrue(names.contains("report_opened"), "received: \(names)")
+        XCTAssertTrue(names.contains("app_open"), "received: \(names)")
+        XCTAssertEqual(invalid, 0, "the app sent an event the server contract rejects")
+        app.activate()
     }
 
     func testOfflineCannotAcceptDependenciesOrUnlockDispatch() {
@@ -236,6 +273,32 @@ final class WorkspaceFlowTests: XCTestCase {
         let output = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "3 passed")).firstMatch
         XCTAssertTrue(output.waitForExistence(timeout: 5))
         capture("plan-output-tail")
+    }
+
+    /// 联网建一个 Codex 任务（服务端随即建好它的 Plan），供报告页安排。
+    private func createTask() {
+        app.terminate()
+        app.launchArguments = ["--workspace-fixture", "--online-ui-testing", "--api-base-url",
+                               "http://127.0.0.1:18768/report-schedule-\(UUID().uuidString)",
+                               "--screen", "tasks/new"]
+        app.launchEnvironment["KEJI_OFFLINE"] = "0"
+        app.launch()
+        let title = app.textFields["输入任务名称"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        title.tap()
+        title.typeText("F08 报告任务\n")
+        tap("AI 来做")
+        tap("Codex")
+        for _ in 0..<5 where !app.buttons["保存任务"].isHittable { app.swipeUp() }
+        tap("保存任务")
+        tap("project.keji")
+        let task = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "F08 报告任务")).firstMatch
+        XCTAssertTrue(task.waitForExistence(timeout: 10))
+        task.tap()
+        let plan = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "plan.")).firstMatch
+        XCTAssertTrue(plan.waitForExistence(timeout: 10), "created task must expose its server Plan")
+        tap("subpage.back")   // task → project
+        tap("subpage.back")   // project → projects tab
     }
 
     private func createAndDispatch(scenario: String, humanOnly: Bool = false, saveAndStart: Bool = false, schedule: Bool = false) {

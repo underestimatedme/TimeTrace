@@ -3,11 +3,14 @@
 No production credentials or services. UI actions use the production HTTP stack.
 """
 import json
+import re
 import time
 from urllib.parse import urlsplit, parse_qs
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 NOW = "2026-09-15T10:00:00Z"
+USAGE_EVENT_NAMES = {"screen_view", "dispatch_started", "dispatch_succeeded", "dispatch_failed", "schedule_created",
+                     "pairing_step", "plan_accepted", "report_opened", "report_action", "quota_viewed", "app_open"}
 states = {}
 
 
@@ -103,6 +106,30 @@ class Handler(BaseHTTPRequestHandler):
                                             "observed_at": NOW, "expires_at": "2099-01-01T00:00:00Z",
                                             "source": "runner", "confidence": "exact"}]}],
                     "observed_at": NOW}
+            if scenario.startswith("report-schedule"):
+                # 报告页的「安排在重置后执行」需要一个真实的未来重置时刻（相对设备当前时间）。
+                reset = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 3 * 3600))
+                data["pools"][0]["windows"][0]["reset_at"] = reset
+        elif path == "/events":
+            # 与 Valley usage_events.go 相同的闭合字典：任何不合规的批次整批 422。
+            log = state.setdefault("usage_events", {"events": [], "invalid": 0})
+            if self.command == "GET":
+                data = log
+            else:
+                assert self.headers.get("Authorization") == "Bearer local-test"
+                events = body.get("events") or []
+                valid = 0 < len(events) <= 100 and len(body.get("app_version", "")) <= 32
+                for event in events:
+                    props = event.get("props") or {}
+                    valid = valid and event.get("name") in USAGE_EVENT_NAMES and len(props) <= 8 and all(
+                        re.fullmatch(r"[a-z_]{1,32}", key) and isinstance(value, (str, int, float, bool))
+                        and (not isinstance(value, str) or len(value) <= 64) for key, value in props.items())
+                if valid:
+                    log["events"].extend(events)
+                    data = {"accepted": len(events), "dropped": 0}
+                else:
+                    log["invalid"] += 1
+                    status, code = 422, 42230
         elif path == "/device-authorizations/inspect":
             # keji://pair 链接里的小写码必须在手机上规范成大写再发出。
             assert body.get("user_code") == "ABCD1234", body
@@ -131,7 +158,7 @@ class Handler(BaseHTTPRequestHandler):
                     state[key] = list(existing.values())
             user_id = scenario if scenario.startswith("feedback-") else "local-test"
             data = {"user": {"id": user_id, "is_guest": False}, "state": {
-                key: value for key, value in state.items() if key not in ["plans", "jobs", "feedback", "feedback_tickets", "preferences", "runner_name"]}}
+                key: value for key, value in state.items() if key not in ["plans", "jobs", "feedback", "feedback_tickets", "preferences", "runner_name", "usage_events"]}}
         elif path.startswith("/tasks/") and path.endswith("/plans"):
             task_id = path.split("/")[2]
             if self.command == "POST":

@@ -93,6 +93,77 @@ class WorktreeTest(unittest.TestCase):
         git("update-index", "--cacheinfo", "160000,%s,deps/child" % next_commit, cwd=self.repo)
         self.assertNotEqual(worktree.snapshot(str(self.repo)), before)
 
+    # ---- metadata integrity (sandbox escape through git config) -------------
+    def test_verify_metadata_accepts_a_fresh_worktree_and_the_main_checkout(self):
+        path, _ = worktree.ensure(str(self.repo), 5, self.home)
+        worktree.verify_metadata(path, str(self.repo))
+        worktree.verify_metadata(str(self.repo), str(self.repo))
+
+    def _admin(self, path):
+        return Path(git("rev-parse", "--absolute-git-dir", cwd=path))
+
+    def test_verify_metadata_rejects_extra_keys_in_config_worktree(self):
+        # A sandboxed run can write the per-worktree admin dir (it must, to
+        # commit). core.fsmonitor there would run a command the next time the
+        # unsandboxed runner calls `git diff` in the worktree.
+        path, _ = worktree.ensure(str(self.repo), 6, self.home)
+        cfg = self._admin(path) / "config.worktree"
+        cfg.write_text(cfg.read_text() + "[core]\n\tfsmonitor = touch /tmp/pwned\n")
+        with self.assertRaises(worktree.MetadataTampered):
+            worktree.verify_metadata(path, str(self.repo))
+
+    def test_verify_metadata_rejects_a_redirected_dot_git_file(self):
+        path, _ = worktree.ensure(str(self.repo), 7, self.home)
+        evil = Path(path) / "evil"
+        evil.mkdir()
+        (Path(path) / ".git").write_text("gitdir: %s\n" % evil)
+        with self.assertRaises(worktree.MetadataTampered):
+            worktree.verify_metadata(path, str(self.repo))
+
+    def test_verify_metadata_rejects_a_redirected_commondir(self):
+        path, _ = worktree.ensure(str(self.repo), 8, self.home)
+        (self._admin(path) / "commondir").write_text(str(Path(path) / "fake") + "\n")
+        with self.assertRaises(worktree.MetadataTampered):
+            worktree.verify_metadata(path, str(self.repo))
+
+    def test_verify_metadata_rejects_a_worktree_of_another_repository(self):
+        other = Path(self.tmp.name) / "other"
+        other.mkdir()
+        git("init", "-q", "-b", "main", cwd=other)
+        git("-c", "user.name=t", "-c", "user.email=t@e", "commit", "--allow-empty", "-qm", "i", cwd=other)
+        path, _ = worktree.ensure(str(other), 9, self.home)
+        with self.assertRaises(worktree.MetadataTampered):
+            worktree.verify_metadata(path, str(self.repo))
+
+    def test_ensure_refuses_to_reuse_a_tampered_worktree(self):
+        path, _ = worktree.ensure(str(self.repo), 10, self.home)
+        cfg = self._admin(path) / "config.worktree"
+        cfg.write_text(cfg.read_text() + "[include]\n\tpath = /tmp/x\n")
+        with self.assertRaises(worktree.MetadataTampered):
+            worktree.ensure(str(self.repo), 10, self.home)
+
+    def test_snapshot_ignores_an_fsmonitor_hook(self):
+        marker = Path(self.tmp.name) / "fsmonitor-ran"
+        git("config", "core.fsmonitor", "touch %s; false" % marker, cwd=self.repo)
+        worktree.snapshot(str(self.repo))
+        self.assertFalse(marker.exists())
+
+    def test_sandbox_write_roots_are_the_minimum_needed_to_commit(self):
+        path, _ = worktree.ensure(str(self.repo), 11, self.home)
+        roots = [Path(r) for r in worktree.sandbox_write_roots(path)]
+        common = (self.repo / ".git").resolve()
+        self.assertIn(self._admin(path).resolve(), roots)
+        self.assertIn(common / "objects", roots)
+        self.assertIn(common / "refs" / "heads" / "keji", roots)
+        # Never the whole .git: shared config and hooks run outside the sandbox.
+        self.assertNotIn(common, roots)
+        for root in roots:
+            self.assertNotIn(root, (common / "config", common / "hooks"))
+            self.assertTrue(root != common and common in root.parents, root)
+
+    def test_sandbox_write_roots_empty_for_a_main_checkout(self):
+        self.assertEqual(worktree.sandbox_write_roots(str(self.repo)), [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,23 +2,36 @@
 import subprocess
 import hashlib
 import os
+import re
 from pathlib import Path
 from typing import List, Tuple
 
 NO_PUSH_URL = "no_push://blocked"
 
+# Every git call the runner makes inside a worktree a model has touched runs
+# with these overrides: no fsmonitor command, no hooks. Config-driven command
+# execution is otherwise closed by verify_metadata().
+SAFE_GIT = ("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null")
+
+_CONFIG_WORKTREE_LINE = re.compile(r'^(?:\[remote "[^"\\\n]*"\]|pushurl = ' + re.escape(NO_PUSH_URL) + r')$')
+
+
+class MetadataTampered(ValueError):
+    """The worktree's git metadata no longer matches what the runner created."""
+
 
 def snapshot(path: str) -> Tuple[str, str]:
     """Bind HEAD, index, tracked changes and untracked content (including ignored
     files). Filenames alone cannot detect edits to an already-dirty file."""
-    head = _git("-C", path, "rev-parse", "HEAD")
+    head = _git(*SAFE_GIT, "-C", path, "rev-parse", "HEAD")
     digest = hashlib.sha256()
     for args in (("diff", "--binary", "HEAD", "--"), ("diff", "--cached", "--binary", "HEAD", "--")):
-        digest.update(subprocess.check_output(["git", "-C", path, args[0], "--ignore-submodules=all"] + list(args[1:])))
+        digest.update(subprocess.check_output(["git"] + list(SAFE_GIT) + ["-C", path, args[0], "--no-ext-diff",
+                                               "--ignore-submodules=all"] + list(args[1:])))
     # A gitlink belongs to the parent index, not to the child working tree.
     # Bind its commit (and conflict stage) without opening the child directory.
     gitlinks = {}
-    index = subprocess.check_output(["git", "-C", path, "ls-files", "--stage", "-z"])
+    index = subprocess.check_output(["git"] + list(SAFE_GIT) + ["-C", path, "ls-files", "--stage", "-z"])
     for entry in index.split(b"\0"):
         if not entry:
             continue
@@ -28,7 +41,7 @@ def snapshot(path: str) -> Tuple[str, str]:
             gitlinks.setdefault(name, []).append(stage + b":" + commit)
     # Read tracked bytes too: git diff deliberately hides assume-unchanged and
     # skip-worktree entries and therefore cannot be our content authority.
-    files = subprocess.check_output(["git", "-C", path, "ls-files", "--cached", "--others", "-z"])
+    files = subprocess.check_output(["git"] + list(SAFE_GIT) + ["-C", path, "ls-files", "--cached", "--others", "-z"])
     for name in sorted(set(files.split(b"\0"))):
         if not name:
             continue
@@ -68,6 +81,70 @@ def git_common_dir(path: str) -> str:
     return str((Path(path) / common).resolve()) if not os.path.isabs(common) else str(Path(common).resolve())
 
 
+def _read_small(path: Path) -> str:
+    if path.is_symlink() or not path.is_file():
+        raise MetadataTampered("%s is not a regular file" % path.name)
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        return fh.read(64 * 1024)
+
+
+def verify_metadata(path: str, repo: str) -> None:
+    """Refuse to run git in `path` unless its metadata is what `ensure` made.
+
+    A sandboxed run can write the worktree and its per-worktree admin dir.
+    Redirecting `.git` / `commondir`, or adding keys such as core.fsmonitor or
+    include.path to config.worktree, would make the runner's own unsandboxed
+    git calls execute attacker-chosen commands. The registered repository is
+    the trusted anchor: its common dir is not writable from the sandbox."""
+    root = Path(path)
+    common = Path(git_common_dir(repo)).resolve()
+    dotgit = root / ".git"
+    if dotgit.is_dir() and not dotgit.is_symlink():
+        if root.resolve() == Path(repo).resolve():
+            return  # the registered main checkout itself
+        raise MetadataTampered("not a linked worktree of the registered repository")
+    match = re.fullmatch(r"gitdir: (.+?)\n?", _read_small(dotgit))
+    if not match:
+        raise MetadataTampered(".git file is malformed")
+    admin = Path(match.group(1))
+    admin = (admin if admin.is_absolute() else root / admin)
+    if admin.is_symlink() or admin.resolve().parent != common / "worktrees":
+        raise MetadataTampered(".git points outside the registered repository")
+    admin = admin.resolve()
+    commondir = _read_small(admin / "commondir").strip()
+    target = Path(commondir) if os.path.isabs(commondir) else admin / commondir
+    if target.resolve() != common:
+        raise MetadataTampered("commondir points outside the registered repository")
+    config_worktree = admin / "config.worktree"
+    if config_worktree.exists() or config_worktree.is_symlink():
+        for line in _read_small(config_worktree).splitlines():
+            line = line.strip()
+            if line and not _CONFIG_WORKTREE_LINE.match(line):
+                raise MetadataTampered("config.worktree holds keys the runner did not write")
+
+
+def sandbox_write_roots(path: str) -> List[str]:
+    """Directories outside a linked worktree that `git add`/`git commit` in it
+    must write: its own admin dir, the object store, and the directory of its
+    branch ref (plus that ref's reflog dir). Never the whole common dir: the
+    shared config and hooks there are executed by unsandboxed git later."""
+    root = Path(path).resolve()
+    common = Path(git_common_dir(path)).resolve()
+    if root == common or root in common.parents:
+        return []
+    admin = Path(_git(*SAFE_GIT, "-C", path, "rev-parse", "--absolute-git-dir")).resolve()
+    if admin.parent != common / "worktrees":
+        return []
+    roots = [admin, common / "objects"]
+    branch = _git(*SAFE_GIT, "-C", path, "symbolic-ref", "--quiet", "--short", "HEAD")
+    if branch and ".." not in branch.split("/"):
+        for base in (common / "refs" / "heads", common / "logs" / "refs" / "heads"):
+            ref_dir = (base / branch).parent
+            ref_dir.mkdir(parents=True, exist_ok=True)
+            roots.append(ref_dir)
+    return [str(r) for r in roots]
+
+
 def _git(*args: str, cwd: str = None) -> str:
     out = subprocess.run(
         ["git"] + list(args), cwd=cwd, check=True, capture_output=True, text=True
@@ -102,8 +179,10 @@ def ensure(repo: str, task_id: int, home: Path, base: str = "HEAD") -> Tuple[str
             if base != "HEAD" and not _branch_exists(repo, base):
                 raise ValueError("registered base branch no longer exists: %s" % base)
             _git("-C", repo, "worktree", "add", "-b", branch, str(path), base)
-    elif _git("-C", str(path), "rev-parse", "--abbrev-ref", "HEAD") != branch:
-        raise ValueError("remote worktree is on an unexpected branch: %s" % path)
+    else:
+        verify_metadata(str(path), repo)
+        if _git(*SAFE_GIT, "-C", str(path), "rev-parse", "--abbrev-ref", "HEAD") != branch:
+            raise ValueError("remote worktree is on an unexpected branch: %s" % path)
     block_push(str(path))
     return str(path), branch
 

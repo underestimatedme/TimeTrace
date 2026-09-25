@@ -100,17 +100,24 @@ def app_server_request(bin_: str, method: str, params: Optional[dict] = None,
 # ---- exec -----------------------------------------------------------------------
 def build_cmd(cfg: Dict[str, Any], prompt: str, cwd: str, resume: Optional[str] = None,
               last_msg_file: Optional[str] = None, add_dirs: Optional[List[str]] = None) -> List[str]:
+    sandbox = str(cfg.get("sandbox", "workspace-write"))
     cmd = [cfg.get("bin", "codex"), "exec"]
     if resume:
         cmd += ["resume", resume]
     cmd += ["--json", "--skip-git-repo-check"]
     if not resume:
-        cmd += ["-s", cfg.get("sandbox", "workspace-write"), "-C", cwd]
-    # Directories the workspace-write sandbox may also write: a linked
-    # worktree's git metadata lives in the main repo's .git, and `git commit`
-    # inside the worktree needs it.
-    for extra in add_dirs or []:
-        cmd += ["--add-dir", extra]
+        cmd += ["-s", sandbox, "-C", cwd]
+    # `codex exec resume` has no -s: pin the sandbox through config so a
+    # resumed run cannot fall back to a laxer mode from ~/.codex/config.toml.
+    cmd += ["-c", "sandbox_mode=%s" % json.dumps(sandbox)]
+    # Model-run commands never need the network (the model API is called by
+    # codex itself, outside the sandbox); this also makes `git push` fail.
+    cmd += ["-c", "sandbox_workspace_write.network_access=false"]
+    # Directories the workspace-write sandbox may also write: the parts of the
+    # main repo's .git that `git commit` in a linked worktree needs. Passed as
+    # config because `codex exec resume` rejects --add-dir.
+    if add_dirs:
+        cmd += ["-c", "sandbox_workspace_write.writable_roots=%s" % json.dumps(list(add_dirs))]
     if cfg.get("model"):
         cmd += ["-m", cfg["model"]]
     if last_msg_file:
@@ -199,12 +206,9 @@ class CodexAdapter(ToolAdapter):
     @staticmethod
     def _writable_extras(cwd: str) -> List[str]:
         try:
-            common = worktree.git_common_dir(cwd)
+            return worktree.sandbox_write_roots(cwd)
         except Exception:
             return []
-        inside = Path(common).resolve()
-        root = Path(cwd).resolve()
-        return [] if root == inside or root in inside.parents else [common]
 
     def start(self, prompt: str, cwd: str, session_id: str, log_file: str, cancel_event=None) -> RunResult:
         cmd = build_cmd(self.cfg, prompt, cwd, last_msg_file=log_file + ".last.md",

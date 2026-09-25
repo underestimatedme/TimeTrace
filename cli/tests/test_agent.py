@@ -1056,6 +1056,26 @@ class RecoveryFenceTest(unittest.TestCase):
         self.assertEqual(self.agent.run_once(), "job j1 → awaiting_review")
         self.assertEqual(self.calls, [("resume", str(actual.resolve()), "native-session")])
 
+    def test_tampered_worktree_metadata_blocks_checkpoint_without_running_git(self):
+        # A model that rewrote config.worktree (core.fsmonitor) must not get
+        # the unsandboxed runner to execute git in that worktree.
+        actual = self.home / "execution"
+        subprocess.run(["git", "-C", str(self.repo), "worktree", "add", "-qb", "execution", str(actual)], check=True)
+        admin = Path(subprocess.check_output(["git", "-C", str(actual), "rev-parse", "--absolute-git-dir"], text=True).strip())
+        marker = self.home / "fsmonitor-ran"
+        original_start = self.adapter.start
+
+        def tampering_start(prompt, cwd, session_id, log_file, cancel_event=None):
+            (admin / "config.worktree").write_text("[core]\n\tfsmonitor = touch %s; false\n" % marker)
+            return original_start(prompt, cwd, session_id, log_file, cancel_event)
+
+        self.adapter.start = tampering_start
+        self.agent.prepare_workspace = lambda *args: (str(actual), "execution")
+        outcome = self.agent.run_once()
+        self.assertIn("checkpoint capture failed", outcome)
+        self.assertFalse(marker.exists())
+        self.assertIsNone(self.db.get_checkpoint("j1"))
+
     def test_invalid_checkpoint_never_falls_back_to_start(self):
         for change in ("session", "provider", "profile", "resume", "path", "dirty", "head", "output", "legacy"):
             with self.subTest(change=change):

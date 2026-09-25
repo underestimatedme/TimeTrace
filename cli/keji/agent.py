@@ -291,6 +291,11 @@ class Agent:
                                                 workspace["path"], adapter_capabilities(adapter).get("can_resume") is True)
                     if not reason and checkpoint.execution_path != execution_path:
                         reason = "checkpoint execution directory changed"
+                    if not reason:
+                        try:
+                            worktree.verify_metadata(execution_path, workspace["path"])
+                        except worktree.MetadataTampered as exc:
+                            reason = "checkpoint worktree metadata changed: %s" % exc
                     if not reason and not worktree.same_repository(execution_path, workspace["path"]):
                         reason = "checkpoint repository changed"
                     if not reason and worktree.snapshot(execution_path) != (checkpoint.git_head, checkpoint.dirty_paths_digest):
@@ -407,6 +412,8 @@ class Agent:
             outcome = "awaiting_review"
         elif result.blocked:
             try:
+                # Git runs here unsandboxed in a directory the model could write.
+                worktree.verify_metadata(execution_path, workspace["path"])
                 head, dirty_digest = worktree.snapshot(execution_path)
                 cp = Checkpoint(
                     plan_id=plan_key, job_id=execution_job, attempt_id=claim["attempt_id"],

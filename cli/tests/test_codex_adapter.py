@@ -97,17 +97,33 @@ class SafetyRulesTest(unittest.TestCase):
         self.assertIn(".git", SAFETY_RULES)
 
 
-class WorktreeWritableRootTest(unittest.TestCase):
-    def test_build_cmd_adds_extra_writable_dirs(self):
-        cmd = codex.build_cmd(BuildCmdTest.cfg, "do it", "/wt", add_dirs=["/repo/.git"])
-        self.assertEqual(cmd[cmd.index("--add-dir") + 1], "/repo/.git")
-        resumed = codex.build_cmd(BuildCmdTest.cfg, "go on", "/wt", resume="tid", add_dirs=["/repo/.git"])
-        self.assertIn("--add-dir", resumed)
+def config_overrides(cmd):
+    return [cmd[i + 1] for i, part in enumerate(cmd) if part == "-c"]
 
-    def test_adapter_makes_the_worktrees_git_dir_writable(self):
+
+class WorktreeWritableRootTest(unittest.TestCase):
+    def test_build_cmd_passes_extra_writable_dirs_as_config_for_start_and_resume(self):
+        # `codex exec resume` rejects --add-dir; the config override works for both.
+        for resume in (None, "tid"):
+            with self.subTest(resume=resume):
+                cmd = codex.build_cmd(BuildCmdTest.cfg, "go", "/wt", resume=resume, add_dirs=["/repo/.git/objects", '/q"x'])
+                self.assertNotIn("--add-dir", cmd)
+                self.assertIn('sandbox_workspace_write.writable_roots=["/repo/.git/objects", "/q\\"x"]',
+                              config_overrides(cmd))
+
+    def test_resume_forces_the_sandbox_and_both_disable_network(self):
+        # Without an explicit sandbox a resumed run would fall back to whatever
+        # ~/.codex/config.toml says, possibly danger-full-access.
+        resumed = codex.build_cmd(BuildCmdTest.cfg, "go on", "/wt", resume="tid")
+        self.assertEqual(resumed[:4], ["codex", "exec", "resume", "tid"])
+        self.assertIn('sandbox_mode="workspace-write"', config_overrides(resumed))
+        for cmd in (resumed, codex.build_cmd(BuildCmdTest.cfg, "go", "/wt")):
+            self.assertIn("sandbox_workspace_write.network_access=false", config_overrides(cmd))
+
+    def test_adapter_grants_only_the_git_paths_a_commit_needs(self):
         # A linked worktree keeps its metadata under the main repo's .git; the
-        # workspace-write sandbox must be allowed to write there or `git commit`
-        # inside the worktree fails.
+        # sandbox may write the worktree's admin dir, objects and its branch
+        # ref, but never the shared config or hooks (unsandboxed git runs them).
         import subprocess
         import tempfile
         from pathlib import Path
@@ -117,7 +133,7 @@ class WorktreeWritableRootTest(unittest.TestCase):
             subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
             subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "--allow-empty", "-qm", "init"], cwd=repo, check=True)
             wt = Path(d) / "wt"
-            subprocess.run(["git", "worktree", "add", "-q", str(wt), "-b", "task"], cwd=repo, check=True)
+            subprocess.run(["git", "worktree", "add", "-q", str(wt), "-b", "keji/4"], cwd=repo, check=True)
             seen = {}
 
             def fake_run(cmd, cwd, log, **kwargs):
@@ -131,9 +147,13 @@ class WorktreeWritableRootTest(unittest.TestCase):
                 ad.start("do it", str(wt), "s", str(Path(d) / "log"))
             finally:
                 codex.run_streaming = original
-            cmd = seen["cmd"]
-            self.assertIn("--add-dir", cmd)
-            self.assertEqual(Path(cmd[cmd.index("--add-dir") + 1]).resolve(), (repo / ".git").resolve())
+            roots_arg = [c for c in config_overrides(seen["cmd"]) if c.startswith("sandbox_workspace_write.writable_roots=")]
+            self.assertEqual(len(roots_arg), 1)
+            roots = [Path(r) for r in json.loads(roots_arg[0].split("=", 1)[1])]
+            common = (repo / ".git").resolve()
+            self.assertIn(common / "objects", roots)
+            self.assertIn(common / "refs" / "heads" / "keji", roots)
+            self.assertNotIn(common, roots)
 
 
 class AdapterBlockedResetTest(unittest.TestCase):
